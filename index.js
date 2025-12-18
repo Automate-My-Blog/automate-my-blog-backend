@@ -41,10 +41,19 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
+  const keyLength = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.length : 0;
+  
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
-    service: 'AutoBlog API'
+    service: 'AutoBlog API',
+    env: {
+      nodeEnv: process.env.NODE_ENV,
+      hasOpenAIKey,
+      openaiKeyLength: keyLength,
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-4'
+    }
   });
 });
 
