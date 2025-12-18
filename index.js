@@ -300,6 +300,22 @@ app.post('/api/test-openai', async (req, res) => {
   try {
     console.log('Testing OpenAI directly...');
     
+    // First test basic OpenAI connectivity
+    const OpenAI = (await import('openai')).default;
+    const testClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
+    
+    console.log('Testing basic OpenAI call...');
+    const simpleTest = await testClient.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: [{ role: 'user', content: 'Say hello' }],
+      max_tokens: 10
+    });
+    
+    console.log('Basic test successful:', simpleTest.choices[0].message.content);
+    
+    // Now test our service
     const mockContent = `
       Title: Test Website
       Meta Description: A test website for debugging
@@ -314,6 +330,7 @@ app.post('/api/test-openai', async (req, res) => {
     res.json({
       success: true,
       message: 'OpenAI is working correctly',
+      basicTest: simpleTest.choices[0].message.content,
       analysis
     });
 

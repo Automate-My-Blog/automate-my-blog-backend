@@ -21,11 +21,14 @@ export class OpenAIService {
   async analyzeWebsite(websiteContent, url) {
     try {
       console.log('OpenAI request starting...');
-      console.log('Model:', process.env.OPENAI_MODEL || 'gpt-4');
+      console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
       console.log('Content length:', websiteContent?.length || 0);
       
+      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+      console.log('Using OpenAI model:', model);
+      
       const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: model,
         messages: [
           {
             role: 'system',
@@ -85,7 +88,7 @@ Please provide a JSON response with these fields:
   async generateTrendingTopics(businessType, targetAudience, contentFocus) {
     try {
       const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
@@ -130,7 +133,7 @@ Return an array of 5 such objects.`
   async generateBlogPost(topic, businessInfo, additionalInstructions = '') {
     try {
       const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
@@ -214,7 +217,7 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       }
 
       const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-4',
+        model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
         messages: [
           {
             role: 'system',
