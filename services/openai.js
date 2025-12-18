@@ -20,6 +20,10 @@ export class OpenAIService {
    */
   async analyzeWebsite(websiteContent, url) {
     try {
+      console.log('OpenAI request starting...');
+      console.log('Model:', process.env.OPENAI_MODEL || 'gpt-4');
+      console.log('Content length:', websiteContent?.length || 0);
+      
       const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4',
         messages: [
@@ -55,11 +59,23 @@ Please provide a JSON response with these fields:
         max_tokens: 1000
       });
 
+      console.log('OpenAI request completed successfully');
+      console.log('Response choices:', completion.choices?.length || 0);
+      
       const response = completion.choices[0].message.content;
+      console.log('Response content length:', response?.length || 0);
+      
       return JSON.parse(response);
     } catch (error) {
       console.error('OpenAI website analysis error:', error);
-      throw new Error('Failed to analyze website with AI');
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        status: error.status,
+        code: error.code,
+        type: error.type
+      });
+      throw new Error(`Failed to analyze website with AI: ${error.message}`);
     }
   }
 
