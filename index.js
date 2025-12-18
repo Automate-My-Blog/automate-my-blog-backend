@@ -60,7 +60,7 @@ app.get('/health', (req, res) => {
       nodeEnv: process.env.NODE_ENV,
       hasOpenAIKey,
       openaiKeyLength: keyLength,
-      openaiModel: process.env.OPENAI_MODEL || 'gpt-4'
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-3.5-turbo'
     }
   });
 });

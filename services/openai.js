@@ -16,6 +16,48 @@ export class OpenAIService {
   }
 
   /**
+   * Clean OpenAI response by removing markdown code blocks and parsing JSON
+   */
+  parseOpenAIResponse(response) {
+    try {
+      // Log the raw response for debugging
+      console.log('Raw OpenAI response:', response);
+      
+      // Remove markdown code blocks if present
+      let cleanedResponse = response.trim();
+      
+      // Remove ```json at the beginning and ``` at the end
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.substring(7);
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.substring(3);
+      }
+      
+      if (cleanedResponse.endsWith('```')) {
+        cleanedResponse = cleanedResponse.slice(0, -3);
+      }
+      
+      // Trim whitespace
+      cleanedResponse = cleanedResponse.trim();
+      
+      console.log('Cleaned response:', cleanedResponse);
+      
+      // Parse JSON
+      return JSON.parse(cleanedResponse);
+    } catch (parseError) {
+      console.error('JSON parsing failed:', parseError);
+      console.error('Attempted to parse:', response);
+      
+      // Try parsing the original response as a fallback
+      try {
+        return JSON.parse(response);
+      } catch (fallbackError) {
+        throw new Error(`Failed to parse OpenAI response as JSON: ${parseError.message}`);
+      }
+    }
+  }
+
+  /**
    * Analyze website content and extract business information
    */
   async analyzeWebsite(websiteContent, url) {
@@ -68,7 +110,7 @@ Please provide a JSON response with these fields:
       const response = completion.choices[0].message.content;
       console.log('Response content length:', response?.length || 0);
       
-      return JSON.parse(response);
+      return this.parseOpenAIResponse(response);
     } catch (error) {
       console.error('OpenAI website analysis error:', error);
       console.error('Error details:', {
@@ -120,7 +162,7 @@ Return an array of 5 such objects.`
       });
 
       const response = completion.choices[0].message.content;
-      return JSON.parse(response);
+      return this.parseOpenAIResponse(response);
     } catch (error) {
       console.error('OpenAI trending topics error:', error);
       throw new Error('Failed to generate trending topics with AI');
@@ -178,7 +220,7 @@ The content should be:
       });
 
       const response = completion.choices[0].message.content;
-      return JSON.parse(response);
+      return this.parseOpenAIResponse(response);
     } catch (error) {
       console.error('OpenAI blog generation error:', error);
       throw new Error('Failed to generate blog content with AI');
