@@ -67,10 +67,18 @@ app.get('/api', (req, res) => {
 
 // Analyze website endpoint
 app.post('/api/analyze-website', async (req, res) => {
+  console.log('=== Website Analysis Request ===');
+  console.log('Request body:', req.body);
+  console.log('Headers:', req.headers);
+  console.log('User-Agent:', req.headers['user-agent']);
+  
   try {
     const { url } = req.body;
 
+    console.log('Analyzing URL:', url);
+
     if (!url) {
+      console.log('Error: No URL provided');
       return res.status(400).json({
         error: 'URL is required',
         message: 'Please provide a valid website URL'
@@ -78,14 +86,18 @@ app.post('/api/analyze-website', async (req, res) => {
     }
 
     if (!webScraperService.isValidUrl(url)) {
+      console.log('Error: Invalid URL format:', url);
       return res.status(400).json({
         error: 'Invalid URL format',
         message: 'Please provide a valid HTTP or HTTPS URL'
       });
     }
 
+    console.log('Starting website scraping...');
     // Scrape website content
     const scrapedContent = await webScraperService.scrapeWebsite(url);
+    console.log('Scraping completed. Title:', scrapedContent.title);
+    console.log('Content length:', scrapedContent.content?.length || 0);
     
     // Combine title, description, content for analysis
     const fullContent = `
@@ -95,10 +107,12 @@ app.post('/api/analyze-website', async (req, res) => {
       Content: ${scrapedContent.content}
     `.trim();
 
+    console.log('Starting OpenAI analysis...');
     // Analyze with OpenAI
     const analysis = await openaiService.analyzeWebsite(fullContent, url);
+    console.log('OpenAI analysis completed:', analysis?.businessType || 'N/A');
 
-    res.json({
+    const response = {
       success: true,
       url,
       scrapedAt: scrapedContent.scrapedAt,
@@ -107,10 +121,18 @@ app.post('/api/analyze-website', async (req, res) => {
         title: scrapedContent.title,
         headings: scrapedContent.headings
       }
-    });
+    };
+
+    console.log('Sending successful response');
+    res.json(response);
 
   } catch (error) {
-    console.error('Website analysis error:', error);
+    console.error('=== Website Analysis Error ===');
+    console.error('Error type:', error.constructor.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('================================');
+    
     res.status(500).json({
       error: 'Analysis failed',
       message: error.message
