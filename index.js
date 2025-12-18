@@ -287,6 +287,37 @@ app.post('/api/export', async (req, res) => {
   }
 });
 
+// Test endpoint for OpenAI without web scraping
+app.post('/api/test-openai', async (req, res) => {
+  try {
+    console.log('Testing OpenAI directly...');
+    
+    const mockContent = `
+      Title: Test Website
+      Meta Description: A test website for debugging
+      Headings: Welcome, About Us
+      Content: This is a test website for debugging the OpenAI integration.
+    `;
+
+    const analysis = await openaiService.analyzeWebsite(mockContent, 'https://test.com');
+    
+    console.log('OpenAI test successful:', analysis);
+    
+    res.json({
+      success: true,
+      message: 'OpenAI is working correctly',
+      analysis
+    });
+
+  } catch (error) {
+    console.error('OpenAI test failed:', error);
+    res.status(500).json({
+      error: 'OpenAI test failed',
+      message: error.message
+    });
+  }
+});
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('Error:', error);
