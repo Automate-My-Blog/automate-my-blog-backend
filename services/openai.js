@@ -129,6 +129,7 @@ Please provide a JSON response with these fields:
    */
   async generateTrendingTopics(businessType, targetAudience, contentFocus) {
     try {
+      // First, generate the topic ideas without images
       const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
         messages: [
@@ -149,7 +150,6 @@ For each topic, provide a JSON object with:
   "trend": "string - trending keyword/topic",
   "title": "string - engaging blog post title",
   "subheader": "string - compelling subtitle/description",
-  "image": "string - Unsplash image URL (use appropriate search terms)",
   "popularity": "string - trending percentage (e.g., 'Trending +250%')",
   "category": "string - content category"
 }
@@ -162,7 +162,25 @@ Return an array of 5 such objects.`
       });
 
       const response = completion.choices[0].message.content;
-      return this.parseOpenAIResponse(response);
+      const topics = this.parseOpenAIResponse(response);
+
+      // Generate DALL-E images for first 2 topics only (for speed)
+      console.log('Generating DALL-E images for first 2 topics');
+      const dalleLimit = Math.min(2, topics.length);
+      
+      for (let i = 0; i < dalleLimit; i++) {
+        console.log(`Generating DALL-E image ${i + 1}/${dalleLimit} for topic: ${topics[i].title}`);
+        topics[i].image = await this.generateTopicImage(topics[i]);
+      }
+      
+      // Use placeholder images for remaining topics
+      for (let i = dalleLimit; i < topics.length; i++) {
+        const placeholderUrl = `https://via.placeholder.com/400x250/6B8CAE/FFFFFF?text=${encodeURIComponent(topics[i].category || 'Topic')}`;
+        topics[i].image = placeholderUrl;
+        console.log(`Using placeholder for topic ${i + 1}: ${topics[i].title}`);
+      }
+
+      return topics;
     } catch (error) {
       console.error('OpenAI trending topics error:', error);
       throw new Error('Failed to generate trending topics with AI');
@@ -278,6 +296,40 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
     } catch (error) {
       console.error('OpenAI export generation error:', error);
       throw new Error('Failed to generate export content with AI');
+    }
+  }
+
+  /**
+   * Generate image using DALL-E for blog topics
+   */
+  async generateTopicImage(topic) {
+    try {
+      console.log('Generating DALL-E image for topic:', topic.title);
+      
+      // Create a descriptive prompt for the image
+      const prompt = `Create a professional, engaging blog header image for: "${topic.title}". 
+      Style: Modern, clean, relevant to the topic. 
+      Colors: Professional and appealing. 
+      No text overlay needed.`;
+
+      const response = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: prompt,
+        size: "1024x1024",
+        quality: "standard",
+        n: 1,
+      });
+
+      console.log('DALL-E image generated successfully');
+      return response.data[0].url;
+      
+    } catch (error) {
+      console.error('DALL-E image generation error:', error);
+      
+      // Fallback to a placeholder image if DALL-E fails
+      const fallbackUrl = `https://via.placeholder.com/400x250/6B8CAE/FFFFFF?text=${encodeURIComponent(topic.title.substring(0, 30))}`;
+      console.log('Using fallback image:', fallbackUrl);
+      return fallbackUrl;
     }
   }
 }
