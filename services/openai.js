@@ -101,11 +101,14 @@ CRITICAL REQUIREMENTS:
 
 ANALYSIS FRAMEWORK:
 - Who has purchasing power/budget authority vs who uses the product?
+- How does this business make money? (analyze pricing, products, CTAs, conversion elements)
+- What are the website's conversion goals? (analyze forms, buttons, user flows, calls-to-action)
+- How should blog content support these business objectives?
 - What specific problems drive people to search for this business type?
 - For each problem: How do customers describe it emotionally vs how SEOs would optimize for it?
-- What are the different search scenarios (problem → search phrases → content opportunities)?
+- What are the different search scenarios (problem → search phrases → content opportunities → business conversion)?
 - When are customers most likely to search (urgency, emotional state)?
-- How does this business uniquely connect with customers for each scenario?
+- How does this business uniquely connect with customers for each scenario to drive conversions?
 
 JSON RESPONSE (follow EXACTLY):
 {
@@ -121,20 +124,25 @@ JSON RESPONSE (follow EXACTLY):
     "accent": "Hex code for accent/highlight color"
   },
   "description": "How business solves customer problems (max 150 chars)",
+  "businessModel": "How this business makes money based on website analysis (max 100 chars)",
+  "websiteGoals": "Primary conversion objectives inferred from CTAs, forms, user flows (max 150 chars)",
+  "blogStrategy": "How blog content should support business conversion goals (max 200 chars)",
   "searchBehavior": "When/how customers search (max 150 chars) - urgency, emotional state, timing patterns",
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
       "customerLanguage": ["2-3 phrases customers actually type into Google for this problem", "use their words not business terms"],
       "seoKeywords": ["3-4 SEO-focused keywords for this problem", "include variations and related terms", "balance search volume with specificity"],
+      "conversionPath": "How this content scenario supports business goals (max 150 chars)",
       "contentIdeas": [
         {
           "title": "Blog post title addressing this specific problem",
-          "searchIntent": "What motivates this customer segment to search for this topic"
+          "searchIntent": "What motivates this customer segment to search for this topic",
+          "businessAlignment": "How this content drives toward conversion goals"
         }
       ]
     },
-    "// Generate 4-5 scenarios based on different customer problems"
+    "// Generate 4-5 scenarios based on different customer problems, each aligned with business conversion strategy"
   ],
   "connectionMessage": "2-3 sentences explaining how this business connects with customers through content, specific to their situation and customer psychology (max 300 chars)"
 }
@@ -145,15 +153,18 @@ VALIDATION RULES:
 - NO business jargon - use customer language in customerLanguage fields
 - ALL arrays must have specified number of items
 - ALL text must be under character limits
-- scenarios must have 4-5 items, each addressing a different customer problem
+- businessModel, websiteGoals, blogStrategy must be inferred from actual website content
+- scenarios must have 4-5 items, each addressing a different customer problem with business alignment
+- conversionPath must show clear connection from content to business goals
 - seoKeywords should be optimization-focused, different from customerLanguage
 - customerLanguage should be emotional phrases customers actually type
+- contentIdeas must include businessAlignment showing conversion strategy
 - connectionMessage must be specific to this business, not generic template text
 - JSON must be valid and parseable`
           }
         ],
         temperature: 0.3,
-        max_tokens: 1500
+        max_tokens: 2000
       });
 
       console.log('OpenAI request completed successfully');
