@@ -66,6 +66,15 @@ export class OpenAIService {
       console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
       console.log('Content length:', websiteContent?.length || 0);
       
+      // Check for minimal content that might indicate JavaScript-heavy site
+      if (websiteContent && websiteContent.length < 500) {
+        console.log('Warning: Very limited content detected. Possible JavaScript-heavy site.');
+      }
+      
+      if (websiteContent && websiteContent.toLowerCase().includes('javascript') && websiteContent.length < 1000) {
+        console.log('Warning: Site appears to require JavaScript for content rendering.');
+      }
+      
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
       console.log('Using OpenAI model:', model);
       
@@ -74,29 +83,38 @@ export class OpenAIService {
         messages: [
           {
             role: 'system',
-            content: `You are a business analyst specializing in understanding websites and their target audiences. Analyze the provided website content and extract key business information.`
+            content: `You are a customer psychology expert who analyzes businesses to understand real customer behavior and search patterns. Your goal is to understand not just what the business does, but who actually makes purchasing decisions, what problems drive customers to search online, and what language customers use when describing their struggles.`
           },
           {
             role: 'user',
-            content: `Please analyze this website (${url}) and extract the following information in JSON format:
+            content: `Please analyze this website (${url}) and extract customer-focused business insights for content marketing:
 
 Website Content:
 ${websiteContent}
 
-Please provide a JSON response with these fields:
+IMPORTANT: Focus on customer psychology and realistic search behavior. If the website content is limited:
+1. Use domain name and available clues to make educated guesses about customer needs
+2. Think about real problems that would drive someone to search for this type of business
+3. Consider who actually makes purchasing decisions (e.g., parents buy for children, managers buy for employees)
+
+Provide a JSON response focused on customer behavior and realistic search patterns:
 {
-  "businessType": "string - primary industry/category",
-  "businessName": "string - company/brand name",
-  "targetAudience": "string - primary customer demographic",
-  "contentFocus": "string - main content themes/topics",
-  "brandVoice": "string - tone and personality",
+  "businessType": "string - specific industry category (e.g. 'Children's Comfort Products' not 'E-commerce')",
+  "businessName": "string - company/brand name extracted from content",
+  "decisionMakers": "string - who actually makes purchasing decisions (be specific about demographics, role, situation)",
+  "endUsers": "string - who actually uses the product/service (may be different from decision makers)",
+  "customerProblems": ["array of 3-5 specific problems that drive customers to search for solutions"],
+  "searchBehavior": "string - describe how and when customers typically search (time of day, emotional state, urgency level)",
+  "customerLanguage": ["array of 4-6 phrases customers actually use when describing their problems or searching for solutions"],
+  "contentFocus": "string - content themes that address real customer problems and build trust",
+  "brandVoice": "string - communication tone that resonates with customers in their situation",
   "brandColors": {
-    "primary": "string - hex color",
-    "secondary": "string - hex color", 
-    "accent": "string - hex color"
+    "primary": "string - primary brand color hex code from website design",
+    "secondary": "string - secondary/background color hex code", 
+    "accent": "string - accent/highlight color hex code"
   },
-  "description": "string - brief business description",
-  "keywords": ["array", "of", "relevant", "keywords"]
+  "description": "string - business description focused on how it solves customer problems",
+  "keywords": ["array of 6-8 realistic search terms that customers use when looking for solutions to their problems - use customer language, not business jargon"]
 }`
           }
         ],
@@ -135,26 +153,34 @@ Please provide a JSON response with these fields:
         messages: [
           {
             role: 'system',
-            content: `You are a content marketing expert who identifies trending topics and creates engaging blog post ideas.`
+            content: `You are a content strategist who creates blog topics that drive qualified traffic. You understand search intent, audience needs, and how to connect content topics to business goals. Your recommendations are factual, specific, and focused on attracting the right audience through valuable content.`
           },
           {
             role: 'user',
-            content: `Generate 5 trending blog post topics for this business:
+            content: `Generate 2 strategic blog post topics for this business that will attract their target audience:
+
+Business Analysis:
 - Business Type: ${businessType}
 - Target Audience: ${targetAudience}
 - Content Focus: ${contentFocus}
 
-For each topic, provide a JSON object with:
+Create topics that would genuinely help this target audience and drive qualified traffic. For each topic, provide:
 {
   "id": number,
-  "trend": "string - trending keyword/topic",
-  "title": "string - engaging blog post title",
-  "subheader": "string - compelling subtitle/description",
-  "popularity": "string - trending percentage (e.g., 'Trending +250%')",
-  "category": "string - content category"
+  "trend": "string - content theme/topic area",
+  "title": "string - SEO-optimized blog post title that the target audience would search for",
+  "subheader": "string - compelling subtitle that explains the value to the reader",
+  "seoBenefit": "string - specific benefit like 'Can help drive [specific audience segment] to your website when they search for [specific search terms]' or 'Can help [audience type] find your [service type] when they look for [specific problem/solution]'",
+  "category": "string - content category that aligns with business expertise"
 }
 
-Return an array of 5 such objects.`
+Focus on:
+1. Topics the target audience actively searches for
+2. Content that showcases business expertise
+3. Realistic SEO opportunities (not overstated claims)
+4. Specific audience-keyword connections
+
+Return an array of 2 strategic topics that align with the business goals and audience needs.`
           }
         ],
         temperature: 0.7,
@@ -164,21 +190,16 @@ Return an array of 5 such objects.`
       const response = completion.choices[0].message.content;
       const topics = this.parseOpenAIResponse(response);
 
-      // Generate DALL-E images for first 2 topics only (for speed)
-      console.log('Generating DALL-E images for first 2 topics');
-      const dalleLimit = Math.min(2, topics.length);
+      // Generate DALL-E images for all topics (now only 2)
+      console.log('Generating DALL-E images for all topics');
+      const dalleLimit = topics.length;
       
       for (let i = 0; i < dalleLimit; i++) {
         console.log(`Generating DALL-E image ${i + 1}/${dalleLimit} for topic: ${topics[i].title}`);
         topics[i].image = await this.generateTopicImage(topics[i]);
       }
       
-      // Use placeholder images for remaining topics
-      for (let i = dalleLimit; i < topics.length; i++) {
-        const placeholderUrl = `https://via.placeholder.com/400x250/6B8CAE/FFFFFF?text=${encodeURIComponent(topics[i].category || 'Topic')}`;
-        topics[i].image = placeholderUrl;
-        console.log(`Using placeholder for topic ${i + 1}: ${topics[i].title}`);
-      }
+      // All topics now have DALL-E images
 
       return topics;
     } catch (error) {
@@ -306,11 +327,16 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
     try {
       console.log('Generating DALL-E image for topic:', topic.title);
       
-      // Create a descriptive prompt for the image
-      const prompt = `Create a professional, engaging blog header image for: "${topic.title}". 
-      Style: Modern, clean, relevant to the topic. 
-      Colors: Professional and appealing. 
-      No text overlay needed.`;
+      // Create a descriptive prompt for realistic blog header image
+      const prompt = `Create a high-quality, realistic image for the blog post: "${topic.title}". 
+      
+      Style: Professional photography, sharp focus, excellent lighting
+      Quality: Ultra-high resolution, magazine quality, commercial photography
+      Composition: Clean, modern, suitable for blog header use
+      Colors: Vibrant but professional color palette
+      Requirements: No text, no people's faces, realistic style only
+      
+      The image should look like a professional stock photo that perfectly represents the topic.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
