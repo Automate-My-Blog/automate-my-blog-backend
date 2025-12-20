@@ -104,6 +104,8 @@ ANALYSIS FRAMEWORK:
 - What real problems drive people to search for this business type?
 - How do customers actually describe their problems (emotional language)?
 - When are customers most likely to search (urgency, emotional state)?
+- What specific blog topics would attract these customers when they search?
+- How does this business uniquely connect with their target customers?
 
 JSON RESPONSE (follow EXACTLY):
 {
@@ -122,7 +124,16 @@ JSON RESPONSE (follow EXACTLY):
     "accent": "Hex code for accent/highlight color"
   },
   "description": "How business solves customer problems (max 150 chars)",
-  "keywords": ["6-8 realistic search terms customers use", "customer language not SEO jargon", "include problem-focused terms", "use emotional descriptors when relevant"]
+  "keywords": ["6-8 realistic search terms customers use", "customer language not SEO jargon", "include problem-focused terms", "use emotional descriptors when relevant"],
+  "contentIdeas": [
+    {
+      "title": "Blog post title that addresses a specific customer problem",
+      "searchIntent": "What motivates this customer segment to search for this topic", 
+      "customerNeed": "The underlying problem this content solves"
+    },
+    "// Generate 4-6 content ideas based on customerProblems and customerLanguage"
+  ],
+  "connectionMessage": "2-3 sentences explaining how this business connects with customers through content, specific to their situation and customer psychology (max 300 chars)"
 }
 
 VALIDATION RULES:
@@ -131,11 +142,13 @@ VALIDATION RULES:
 - NO business jargon - use customer language
 - ALL arrays must have specified number of items
 - ALL text must be under character limits
+- contentIdeas must have 4-6 items, each addressing a different customer problem
+- connectionMessage must be specific to this business, not generic template text
 - JSON must be valid and parseable`
           }
         ],
         temperature: 0.3,
-        max_tokens: 1000
+        max_tokens: 1500
       });
 
       console.log('OpenAI request completed successfully');
