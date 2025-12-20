@@ -83,39 +83,55 @@ export class OpenAIService {
         messages: [
           {
             role: 'system',
-            content: `You are a customer psychology expert who analyzes businesses to understand real customer behavior and search patterns. Your goal is to understand not just what the business does, but who actually makes purchasing decisions, what problems drive customers to search online, and what language customers use when describing their struggles.`
+            content: `You are a customer psychology expert who analyzes ANY type of business to understand real customer behavior. You must be extremely precise with your analysis and follow the exact JSON format specified. Your responses will be parsed by code, so accuracy is critical.`
           },
           {
             role: 'user',
-            content: `Please analyze this website (${url}) and extract customer-focused business insights for content marketing:
+            content: `Analyze this website and provide customer psychology insights for content marketing:
 
-Website Content:
-${websiteContent}
+Website: ${url}
+Content: ${websiteContent}
 
-IMPORTANT: Focus on customer psychology and realistic search behavior. If the website content is limited:
-1. Use domain name and available clues to make educated guesses about customer needs
-2. Think about real problems that would drive someone to search for this type of business
-3. Consider who actually makes purchasing decisions (e.g., parents buy for children, managers buy for employees)
+CRITICAL REQUIREMENTS:
+1. Return EXACTLY the JSON structure specified - no deviations
+2. ALL fields are REQUIRED - no empty strings or null values
+3. Follow character limits strictly
+4. Use realistic customer language, not business jargon
+5. Think systematically about who pays vs who uses the product/service
 
-Provide a JSON response focused on customer behavior and realistic search patterns:
+ANALYSIS FRAMEWORK:
+- Who has purchasing power/budget authority vs who uses the product?
+- What real problems drive people to search for this business type?
+- How do customers actually describe their problems (emotional language)?
+- When are customers most likely to search (urgency, emotional state)?
+
+JSON RESPONSE (follow EXACTLY):
 {
-  "businessType": "string - specific industry category (e.g. 'Children's Comfort Products' not 'E-commerce')",
-  "businessName": "string - company/brand name extracted from content",
-  "decisionMakers": "string - who actually makes purchasing decisions (be specific about demographics, role, situation)",
-  "endUsers": "string - who actually uses the product/service (may be different from decision makers)",
-  "customerProblems": ["array of 3-5 specific problems that drive customers to search for solutions"],
-  "searchBehavior": "string - describe how and when customers typically search (time of day, emotional state, urgency level)",
-  "customerLanguage": ["array of 4-6 phrases customers actually use when describing their problems or searching for solutions"],
-  "contentFocus": "string - content themes that address real customer problems and build trust",
-  "brandVoice": "string - communication tone that resonates with customers in their situation",
+  "businessType": "Specific category (max 50 chars) - be descriptive, avoid generic terms like 'E-commerce' or 'Technology'",
+  "businessName": "Exact company name from website content",
+  "decisionMakers": "Who actually makes purchasing decisions (max 100 chars) - consider demographics, role, authority",
+  "endUsers": "Who uses the product/service (max 100 chars) - may be same as decision makers",
+  "customerProblems": ["4-5 specific problems that drive search behavior", "use emotional language customers use", "focus on pain points", "be specific not generic"],
+  "searchBehavior": "When/how customers search (max 150 chars) - urgency, emotional state, timing patterns",
+  "customerLanguage": ["4-6 phrases customers actually type into Google", "use their words not business terms", "include emotional descriptors", "real search phrases"],
+  "contentFocus": "Content themes addressing customer problems (max 100 chars)",
+  "brandVoice": "Communication tone for this customer situation (max 50 chars)",
   "brandColors": {
-    "primary": "string - primary brand color hex code from website design",
-    "secondary": "string - secondary/background color hex code", 
-    "accent": "string - accent/highlight color hex code"
+    "primary": "Hex code for primary brand color from website",
+    "secondary": "Hex code for secondary/background color", 
+    "accent": "Hex code for accent/highlight color"
   },
-  "description": "string - business description focused on how it solves customer problems",
-  "keywords": ["array of 6-8 realistic search terms that customers use when looking for solutions to their problems - use customer language, not business jargon"]
-}`
+  "description": "How business solves customer problems (max 150 chars)",
+  "keywords": ["6-8 realistic search terms customers use", "customer language not SEO jargon", "include problem-focused terms", "use emotional descriptors when relevant"]
+}
+
+VALIDATION RULES:
+- NO placeholder text like "Target Audience" or "Business Type"
+- NO generic terms like "customers" or "users" - be specific
+- NO business jargon - use customer language
+- ALL arrays must have specified number of items
+- ALL text must be under character limits
+- JSON must be valid and parseable`
           }
         ],
         temperature: 0.3,
