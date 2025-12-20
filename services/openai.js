@@ -101,11 +101,11 @@ CRITICAL REQUIREMENTS:
 
 ANALYSIS FRAMEWORK:
 - Who has purchasing power/budget authority vs who uses the product?
-- What real problems drive people to search for this business type?
-- How do customers actually describe their problems (emotional language)?
+- What specific problems drive people to search for this business type?
+- For each problem: How do customers describe it emotionally vs how SEOs would optimize for it?
+- What are the different search scenarios (problem → search phrases → content opportunities)?
 - When are customers most likely to search (urgency, emotional state)?
-- What specific blog topics would attract these customers when they search?
-- How does this business uniquely connect with their target customers?
+- How does this business uniquely connect with customers for each scenario?
 
 JSON RESPONSE (follow EXACTLY):
 {
@@ -113,9 +113,6 @@ JSON RESPONSE (follow EXACTLY):
   "businessName": "Exact company name from website content",
   "decisionMakers": "Who actually makes purchasing decisions (max 100 chars) - consider demographics, role, authority",
   "endUsers": "Who uses the product/service (max 100 chars) - may be same as decision makers",
-  "customerProblems": ["4-5 specific problems that drive search behavior", "use emotional language customers use", "focus on pain points", "be specific not generic"],
-  "searchBehavior": "When/how customers search (max 150 chars) - urgency, emotional state, timing patterns",
-  "customerLanguage": ["4-6 phrases customers actually type into Google", "use their words not business terms", "include emotional descriptors", "real search phrases"],
   "contentFocus": "Content themes addressing customer problems (max 100 chars)",
   "brandVoice": "Communication tone for this customer situation (max 50 chars)",
   "brandColors": {
@@ -124,14 +121,20 @@ JSON RESPONSE (follow EXACTLY):
     "accent": "Hex code for accent/highlight color"
   },
   "description": "How business solves customer problems (max 150 chars)",
-  "keywords": ["6-8 realistic search terms customers use", "customer language not SEO jargon", "include problem-focused terms", "use emotional descriptors when relevant"],
-  "contentIdeas": [
+  "searchBehavior": "When/how customers search (max 150 chars) - urgency, emotional state, timing patterns",
+  "scenarios": [
     {
-      "title": "Blog post title that addresses a specific customer problem",
-      "searchIntent": "What motivates this customer segment to search for this topic", 
-      "customerNeed": "The underlying problem this content solves"
+      "customerProblem": "Specific problem that drives search behavior (use emotional language)",
+      "customerLanguage": ["2-3 phrases customers actually type into Google for this problem", "use their words not business terms"],
+      "seoKeywords": ["3-4 SEO-focused keywords for this problem", "include variations and related terms", "balance search volume with specificity"],
+      "contentIdeas": [
+        {
+          "title": "Blog post title addressing this specific problem",
+          "searchIntent": "What motivates this customer segment to search for this topic"
+        }
+      ]
     },
-    "// Generate 4-6 content ideas based on customerProblems and customerLanguage"
+    "// Generate 4-5 scenarios based on different customer problems"
   ],
   "connectionMessage": "2-3 sentences explaining how this business connects with customers through content, specific to their situation and customer psychology (max 300 chars)"
 }
@@ -139,10 +142,12 @@ JSON RESPONSE (follow EXACTLY):
 VALIDATION RULES:
 - NO placeholder text like "Target Audience" or "Business Type"
 - NO generic terms like "customers" or "users" - be specific
-- NO business jargon - use customer language
+- NO business jargon - use customer language in customerLanguage fields
 - ALL arrays must have specified number of items
 - ALL text must be under character limits
-- contentIdeas must have 4-6 items, each addressing a different customer problem
+- scenarios must have 4-5 items, each addressing a different customer problem
+- seoKeywords should be optimization-focused, different from customerLanguage
+- customerLanguage should be emotional phrases customers actually type
 - connectionMessage must be specific to this business, not generic template text
 - JSON must be valid and parseable`
           }
