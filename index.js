@@ -116,6 +116,16 @@ app.post('/api/analyze-website', async (req, res) => {
     console.log('Scraping completed. Title:', scrapedContent.title);
     console.log('Content length:', scrapedContent.content?.length || 0);
     
+    // Log extracted brand colors for debugging
+    if (scrapedContent.brandColors) {
+      console.log('🎨 Brand Colors Extracted:');
+      console.log('Primary:', scrapedContent.brandColors.primary);
+      console.log('Secondary:', scrapedContent.brandColors.secondary);
+      console.log('Accent:', scrapedContent.brandColors.accent);
+      console.log('All Colors:', scrapedContent.brandColors.allColors);
+      console.log('CSS Variables Found:', Object.keys(scrapedContent.brandColors.cssVariables || {}));
+    }
+    
     // Combine title, description, content for analysis
     const fullContent = `
       Title: ${scrapedContent.title}
@@ -125,8 +135,8 @@ app.post('/api/analyze-website', async (req, res) => {
     `.trim();
 
     console.log('Starting OpenAI analysis...');
-    // Analyze with OpenAI
-    const analysis = await openaiService.analyzeWebsite(fullContent, url);
+    // Analyze with OpenAI (pass extracted brand colors)
+    const analysis = await openaiService.analyzeWebsite(fullContent, url, scrapedContent.brandColors);
     console.log('OpenAI analysis completed:', analysis?.businessType || 'N/A');
 
     const response = {

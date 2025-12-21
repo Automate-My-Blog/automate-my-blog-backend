@@ -60,7 +60,7 @@ export class OpenAIService {
   /**
    * Analyze website content and extract business information
    */
-  async analyzeWebsite(websiteContent, url) {
+  async analyzeWebsite(websiteContent, url, extractedBrandColors = null) {
     try {
       console.log('OpenAI website analysis starting...');
       console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
@@ -157,6 +157,8 @@ IMPORTANT: Your analysis will drive content generation that must be genuinely in
 Website: ${url}
 Content: ${websiteContent}${webSearchData}${keywordData}
 
+EXTRACTED BRAND COLORS: ${extractedBrandColors ? JSON.stringify(extractedBrandColors, null, 2) : 'None detected'}
+
 CRITICAL REQUIREMENTS:
 1. Return EXACTLY the JSON structure specified - no deviations
 2. ALL fields are REQUIRED - no empty strings or null values
@@ -202,9 +204,9 @@ JSON RESPONSE (follow EXACTLY):
   "contentFocus": "Content themes addressing customer problems (max 100 chars)",
   "brandVoice": "Communication tone for this customer situation (max 50 chars)",
   "brandColors": {
-    "primary": "Hex code for primary brand color - use web search data if available, otherwise extract from website",
-    "secondary": "Hex code for secondary/background color - prioritize actual brand guidelines if found", 
-    "accent": "Hex code for accent/highlight color - ensure brand consistency"
+    "primary": "Hex code for primary brand color - MUST use extracted brand colors if available, fallback to #6B8CAE only if none detected",
+    "secondary": "Hex code for secondary/background color - MUST use extracted brand colors if available, fallback to #F4E5D3 only if none detected", 
+    "accent": "Hex code for accent/highlight color - MUST use extracted brand colors if available, fallback to #8FBC8F only if none detected"
   },
   "description": "How business solves customer problems (max 150 chars)",
   "businessModel": "How this business makes money based on website analysis (max 100 chars)",
@@ -242,7 +244,8 @@ JSON RESPONSE (follow EXACTLY):
 }
 
 VALIDATION RULES:
-- PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of brand colors, customer language, SEO keywords, and business context
+- PRIORITIZE EXTRACTED BRAND COLORS: If brand colors were extracted from the website CSS/styling, use them exactly as provided for primary/secondary/accent
+- PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of customer language, SEO keywords, and business context
 - NO placeholder text like "Target Audience" or "Business Type"
 - NO generic terms like "customers" or "users" - be specific
 - NO business jargon - use customer language in customerLanguage fields (prioritize keyword research findings)
@@ -385,9 +388,32 @@ Return an array of 2 strategic topics that promise genuinely valuable, insight-d
    * Generate blog post content
    */
   async generateBlogPost(topic, businessInfo, additionalInstructions = '') {
+    const startTime = Date.now();
+    
     try {
+      // Log request details for analysis
+      const requestPayload = {
+        topic: topic,
+        businessInfo: businessInfo,
+        additionalInstructions: additionalInstructions
+      };
+      
+      const payloadSize = JSON.stringify(requestPayload).length;
+      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+      
+      console.log('🚀 BLOG GENERATION REQUEST START');
+      console.log('📊 Request Metrics:', {
+        model: model,
+        payloadSizeBytes: payloadSize,
+        payloadSizeKB: Math.round(payloadSize / 1024 * 100) / 100,
+        topicTitle: topic.title,
+        hasEnhancedData: !!(businessInfo.scenarios && businessInfo.scenarios.length > 0),
+        scenarioCount: businessInfo.scenarios?.length || 0,
+        timestamp: new Date().toISOString()
+      });
+
       const completion = await openai.chat.completions.create({
-        model: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+        model: model,
         messages: [
           {
             role: 'system',
@@ -457,11 +483,58 @@ The content should be 1000-1500 words and demonstrate expertise through empathy,
         max_tokens: 2500
       });
 
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+
+      // Log successful completion metrics
+      console.log('✅ BLOG GENERATION SUCCESS');
+      console.log('📈 Success Metrics:', {
+        durationMs: duration,
+        durationSeconds: Math.round(duration / 1000 * 100) / 100,
+        inputTokens: completion.usage?.prompt_tokens || 'unknown',
+        outputTokens: completion.usage?.completion_tokens || 'unknown',
+        totalTokens: completion.usage?.total_tokens || 'unknown',
+        model: model,
+        finishReason: completion.choices[0]?.finish_reason || 'unknown',
+        timestamp: new Date().toISOString()
+      });
+
       const response = completion.choices[0].message.content;
       return this.parseOpenAIResponse(response);
     } catch (error) {
-      console.error('OpenAI blog generation error:', error);
-      throw new Error('Failed to generate blog content with AI');
+      const endTime = Date.now();
+      const duration = endTime - startTime;
+      
+      console.error('❌ BLOG GENERATION FAILED');
+      console.error('🔍 Error Analysis:', {
+        errorType: error.constructor.name,
+        errorMessage: error.message,
+        errorCode: error.code,
+        errorStatus: error.status,
+        errorStack: error.stack,
+        durationMs: duration,
+        durationSeconds: Math.round(duration / 1000 * 100) / 100,
+        model: model,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Check for specific error types to provide better error messages
+      let specificErrorMessage = 'Failed to generate blog content with AI';
+      
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        specificErrorMessage = 'Request timed out - content generation took too long';
+      } else if (error.status === 429) {
+        specificErrorMessage = 'Rate limit exceeded - too many requests to OpenAI API';
+      } else if (error.code === 'context_length_exceeded') {
+        specificErrorMessage = 'Content too long - request exceeded token limits';
+      } else if (error.status === 500) {
+        specificErrorMessage = 'OpenAI server error - temporary issue with AI service';
+      } else if (error.status === 503) {
+        specificErrorMessage = 'OpenAI service unavailable - server overloaded';
+      }
+      
+      console.error('📤 Error Message to Client:', specificErrorMessage);
+      throw new Error(specificErrorMessage);
     }
   }
 

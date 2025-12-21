@@ -67,12 +67,145 @@ export class WebScraperService {
       // Wait a bit for any dynamic content
       await page.waitForTimeout(2000);
 
-      // Extract content
+      // Extract content and brand colors
       const content = await page.evaluate(() => {
-        // Remove unwanted elements
+        // Helper function to convert RGB to Hex
+        const rgbToHex = (rgb) => {
+          if (!rgb || rgb === 'transparent') return null;
+          const match = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          if (!match) return rgb.startsWith('#') ? rgb : null;
+          
+          const [, r, g, b] = match;
+          const hex = '#' + [r, g, b].map(x => {
+            const hex = parseInt(x).toString(16);
+            return hex.length === 1 ? '0' + hex : hex;
+          }).join('');
+          return hex;
+        };
+
+        // Helper function to check if color is meaningful (not white/black/gray)
+        const isValidBrandColor = (color) => {
+          if (!color || color === 'transparent') return false;
+          const commonColors = ['#ffffff', '#000000', '#fff', '#000', 'white', 'black', 'transparent'];
+          if (commonColors.includes(color.toLowerCase())) return false;
+          
+          // Check if it's a gray color (RGB values are similar)
+          const match = color.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+          if (match) {
+            const [, r, g, b] = match.map(Number);
+            const max = Math.max(r, g, b);
+            const min = Math.min(r, g, b);
+            // If color variance is low, it's likely a gray
+            return (max - min) > 30;
+          }
+          
+          return true;
+        };
+
+        // Extract CSS custom properties (CSS variables)
+        const extractCSSVariables = () => {
+          const cssVariables = {};
+          const rootStyles = getComputedStyle(document.documentElement);
+          
+          // Common brand color variable names
+          const brandColorVars = [
+            '--primary', '--primary-color', '--brand-primary', '--main-color',
+            '--secondary', '--secondary-color', '--brand-secondary',
+            '--accent', '--accent-color', '--brand-accent', '--highlight',
+            '--theme-color', '--brand-color'
+          ];
+          
+          brandColorVars.forEach(varName => {
+            const value = rootStyles.getPropertyValue(varName).trim();
+            if (value) {
+              cssVariables[varName] = rgbToHex(value) || value;
+            }
+          });
+          
+          return cssVariables;
+        };
+
+        // Extract colors from key brand elements
+        const extractElementColors = () => {
+          const brandElements = [
+            // Header and navigation
+            'header', 'nav', '.header', '.navigation', '.navbar',
+            // Primary buttons and CTAs
+            'button[type="submit"]', '.btn-primary', '.cta', '.button',
+            'a[href*="contact"]', 'a[href*="buy"]', 'a[href*="shop"]',
+            // Logo containers
+            '.logo', '#logo', '.brand', '.site-title',
+            // Other brand elements
+            '.hero', '.banner', '.highlight'
+          ];
+          
+          const elementColors = {};
+          
+          brandElements.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((el, index) => {
+              const styles = getComputedStyle(el);
+              const bgColor = rgbToHex(styles.backgroundColor);
+              const textColor = rgbToHex(styles.color);
+              const borderColor = rgbToHex(styles.borderColor);
+              
+              if (isValidBrandColor(bgColor)) {
+                elementColors[`${selector}-${index}-bg`] = bgColor;
+              }
+              if (isValidBrandColor(textColor)) {
+                elementColors[`${selector}-${index}-text`] = textColor;
+              }
+              if (isValidBrandColor(borderColor)) {
+                elementColors[`${selector}-${index}-border`] = borderColor;
+              }
+            });
+          });
+          
+          return elementColors;
+        };
+
+        // Analyze and rank colors by frequency and importance
+        const analyzeColors = (cssVars, elementColors) => {
+          const colorFrequency = {};
+          
+          // Weight CSS variables higher (they're intentional brand colors)
+          Object.values(cssVars).forEach(color => {
+            if (color && isValidBrandColor(color)) {
+              colorFrequency[color] = (colorFrequency[color] || 0) + 10;
+            }
+          });
+          
+          // Count element colors
+          Object.values(elementColors).forEach(color => {
+            if (color && isValidBrandColor(color)) {
+              colorFrequency[color] = (colorFrequency[color] || 0) + 1;
+            }
+          });
+          
+          // Sort by frequency and return top colors
+          const sortedColors = Object.entries(colorFrequency)
+            .sort(([,a], [,b]) => b - a)
+            .map(([color]) => color);
+          
+          return {
+            primary: sortedColors[0] || null,
+            secondary: sortedColors[1] || null,
+            accent: sortedColors[2] || null,
+            allColors: sortedColors.slice(0, 5),
+            cssVariables: cssVars,
+            elementColors: elementColors,
+            colorFrequency: colorFrequency
+          };
+        };
+
+        // Extract brand colors
+        const cssVariables = extractCSSVariables();
+        const elementColors = extractElementColors();
+        const brandColorAnalysis = analyzeColors(cssVariables, elementColors);
+
+        // Remove unwanted elements for content extraction (but keep them for color analysis)
         const elementsToRemove = [
-          'script', 'style', 'nav', 'footer', 'header', 
-          '.cookie-banner', '.popup', '.modal', '.advertisement'
+          'script', '.cookie-banner', '.popup', '.modal', '.advertisement'
         ];
         
         elementsToRemove.forEach(selector => {
@@ -116,7 +249,8 @@ export class WebScraperService {
           metaDescription: metaDescription.trim(),
           content: mainContent.trim(),
           headings,
-          url
+          url,
+          brandColors: brandColorAnalysis
         };
       });
 
