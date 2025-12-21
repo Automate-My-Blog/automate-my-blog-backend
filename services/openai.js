@@ -62,7 +62,7 @@ export class OpenAIService {
    */
   async analyzeWebsite(websiteContent, url) {
     try {
-      console.log('OpenAI request starting...');
+      console.log('OpenAI website analysis starting...');
       console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
       console.log('Content length:', websiteContent?.length || 0);
       
@@ -74,23 +74,88 @@ export class OpenAIService {
       if (websiteContent && websiteContent.toLowerCase().includes('javascript') && websiteContent.length < 1000) {
         console.log('Warning: Site appears to require JavaScript for content rendering.');
       }
+
+      // Extract basic business info for web search
+      let businessName = '';
+      let businessType = '';
+      
+      // Quick extraction of business name and type from URL and content
+      const domain = url.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+      businessName = domain.split('.')[0].charAt(0).toUpperCase() + domain.split('.')[0].slice(1);
+      
+      // Try to identify business type from content
+      const contentLower = websiteContent?.toLowerCase() || '';
+      if (contentLower.includes('doctor') || contentLower.includes('medical') || contentLower.includes('health')) {
+        businessType = 'Healthcare/Medical Practice';
+      } else if (contentLower.includes('restaurant') || contentLower.includes('food') || contentLower.includes('dining')) {
+        businessType = 'Restaurant/Food Service';
+      } else if (contentLower.includes('lawyer') || contentLower.includes('attorney') || contentLower.includes('legal')) {
+        businessType = 'Legal Services';
+      } else if (contentLower.includes('consulting') || contentLower.includes('consultant')) {
+        businessType = 'Consulting Services';
+      } else {
+        businessType = 'Business Services';
+      }
+
+      // Perform web search-enhanced research (parallel execution for speed)
+      console.log('=== STARTING WEB SEARCH RESEARCH ===');
+      console.log('Business Name:', businessName);
+      console.log('Business Type:', businessType);
+      console.log('Website URL:', url);
+      console.log('About to call performBusinessResearch and performKeywordResearch...');
+      
+      const [webSearchResults, keywordResults] = await Promise.allSettled([
+        this.performBusinessResearch(businessName, businessType, url),
+        this.performKeywordResearch(businessType, 'target customers', null)
+      ]);
+
+      console.log('=== WEB SEARCH RESULTS ===');
+      console.log('Business Research Status:', webSearchResults.status);
+      if (webSearchResults.status === 'rejected') {
+        console.error('Business Research Error:', webSearchResults.reason);
+      }
+      console.log('Keyword Research Status:', keywordResults.status);
+      if (keywordResults.status === 'rejected') {
+        console.error('Keyword Research Error:', keywordResults.reason);
+      }
+
+      let webSearchData = '';
+      let keywordData = '';
+
+      if (webSearchResults.status === 'fulfilled' && webSearchResults.value) {
+        webSearchData = `\n\nWEB SEARCH BUSINESS INTELLIGENCE:\n${webSearchResults.value}`;
+        console.log('✅ Web search business research completed successfully');
+        console.log('Data length:', webSearchResults.value?.length || 0);
+      } else {
+        console.log('❌ Web search business research failed or unavailable, continuing with basic analysis');
+      }
+
+      if (keywordResults.status === 'fulfilled' && keywordResults.value) {
+        keywordData = `\n\nKEYWORD & SEO RESEARCH:\n${keywordResults.value}`;
+        console.log('✅ Keyword research completed successfully');
+        console.log('Data length:', keywordResults.value?.length || 0);
+      } else {
+        console.log('❌ Keyword research failed or unavailable, continuing with basic analysis');
+      }
       
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
-      console.log('Using OpenAI model:', model);
+      console.log('Using OpenAI model for final analysis:', model);
       
       const completion = await openai.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: `You are a customer psychology expert who analyzes ANY type of business to understand real customer behavior. You must be extremely precise with your analysis and follow the exact JSON format specified. Your responses will be parsed by code, so accuracy is critical.`
+            content: `You are a customer psychology expert who analyzes ANY type of business to understand real customer behavior. You must be extremely precise with your analysis and follow the exact JSON format specified. Your responses will be parsed by code, so accuracy is critical.
+
+IMPORTANT: Your analysis will drive content generation that must be genuinely insightful, empathetic, and valuable - not generic advice. Focus on the complex emotional reality of customer problems and the specific psychological barriers they face.`
           },
           {
             role: 'user',
-            content: `Analyze this website and provide customer psychology insights for content marketing:
+            content: `Analyze this website and provide customer psychology insights for content marketing, incorporating web search research data:
 
 Website: ${url}
-Content: ${websiteContent}
+Content: ${websiteContent}${webSearchData}${keywordData}
 
 CRITICAL REQUIREMENTS:
 1. Return EXACTLY the JSON structure specified - no deviations
@@ -99,16 +164,34 @@ CRITICAL REQUIREMENTS:
 4. Use realistic customer language, not business jargon
 5. Think systematically about who pays vs who uses the product/service
 
-ANALYSIS FRAMEWORK:
+ANALYSIS FRAMEWORK (Integrate web search data where available):
+
+CORE BUSINESS ANALYSIS:
 - Who has purchasing power/budget authority vs who uses the product?
 - How does this business make money? (analyze pricing, products, CTAs, conversion elements)
 - What are the website's conversion goals? (analyze forms, buttons, user flows, calls-to-action)
 - How should blog content support these business objectives?
+
+ENHANCED CUSTOMER PSYCHOLOGY (Use web search insights):
 - What specific problems drive people to search for this business type?
-- For each problem: How do customers describe it emotionally vs how SEOs would optimize for it?
+- How do customers actually describe their problems? (Use keyword research data if available)
+- What emotional language patterns emerge from customer reviews/discussions?
 - What are the different search scenarios (problem → search phrases → content opportunities → business conversion)?
 - When are customers most likely to search (urgency, emotional state)?
-- How does this business uniquely connect with customers for each scenario to drive conversions?
+- CRITICAL: For each customer problem, identify DISTINCT target segments with DIFFERENT demographics, life stages, and psychographics
+- NEVER use identical or similar target audience descriptions across scenarios - each must be unique and specific
+
+BRAND & COMPETITIVE INTELLIGENCE (Leverage web search findings):
+- What are the actual brand colors and visual identity? (Use web search brand research if available)
+- How does this business position itself vs competitors?
+- What industry-specific terminology and trends should inform content strategy?
+- What recent developments or context affect customer behavior?
+
+KEYWORD & SEO INTEGRATION (Apply keyword research):
+- What keywords are customers actually using to find businesses like this?
+- What search intent patterns reveal about customer journey stages?
+- How can content strategy align with actual search behavior?
+- What are the current trending topics and opportunities in this space?
 
 JSON RESPONSE (follow EXACTLY):
 {
@@ -119,9 +202,9 @@ JSON RESPONSE (follow EXACTLY):
   "contentFocus": "Content themes addressing customer problems (max 100 chars)",
   "brandVoice": "Communication tone for this customer situation (max 50 chars)",
   "brandColors": {
-    "primary": "Hex code for primary brand color from website",
-    "secondary": "Hex code for secondary/background color", 
-    "accent": "Hex code for accent/highlight color"
+    "primary": "Hex code for primary brand color - use web search data if available, otherwise extract from website",
+    "secondary": "Hex code for secondary/background color - prioritize actual brand guidelines if found", 
+    "accent": "Hex code for accent/highlight color - ensure brand consistency"
   },
   "description": "How business solves customer problems (max 150 chars)",
   "businessModel": "How this business makes money based on website analysis (max 100 chars)",
@@ -131,8 +214,19 @@ JSON RESPONSE (follow EXACTLY):
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
-      "customerLanguage": ["2-3 phrases customers actually type into Google for this problem", "use their words not business terms"],
-      "seoKeywords": ["3-4 SEO-focused keywords for this problem", "include variations and related terms", "balance search volume with specificity"],
+      "targetSegment": {
+        "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Specific age range, life stage, education, income, family status that differentiates this segment from others",
+        "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
+        "searchBehavior": "MUST VARY BY SCENARIO: When and how this specific segment searches (crisis-driven vs planned, reactive vs proactive) - different from other scenarios"
+      },
+      "businessValue": {
+        "searchVolume": "Estimated monthly searches (e.g., 'High - 5,400/month' or 'Medium - 1,200/month')",
+        "competition": "Competition level (Low/Medium/High) and competitive gaps",
+        "conversionPotential": "Conversion likelihood based on urgency, payment ability, and intent (High/Medium/Low)",
+        "priority": "Overall business priority ranking (1=highest value, 2=secondary, etc.)"
+      },
+      "customerLanguage": ["2-3 phrases customers actually type into Google for this problem", "use keyword research data if available, otherwise infer from emotional context"],
+      "seoKeywords": ["3-4 SEO-focused keywords for this problem", "prioritize keyword research findings if available", "balance search volume with specificity"],
       "conversionPath": "How this content scenario supports business goals (max 150 chars)",
       "contentIdeas": [
         {
@@ -142,29 +236,41 @@ JSON RESPONSE (follow EXACTLY):
         }
       ]
     },
-    "// Generate 4-5 scenarios based on different customer problems, each aligned with business conversion strategy"
+    "// Generate 4-5 scenarios based on different customer problems, each with distinct target segments and ranked by business value"
   ],
   "connectionMessage": "2-3 sentences explaining how this business connects with customers through content, specific to their situation and customer psychology (max 300 chars)"
 }
 
 VALIDATION RULES:
+- PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of brand colors, customer language, SEO keywords, and business context
 - NO placeholder text like "Target Audience" or "Business Type"
 - NO generic terms like "customers" or "users" - be specific
-- NO business jargon - use customer language in customerLanguage fields
+- NO business jargon - use customer language in customerLanguage fields (prioritize keyword research findings)
 - ALL arrays must have specified number of items
 - ALL text must be under character limits
-- businessModel, websiteGoals, blogStrategy must be inferred from actual website content
+- businessModel, websiteGoals, blogStrategy must be inferred from actual website content and web search intelligence
+
+SCENARIO-SPECIFIC REQUIREMENTS:
 - scenarios must have 4-5 items, each addressing a different customer problem with business alignment
+- CRITICAL: EACH SCENARIO MUST HAVE COMPLETELY DIFFERENT TARGET DEMOGRAPHICS - NO IDENTICAL OR SIMILAR DESCRIPTIONS ALLOWED
+- targetSegment.demographics MUST be specific and unique for each scenario: include DIFFERENT age ranges, life stages, income levels, education, family status
+- targetSegment.psychographics MUST describe DIFFERENT emotional states, urgency levels, healthcare-seeking behaviors, and decision-making contexts
+- If targeting the same broad category (e.g., reproductive health), EACH scenario must target a DISTINCT SUBSET with different characteristics
+- Example: "Pregnant women 25-35, first-time mothers, high anxiety about medication" vs "New mothers 0-12 months postpartum, overwhelmed, seeking immediate relief"
+- businessValue.priority must rank scenarios by total opportunity (1=highest, 2=secondary, etc.)
+- businessValue fields must include realistic search volume estimates and conversion assessments
+- scenarios must be ordered by priority (highest business value first)
 - conversionPath must show clear connection from content to business goals
-- seoKeywords should be optimization-focused, different from customerLanguage
-- customerLanguage should be emotional phrases customers actually type
+- seoKeywords should be optimization-focused, incorporating keyword research data when available
+- customerLanguage should be emotional phrases customers actually type (use web search customer insights)
+- brandColors should reflect actual brand guidelines found through web search when available
 - contentIdeas must include businessAlignment showing conversion strategy
 - connectionMessage must be specific to this business, not generic template text
 - JSON must be valid and parseable`
           }
         ],
         temperature: 0.3,
-        max_tokens: 2000
+        max_tokens: 3000
       });
 
       console.log('OpenAI request completed successfully');
@@ -198,34 +304,56 @@ VALIDATION RULES:
         messages: [
           {
             role: 'system',
-            content: `You are a content strategist who creates blog topics that drive qualified traffic. You understand search intent, audience needs, and how to connect content topics to business goals. Your recommendations are factual, specific, and focused on attracting the right audience through valuable content.`
+            content: `You are a content strategist who creates blog topics that provide genuine insight and value, not generic content. You understand that readers are overwhelmed by surface-level advice and crave depth, empathy, and fresh perspectives. Your topics promise content that will make readers think differently about their problems.
+
+CRITICAL PRINCIPLES:
+1. INSIGHT-DRIVEN: Topics must promise unique analytical perspectives, not generic advice recycling
+2. EMOTIONALLY INTELLIGENT: Topics acknowledge the real emotional complexity of audience problems
+3. CONTRARIAN THINKING: When appropriate, challenge conventional wisdom with defensible alternative viewpoints
+4. DEPTH OVER BREADTH: Focus on deep understanding of specific problems rather than broad overviews`
           },
           {
             role: 'user',
-            content: `Generate 2 strategic blog post topics for this business that will attract their target audience:
+            content: `Generate 2 strategic blog post topics for this business that promise genuinely insightful content:
 
 Business Analysis:
 - Business Type: ${businessType}
 - Target Audience: ${targetAudience}
 - Content Focus: ${contentFocus}
 
-Create topics that would genuinely help this target audience and drive qualified traffic. For each topic, provide:
+TOPIC QUALITY REQUIREMENTS:
+
+1. INSIGHT PROMISE: Each topic must promise to provide a unique perspective, analytical framework, or counter-intuitive insight that goes beyond obvious advice.
+
+2. EMOTIONAL RESONANCE: Topics should acknowledge the specific emotional reality and practical barriers the target audience faces.
+
+3. DEPTH FOCUS: Avoid broad overview topics. Focus on specific, nuanced aspects of problems that deserve deep exploration.
+
+4. VALUE DIFFERENTIATION: Each topic should promise content that will be genuinely different from what readers can find elsewhere.
+
+For each topic, provide:
 {
   "id": number,
-  "trend": "string - content theme/topic area",
-  "title": "string - SEO-optimized blog post title that the target audience would search for",
-  "subheader": "string - compelling subtitle that explains the value to the reader",
-  "seoBenefit": "string - specific benefit like 'Can help drive [specific audience segment] to your website when they search for [specific search terms]' or 'Can help [audience type] find your [service type] when they look for [specific problem/solution]'",
-  "category": "string - content category that aligns with business expertise"
+  "trend": "string - content theme/topic area that suggests depth",
+  "title": "string - title that promises genuine insight or fresh perspective (not generic advice)",
+  "subheader": "string - subtitle that acknowledges emotional reality and promises analytical depth",
+  "seoBenefit": "string - specific value like 'Can help [audience] understand [complex aspect] of [their situation] when they search for [specific insight-focused terms]'",
+  "category": "string - content category emphasizing analytical depth"
 }
 
-Focus on:
-1. Topics the target audience actively searches for
-2. Content that showcases business expertise
-3. Realistic SEO opportunities (not overstated claims)
-4. Specific audience-keyword connections
+AVOID:
+- Generic "how-to" topics that rehash obvious advice
+- Broad overview topics that stay surface-level
+- Titles that promise simple solutions to complex problems
+- Topics that ignore the emotional/psychological aspects
 
-Return an array of 2 strategic topics that align with the business goals and audience needs.`
+CREATE:
+- Topics that promise to explain WHY things work the way they do
+- Titles that suggest contrarian or counter-intuitive insights
+- Content angles that acknowledge complexity rather than oversimplify
+- Topics that demonstrate deep understanding of audience psychology
+
+Return an array of 2 strategic topics that promise genuinely valuable, insight-driven content.`
           }
         ],
         temperature: 0.7,
@@ -263,7 +391,13 @@ Return an array of 2 strategic topics that align with the business goals and aud
         messages: [
           {
             role: 'system',
-            content: `You are an expert blog content writer who creates engaging, SEO-optimized blog posts tailored to specific audiences and brand voices.`
+            content: `You are an expert content strategist who creates genuinely insightful, empathetic blog posts that provide real value. You understand that readers' time is precious and every piece of content must earn their attention through depth, originality, and emotional connection.
+
+CRITICAL REQUIREMENTS:
+1. FACTUAL ACCURACY: Never fabricate statistics, studies, case studies, or personal stories. Work only with established knowledge and general principles.
+2. ANALYTICAL DEPTH: Provide unique insights through analysis and synthesis of existing knowledge, not generic advice.
+3. EMOTIONAL INTELLIGENCE: Demonstrate deep understanding of the reader's lived experience and emotional reality.
+4. ORIGINALITY: Avoid predictable templates. Create content that makes readers think "I never thought of it that way" or "This person really understands my situation."`
           },
           {
             role: 'user',
@@ -278,25 +412,45 @@ Content Focus: ${businessInfo.contentFocus}
 
 Additional Instructions: ${additionalInstructions}
 
+CONTENT QUALITY STANDARDS:
+
+1. EMPATHY & RELATABILITY:
+   - Begin by acknowledging the specific emotional reality of this problem
+   - Validate why this situation is genuinely difficult (don't minimize it)
+   - Address the gap between "knowing what to do" and "being able to do it"
+   - Show understanding of practical and emotional barriers
+
+2. ANALYTICAL DEPTH (NO FABRICATION):
+   - Provide unique analytical frameworks for understanding the problem
+   - Synthesize existing knowledge in novel ways
+   - Offer contrarian but defensible perspectives where appropriate
+   - Connect concepts from different areas to create fresh insights
+   - Focus on WHY things work, not just WHAT to do
+
+3. FACTUAL ACCURACY:
+   - NO fabricated statistics, research citations, or case studies
+   - NO invented personal stories or testimonials
+   - Stay within bounds of established general knowledge
+   - Present analysis and insights, not speculation as fact
+
+4. STRUCTURE & VALUE:
+   - Avoid predictable listicle formats
+   - Create content that justifies the reader's time investment
+   - Make every paragraph provide genuine insight or understanding
+   - End with perspective that shifts how readers think about the topic
+
 Please provide a JSON response with:
 {
-  "title": "string - SEO-optimized title",
-  "subtitle": "string - engaging subtitle",
-  "metaDescription": "string - SEO meta description (150-160 chars)",
-  "content": "string - full blog post content in markdown format",
+  "title": "string - SEO-optimized title that promises genuine insight",
+  "subtitle": "string - compelling subtitle that sets up unique perspective",
+  "metaDescription": "string - SEO meta description emphasizing insight/understanding (150-160 chars)",
+  "content": "string - full blog post content in markdown format meeting all quality standards",
   "tags": ["array", "of", "relevant", "tags"],
   "estimatedReadTime": "string - reading time estimate",
   "seoKeywords": ["array", "of", "SEO", "keywords"]
 }
 
-The content should be:
-- 1000-1500 words
-- Engaging and informative
-- SEO-optimized
-- Tailored to the target audience
-- Written in the specified brand voice
-- Include relevant headers and subheaders
-- Actionable and valuable`
+The content should be 1000-1500 words and demonstrate expertise through empathy, insight, and analytical depth - not generic advice recycling.`
           }
         ],
         temperature: 0.7,
@@ -401,6 +555,135 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       const fallbackUrl = `https://via.placeholder.com/400x250/6B8CAE/FFFFFF?text=${encodeURIComponent(topic.title.substring(0, 30))}`;
       console.log('Using fallback image:', fallbackUrl);
       return fallbackUrl;
+    }
+  }
+
+  /**
+   * Perform web search-enhanced business research
+   */
+  async performBusinessResearch(businessName, businessType, websiteUrl) {
+    console.log('🔍 performBusinessResearch() called with:', {
+      businessName,
+      businessType,
+      websiteUrl
+    });
+    
+    try {
+      console.log('Starting web search-enhanced business research...');
+      
+      // Try OpenAI Responses API with web search first
+      console.log('Attempting OpenAI Responses API call...');
+      try {
+        const response = await openai.responses.create({
+          model: "gpt-4o-mini",
+          tools: [{
+            type: "web_search",
+            filters: {
+              // Focus on business-relevant domains for better results
+              allowed_domains: [
+                businessName.toLowerCase().replace(/\s+/g, '') + '.com',
+                'linkedin.com',
+                'facebook.com',
+                'instagram.com',
+                'twitter.com',
+                'crunchbase.com',
+                'glassdoor.com',
+                'yelp.com',
+                'google.com',
+                'better-business-bureau.org',
+                'chamber-of-commerce.org'
+              ].filter(domain => domain !== '.com') // Remove empty business name domains
+            }
+          }],
+          input: `Research comprehensive business intelligence for: ${businessName} (${businessType}) - Website: ${websiteUrl}
+
+          RESEARCH OBJECTIVES:
+          1. BRAND IDENTITY & COLORS: Find actual brand colors and marketing materials
+          2. COMPETITIVE ANALYSIS: Research competitors and market positioning  
+          3. CUSTOMER INTELLIGENCE: Analyze reviews and customer language patterns
+          4. BUSINESS CREDIBILITY: Find news, achievements, and context
+
+          Provide specific findings for business strategy ranking and target audience analysis.`
+        });
+
+        console.log('OpenAI Responses API with web search successful');
+        return response.output_text || response.output;
+        
+      } catch (responsesError) {
+        console.error('🚨 OpenAI Responses API failed:');
+        console.error('Error name:', responsesError.name);
+        console.error('Error message:', responsesError.message);
+        console.error('Error code:', responsesError.code);
+        console.error('Full error:', responsesError);
+        return null;
+      }
+      
+    } catch (error) {
+      console.error('All business research methods failed:', error);
+      console.log('Continuing with basic analysis only');
+      return null;
+    }
+  }
+
+  /**
+   * Perform keyword and SEO research using web search
+   */
+  async performKeywordResearch(businessType, targetAudience, location = null) {
+    console.log('📊 performKeywordResearch() called with:', {
+      businessType,
+      targetAudience,
+      location
+    });
+    
+    try {
+      console.log('Starting web search-enhanced keyword research...');
+      
+      const locationFilter = location ? `, location: ${location}` : '';
+      
+      // Try web search first
+      try {
+        const response = await openai.responses.create({
+          model: "gpt-4o-mini",
+          tools: [{
+            type: "web_search",
+            filters: {
+              // Focus on SEO and marketing research domains
+              allowed_domains: [
+                'semrush.com',
+                'ahrefs.com',
+                'moz.com',
+                'google.com',
+                'searchenginejournal.com',
+                'reddit.com',
+                'quora.com',
+                'answerthepublic.com',
+                'ubersuggest.com'
+              ]
+            }
+          }],
+          input: `Research keyword opportunities for: ${businessType} targeting ${targetAudience}${locationFilter}
+
+          PRIORITY RESEARCH:
+          1. Search volume estimates for customer problems
+          2. Competition analysis and content gaps  
+          3. Customer problem prioritization by business value
+          4. Conversion potential analysis
+
+          Provide business value ranking for different customer problems with search volume and competition data.`
+        });
+
+        console.log('Web search keyword research successful');
+        return response.output_text || response.output;
+        
+      } catch (responsesError) {
+        console.log('Web search keyword research not available:', responsesError.message);
+        return null;
+      }
+      
+    } catch (error) {
+      console.error('All keyword research methods failed:', error);
+      console.log('Continuing without keyword enhancement');
+      return null;
     }
   }
 }
