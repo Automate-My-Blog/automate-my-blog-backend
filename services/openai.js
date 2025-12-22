@@ -406,10 +406,22 @@ Return an array of 2 strategic topics that promise genuinely valuable, insight-d
         model: model,
         payloadSizeBytes: payloadSize,
         payloadSizeKB: Math.round(payloadSize / 1024 * 100) / 100,
+        estimatedTokens: Math.round(payloadSize / 4), // Rough token estimate (1 token ≈ 4 chars)
         topicTitle: topic.title,
+        topicSubheader: topic.subheader,
+        businessType: businessInfo.businessType,
         hasEnhancedData: !!(businessInfo.scenarios && businessInfo.scenarios.length > 0),
         scenarioCount: businessInfo.scenarios?.length || 0,
+        additionalInstructionsLength: additionalInstructions?.length || 0,
         timestamp: new Date().toISOString()
+      });
+      
+      // Log key components of the request
+      console.log('🔍 Request Components:', {
+        topicKeys: Object.keys(topic),
+        businessInfoKeys: Object.keys(businessInfo),
+        hasScenarios: !!(businessInfo.scenarios && businessInfo.scenarios.length > 0),
+        scenariosLength: businessInfo.scenarios ? JSON.stringify(businessInfo.scenarios).length : 0
       });
 
       const completion = await openai.chat.completions.create({
@@ -506,16 +518,40 @@ The content should be 1000-1500 words and demonstrate expertise through empathy,
       const duration = endTime - startTime;
       
       console.error('❌ BLOG GENERATION FAILED');
-      console.error('🔍 Error Analysis:', {
+      console.error('🔍 Comprehensive Error Analysis:', {
+        // Basic error info
         errorType: error.constructor.name,
+        errorName: error.name,
         errorMessage: error.message,
         errorCode: error.code,
         errorStatus: error.status,
-        errorStack: error.stack,
+        errorType: error.type,
+        
+        // OpenAI specific error details
+        openaiError: error.error,
+        openaiErrorType: error.error?.type,
+        openaiErrorCode: error.error?.code,
+        openaiErrorParam: error.error?.param,
+        
+        // Full error object for debugging
+        fullError: JSON.stringify(error, Object.getOwnPropertyNames(error)),
+        
+        // Request context
         durationMs: duration,
         durationSeconds: Math.round(duration / 1000 * 100) / 100,
         model: model,
+        requestSize: JSON.stringify({ topic, businessInfo, additionalInstructions }).length,
+        estimatedTokens: Math.round(JSON.stringify({ topic, businessInfo, additionalInstructions }).length / 4),
         timestamp: new Date().toISOString()
+      });
+      
+      // Log the actual request that failed (truncated for readability)
+      console.error('📤 Failed Request Details:', {
+        topicTitle: topic?.title,
+        businessType: businessInfo?.businessType,
+        targetAudience: businessInfo?.targetAudience,
+        scenarioCount: businessInfo?.scenarios?.length || 0,
+        additionalInstructionsLength: additionalInstructions?.length || 0
       });
       
       // Check for specific error types to provide better error messages
