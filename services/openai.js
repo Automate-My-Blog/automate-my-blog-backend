@@ -41,12 +41,9 @@ export class OpenAIService {
       cleanedResponse = cleanedResponse.trim();
       
       // Fix control characters in JSON strings before parsing
-      // Replace unescaped newlines, carriage returns, and tabs with escaped versions
+      // Replace unescaped newlines with escaped versions
       cleanedResponse = cleanedResponse
-        .replace(/(?<!\\)(\r\n|\r|\n)/g, '\\n')  // Replace unescaped newlines
-        .replace(/(?<!\\)\t/g, '\\t')           // Replace unescaped tabs
-        .replace(/(?<!\\)\f/g, '\\f')           // Replace unescaped form feeds
-        .replace(/(?<!\\)\b/g, '\\b');          // Replace unescaped backspaces
+        .replace(/(?<!\\)(\r\n|\r|\n)/g, '\\n');  // Replace unescaped newlines only
       
       console.log('Cleaned response:', cleanedResponse);
       
