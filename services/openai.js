@@ -389,6 +389,7 @@ Return an array of 2 strategic topics that promise genuinely valuable, insight-d
    */
   async generateBlogPost(topic, businessInfo, additionalInstructions = '') {
     const startTime = Date.now();
+    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
     
     try {
       // Log request details for analysis
@@ -399,7 +400,6 @@ Return an array of 2 strategic topics that promise genuinely valuable, insight-d
       };
       
       const payloadSize = JSON.stringify(requestPayload).length;
-      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
       
       console.log('🚀 BLOG GENERATION REQUEST START');
       console.log('📊 Request Metrics:', {
