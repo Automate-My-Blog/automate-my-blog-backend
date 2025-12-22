@@ -62,7 +62,7 @@ export class OpenAIService {
   /**
    * Analyze website content and extract business information
    */
-  async analyzeWebsite(websiteContent, url, extractedBrandColors = null) {
+  async analyzeWebsite(websiteContent, url) {
     try {
       console.log('OpenAI website analysis starting...');
       console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
@@ -159,8 +159,6 @@ IMPORTANT: Your analysis will drive content generation that must be genuinely in
 Website: ${url}
 Content: ${websiteContent}${webSearchData}${keywordData}
 
-EXTRACTED BRAND COLORS: ${extractedBrandColors ? JSON.stringify(extractedBrandColors, null, 2) : 'None detected'}
-
 CRITICAL REQUIREMENTS:
 1. Return EXACTLY the JSON structure specified - no deviations
 2. ALL fields are REQUIRED - no empty strings or null values
@@ -206,9 +204,9 @@ JSON RESPONSE (follow EXACTLY):
   "contentFocus": "Content themes addressing customer problems (max 100 chars)",
   "brandVoice": "Communication tone for this customer situation (max 50 chars)",
   "brandColors": {
-    "primary": "Hex code for primary brand color - MUST use extracted brand colors if available, fallback to #6B8CAE only if none detected",
-    "secondary": "Hex code for secondary/background color - MUST use extracted brand colors if available, fallback to #F4E5D3 only if none detected", 
-    "accent": "Hex code for accent/highlight color - MUST use extracted brand colors if available, fallback to #8FBC8F only if none detected"
+    "primary": "#6B8CAE",
+    "secondary": "#F4E5D3", 
+    "accent": "#8FBC8F"
   },
   "description": "How business solves customer problems (max 150 chars)",
   "businessModel": "How this business makes money based on website analysis (max 100 chars)",
@@ -246,7 +244,6 @@ JSON RESPONSE (follow EXACTLY):
 }
 
 VALIDATION RULES:
-- PRIORITIZE EXTRACTED BRAND COLORS: If brand colors were extracted from the website CSS/styling, use them exactly as provided for primary/secondary/accent
 - PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of customer language, SEO keywords, and business context
 - NO placeholder text like "Target Audience" or "Business Type"
 - NO generic terms like "customers" or "users" - be specific
