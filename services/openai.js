@@ -40,9 +40,6 @@ export class OpenAIService {
       // Trim whitespace
       cleanedResponse = cleanedResponse.trim();
       
-      // Fix control characters that break JSON parsing
-      cleanedResponse = cleanedResponse.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
-      
       console.log('Cleaned response:', cleanedResponse);
       
       // Parse JSON
@@ -500,6 +497,13 @@ Please provide a JSON response with:
   "estimatedReadTime": "string - reading time estimate",
   "seoKeywords": ["array", "of", "SEO", "keywords"]
 }
+
+CRITICAL JSON FORMATTING REQUIREMENTS:
+- Return valid JSON that can be parsed by standard JSON.parse()
+- In the "content" field, escape all newlines as \\n (double backslash followed by n)
+- Escape all quotes within content as \\" 
+- Do not include literal line breaks within any JSON string values
+- Ensure all string values are properly quoted and escaped
 
 The content should be 1000-1500 words and demonstrate expertise through empathy, insight, and analytical depth - not generic advice recycling.`
           }
