@@ -708,7 +708,7 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       console.log('Attempting OpenAI Responses API call...');
       try {
         const response = await openai.responses.create({
-          model: "gpt-4o-mini",
+          model: "gpt-4o",
           tools: [{
             type: "web_search",
             filters: {
@@ -776,7 +776,7 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       // Try web search first
       try {
         const response = await openai.responses.create({
-          model: "gpt-4o-mini",
+          model: "gpt-4o",
           tools: [{
             type: "web_search",
             filters: {
