@@ -40,7 +40,8 @@ export class OpenAIService {
       // Trim whitespace
       cleanedResponse = cleanedResponse.trim();
       
-      // OpenAI responses are already valid JSON, no need for control character fixes
+      // Fix control characters that break JSON parsing
+      cleanedResponse = cleanedResponse.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
       
       console.log('Cleaned response:', cleanedResponse);
       
