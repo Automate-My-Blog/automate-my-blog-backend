@@ -512,6 +512,13 @@ The content should be 1000-1500 words and demonstrate expertise through empathy,
       });
 
       const response = completion.choices[0].message.content;
+      
+      // Log the raw response for debugging
+      console.log('✅ OpenAI API call successful, parsing response...');
+      console.log('📄 Raw Response Length:', response?.length || 0);
+      console.log('📄 Raw Response Preview (first 500 chars):', response?.substring(0, 500));
+      console.log('📄 Raw Response End (last 200 chars):', response?.substring(response.length - 200));
+      
       return this.parseOpenAIResponse(response);
     } catch (error) {
       const endTime = Date.now();
