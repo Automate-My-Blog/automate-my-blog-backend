@@ -284,7 +284,20 @@ SCENARIO-SPECIFIC REQUIREMENTS:
       const response = completion.choices[0].message.content;
       console.log('Response content length:', response?.length || 0);
       
-      return this.parseOpenAIResponse(response);
+      const analysisResult = this.parseOpenAIResponse(response);
+      
+      // Add web search enhancement status to the response
+      const webSearchStatus = {
+        businessResearchSuccess: webSearchResults.status === 'fulfilled' && !!webSearchResults.value,
+        keywordResearchSuccess: keywordResults.status === 'fulfilled' && !!keywordResults.value,
+        enhancementComplete: (webSearchResults.status === 'fulfilled' && !!webSearchResults.value) || 
+                           (keywordResults.status === 'fulfilled' && !!keywordResults.value)
+      };
+      
+      return {
+        ...analysisResult,
+        webSearchStatus
+      };
     } catch (error) {
       console.error('OpenAI website analysis error:', error);
       console.error('Error details:', {
