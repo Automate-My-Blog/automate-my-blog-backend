@@ -11,6 +11,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Configure Express to trust Vercel proxy for accurate IP detection
+app.set('trust proxy', 1);
+
 // Rate limiting with Vercel-compatible configuration
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
