@@ -78,6 +78,7 @@ app.get('/api', (req, res) => {
       'POST /api/analyze-website': 'Analyze website content and extract business information',
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
       'POST /api/generate-content': 'Generate complete blog post content',
+      'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',
       'POST /api/export': 'Export blog content in different formats (markdown, html, json)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
@@ -236,6 +237,56 @@ app.post('/api/generate-content', async (req, res) => {
     console.error('Content generation error:', error);
     res.status(500).json({
       error: 'Failed to generate content',
+      message: error.message
+    });
+  }
+});
+
+// Analyze changes endpoint
+app.post('/api/analyze-changes', async (req, res) => {
+  try {
+    const { previousContent, newContent, customFeedback } = req.body;
+
+    if (!previousContent || !newContent) {
+      return res.status(400).json({
+        error: 'Missing required parameters',
+        message: 'previousContent and newContent are required'
+      });
+    }
+
+    if (previousContent === newContent) {
+      return res.json({
+        success: true,
+        analysis: {
+          summary: 'No changes detected in the content.',
+          keyChanges: [],
+          feedbackApplied: customFeedback ? 'No changes needed based on feedback.' : ''
+        },
+        analyzedAt: new Date().toISOString()
+      });
+    }
+
+    console.log('Analyzing content changes...');
+    console.log('Previous content length:', previousContent.length);
+    console.log('New content length:', newContent.length);
+    console.log('Custom feedback provided:', !!customFeedback);
+
+    const analysis = await openaiService.analyzeContentChanges(
+      previousContent,
+      newContent,
+      customFeedback || ''
+    );
+
+    res.json({
+      success: true,
+      analysis,
+      analyzedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Change analysis error:', error);
+    res.status(500).json({
+      error: 'Failed to analyze changes',
       message: error.message
     });
   }

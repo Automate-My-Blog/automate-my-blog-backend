@@ -759,6 +759,74 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
   }
 
   /**
+   * Analyze content changes and generate a summary of what changed
+   */
+  async analyzeContentChanges(previousContent, newContent, customFeedback = '') {
+    try {
+      console.log('Starting AI content change analysis...');
+      
+      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+      
+      const completion = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert content analyst who identifies conceptual changes between two versions of content. You focus on meaningful improvements and changes that matter to readers, not superficial text differences.
+
+ANALYSIS APPROACH:
+- Focus on conceptual and structural changes, not word-for-word differences
+- Identify improvements in tone, clarity, depth, examples, structure, etc.
+- Explain changes in terms that content creators and readers would care about
+- Be specific and actionable in your descriptions
+
+CRITICAL REQUIREMENTS:
+- Return valid JSON that can be parsed
+- Provide 3-5 key changes maximum
+- Each change should be a clear, specific insight
+- Avoid generic statements like "content was improved"
+- Focus on what actually matters to the reader experience`
+          },
+          {
+            role: 'user',
+            content: `Analyze the changes between these two versions of content and explain what conceptually changed:
+
+ORIGINAL CONTENT:
+${previousContent}
+
+NEW CONTENT:
+${newContent}
+
+${customFeedback ? `USER FEEDBACK APPLIED: ${customFeedback}` : ''}
+
+Provide a JSON response with this exact structure:
+{
+  "summary": "Brief 1-2 sentence summary of the overall changes",
+  "keyChanges": [
+    {
+      "change": "Specific description of what changed (e.g., 'Made the writing more conversational and approachable')",
+      "impact": "Why this change matters to readers (e.g., 'Easier to understand for beginners')"
+    }
+  ],
+  "feedbackApplied": "How the user's feedback was implemented (if any feedback was provided)"
+}`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 800
+      });
+
+      const response = completion.choices[0].message.content;
+      console.log('AI change analysis completed successfully');
+      
+      return this.parseOpenAIResponse(response);
+    } catch (error) {
+      console.error('OpenAI content change analysis error:', error);
+      throw new Error(`Failed to analyze content changes: ${error.message}`);
+    }
+  }
+
+  /**
    * Perform keyword and SEO research using web search
    */
   async performKeywordResearch(businessType, targetAudience, location = null) {
