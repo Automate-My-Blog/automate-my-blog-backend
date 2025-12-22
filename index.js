@@ -18,10 +18,9 @@ const limiter = rateLimit({
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
-  // Fix for Vercel serverless environment
-  keyGenerator: (req) => {
-    return req.ip || req.connection.remoteAddress || 'unknown';
-  },
+  // Use default key generator which properly handles IPv6
+  standardHeaders: true,
+  legacyHeaders: false,
   skip: (req) => {
     // Skip rate limiting for health checks
     return req.path === '/health';
