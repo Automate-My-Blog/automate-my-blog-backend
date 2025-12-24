@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import openaiService from './services/openai.js';
 import webScraperService from './services/webscraper.js';
+import authService from './services/auth.js';
 
 // Load environment variables
 dotenv.config();
@@ -75,6 +76,11 @@ app.get('/api', (req, res) => {
     version: '1.0.0',
     endpoints: {
       'GET /health': 'Health check endpoint',
+      'POST /api/v1/auth/register': 'Register a new user account',
+      'POST /api/v1/auth/login': 'Login with email and password',
+      'GET /api/v1/auth/me': 'Get current user information (requires auth)',
+      'POST /api/v1/auth/refresh': 'Refresh access token',
+      'POST /api/v1/auth/logout': 'Logout user',
       'POST /api/analyze-website': 'Analyze website content and extract business information',
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
       'POST /api/generate-content': 'Generate complete blog post content',
@@ -82,6 +88,153 @@ app.get('/api', (req, res) => {
       'POST /api/export': 'Export blog content in different formats (markdown, html, json)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
+  });
+});
+
+// Authentication Routes
+// Register endpoint
+app.post('/api/v1/auth/register', async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, organizationName } = req.body;
+
+    // Validate required fields
+    if (!email || !password || !firstName || !lastName || !organizationName) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'email, password, firstName, lastName, and organizationName are required'
+      });
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        error: 'Invalid email format',
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    // Password validation
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: 'Invalid password',
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+
+    const result = await authService.register({
+      email: email.toLowerCase().trim(),
+      password,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      organizationName: organizationName.trim()
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'User registered successfully',
+      user: result.user,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    res.status(400).json({
+      error: 'Registration failed',
+      message: error.message
+    });
+  }
+});
+
+// Login endpoint
+app.post('/api/v1/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({
+        error: 'Missing credentials',
+        message: 'Email and password are required'
+      });
+    }
+
+    const result = await authService.login(email.toLowerCase().trim(), password);
+
+    res.json({
+      success: true,
+      message: 'Login successful',
+      user: result.user,
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      expiresIn: result.expiresIn
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(401).json({
+      error: 'Login failed',
+      message: error.message
+    });
+  }
+});
+
+// Get current user endpoint
+app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const user = authService.getUserById(req.user.userId);
+    
+    res.json({
+      success: true,
+      user
+    });
+
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(404).json({
+      error: 'User not found',
+      message: error.message
+    });
+  }
+});
+
+// Refresh token endpoint
+app.post('/api/v1/auth/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'Missing refresh token',
+        message: 'Refresh token is required'
+      });
+    }
+
+    const tokens = await authService.refreshTokens(refreshToken);
+
+    res.json({
+      success: true,
+      message: 'Tokens refreshed successfully',
+      ...tokens
+    });
+
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({
+      error: 'Token refresh failed',
+      message: error.message
+    });
+  }
+});
+
+// Logout endpoint
+app.post('/api/v1/auth/logout', (req, res) => {
+  // For JWT-based auth, logout is typically handled client-side
+  // by removing the tokens from storage
+  res.json({
+    success: true,
+    message: 'Logout successful'
   });
 });
 
