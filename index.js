@@ -4,7 +4,9 @@ import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import openaiService from './services/openai.js';
 import webScraperService from './services/webscraper.js';
-import authService from './services/auth.js';
+import DatabaseAuthService from './services/auth-database.js';
+const authService = new DatabaseAuthService();
+import contentService from './services/content.js';
 
 // Load environment variables
 dotenv.config();
@@ -85,7 +87,12 @@ app.get('/api', (req, res) => {
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
       'POST /api/generate-content': 'Generate complete blog post content',
       'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',
-      'POST /api/export': 'Export blog content in different formats (markdown, html, json)'
+      'POST /api/export': 'Export blog content in different formats (markdown, html, json)',
+      'GET /api/v1/blog-posts': 'Get user blog posts (requires auth)',
+      'POST /api/v1/blog-posts': 'Create new blog post (requires auth)',
+      'GET /api/v1/blog-posts/:id': 'Get specific blog post (requires auth)',
+      'PUT /api/v1/blog-posts/:id': 'Update blog post (requires auth)',
+      'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -349,10 +356,12 @@ app.post('/api/trending-topics', async (req, res) => {
   }
 });
 
-// Generate content endpoint
-app.post('/api/generate-content', async (req, res) => {
+// Generate content endpoint (with optional auth for saving)
+app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
+  const startTime = Date.now();
+  
   try {
-    const { topic, businessInfo, additionalInstructions } = req.body;
+    const { topic, businessInfo, additionalInstructions, saveToAccount } = req.body;
 
     if (!topic || !businessInfo) {
       return res.status(400).json({
@@ -368,13 +377,57 @@ app.post('/api/generate-content', async (req, res) => {
       });
     }
 
+    // Generate the blog post content
     const blogPost = await openaiService.generateBlogPost(
       topic,
       businessInfo,
       additionalInstructions || ''
     );
 
-    res.json({
+    const generationTime = Date.now() - startTime;
+    let savedPost = null;
+
+    // Save to user account if authenticated and requested
+    if (req.user && (saveToAccount === true || saveToAccount === 'true')) {
+      try {
+        savedPost = await contentService.saveBlogPost(req.user.userId, {
+          title: blogPost.title,
+          content: blogPost.content,
+          topic,
+          businessInfo,
+          generationMetadata: {
+            tokensUsed: blogPost.tokensUsed || 0,
+            generationTime,
+            aiModel: 'gpt-4'
+          },
+          status: 'draft'
+        });
+        
+        console.log(`✅ Blog post saved for user ${req.user.userId}: ${savedPost.id}`);
+      } catch (saveError) {
+        console.warn('Failed to save blog post:', saveError.message);
+        // Don't fail the whole request if saving fails
+      }
+    }
+
+    // Record generation history for authenticated users
+    if (req.user) {
+      await contentService.recordGenerationHistory(req.user.userId, {
+        type: 'blog_post',
+        inputData: { topic, businessInfo, additionalInstructions },
+        outputData: { 
+          title: blogPost.title, 
+          wordCount: blogPost.content?.split(' ').length,
+          savedPostId: savedPost?.id
+        },
+        tokensUsed: blogPost.tokensUsed || 0,
+        durationMs: generationTime,
+        successStatus: true,
+        aiModel: 'gpt-4'
+      });
+    }
+
+    const response = {
       success: true,
       topic,
       businessInfo: {
@@ -383,11 +436,34 @@ app.post('/api/generate-content', async (req, res) => {
         brandVoice: businessInfo.brandVoice
       },
       blogPost,
-      generatedAt: new Date().toISOString()
-    });
+      generatedAt: new Date().toISOString(),
+      generationTimeMs: generationTime
+    };
+
+    // Include saved post info if applicable
+    if (savedPost) {
+      response.savedPost = savedPost;
+      response.message = 'Blog post generated and saved to your account';
+    }
+
+    res.json(response);
 
   } catch (error) {
     console.error('Content generation error:', error);
+    
+    // Record failed generation for authenticated users
+    if (req.user) {
+      await contentService.recordGenerationHistory(req.user.userId, {
+        type: 'blog_post',
+        inputData: { topic: req.body.topic, businessInfo: req.body.businessInfo },
+        outputData: { error: error.message },
+        tokensUsed: 0,
+        durationMs: Date.now() - startTime,
+        successStatus: false,
+        aiModel: 'gpt-4'
+      });
+    }
+
     res.status(500).json({
       error: 'Failed to generate content',
       message: error.message
@@ -442,6 +518,187 @@ app.post('/api/analyze-changes', async (req, res) => {
       error: 'Failed to analyze changes',
       message: error.message
     });
+  }
+});
+
+// Blog Posts CRUD Endpoints
+
+// Get user's blog posts
+app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const {
+      limit = 25,
+      offset = 0,
+      status = 'all',
+      sortBy = 'created_at',
+      order = 'DESC',
+      search = ''
+    } = req.query;
+
+    const options = {
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      status,
+      sortBy,
+      order,
+      search
+    };
+
+    const result = await contentService.getUserBlogPosts(req.user.userId, options);
+
+    res.json({
+      success: true,
+      data: {
+        posts: result.posts,
+        pagination: {
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+          hasMore: result.hasMore
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get blog posts error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve blog posts',
+      message: error.message
+    });
+  }
+});
+
+// Create new blog post
+app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { title, content, topic, businessInfo, status = 'draft' } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'title and content are required'
+      });
+    }
+
+    const savedPost = await contentService.saveBlogPost(req.user.userId, {
+      title,
+      content,
+      topic,
+      businessInfo,
+      status
+    });
+
+    res.status(201).json({
+      success: true,
+      post: savedPost,
+      message: 'Blog post created successfully'
+    });
+
+  } catch (error) {
+    console.error('Create blog post error:', error);
+    res.status(500).json({
+      error: 'Failed to create blog post',
+      message: error.message
+    });
+  }
+});
+
+// Get specific blog post
+app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const post = await contentService.getBlogPost(id, req.user.userId);
+
+    res.json({
+      success: true,
+      post
+    });
+
+  } catch (error) {
+    console.error('Get blog post error:', error);
+    
+    if (error.message === 'Blog post not found') {
+      res.status(404).json({
+        error: 'Blog post not found',
+        message: 'The requested blog post does not exist or you do not have access to it'
+      });
+    } else {
+      res.status(500).json({
+        error: 'Failed to retrieve blog post',
+        message: error.message
+      });
+    }
+  }
+});
+
+// Update blog post
+app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, content, status } = req.body;
+
+    const updates = {};
+    if (title !== undefined) updates.title = title;
+    if (content !== undefined) updates.content = content;
+    if (status !== undefined) updates.status = status;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        error: 'No updates provided',
+        message: 'At least one field (title, content, status) must be provided'
+      });
+    }
+
+    const updatedPost = await contentService.updateBlogPost(id, req.user.userId, updates);
+
+    res.json({
+      success: true,
+      post: updatedPost,
+      message: 'Blog post updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update blog post error:', error);
+    
+    if (error.message === 'Blog post not found') {
+      res.status(404).json({
+        error: 'Blog post not found',
+        message: 'The requested blog post does not exist or you do not have access to it'
+      });
+    } else {
+      res.status(500).json({
+        error: 'Failed to update blog post',
+        message: error.message
+      });
+    }
+  }
+});
+
+// Delete blog post
+app.delete('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { id } = req.params;
+    await contentService.deleteBlogPost(id, req.user.userId);
+
+    res.json({
+      success: true,
+      message: 'Blog post deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete blog post error:', error);
+    
+    if (error.message === 'Blog post not found') {
+      res.status(404).json({
+        error: 'Blog post not found',
+        message: 'The requested blog post does not exist or you do not have access to it'
+      });
+    } else {
+      res.status(500).json({
+        error: 'Failed to delete blog post',
+        message: error.message
+      });
+    }
   }
 });
 
