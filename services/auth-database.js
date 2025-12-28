@@ -315,8 +315,21 @@ class DatabaseAuthService {
       session_id: sessionId
     });
 
-    // Generate tokens
-    const tokens = this.generateTokens(user);
+    // Generate tokens with all user data including permissions
+    const userForToken = {
+      id: user.id,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name,
+      organization_name: user.organization_name,
+      plan_tier: user.current_plan || user.plan_tier,
+      role: user.role_name || user.role,
+      permissions: user.permissions || [],
+      hierarchy_level: user.hierarchy_level || 10
+    };
+    
+    
+    const tokens = this.generateTokens(userForToken);
 
     return {
       user: {
@@ -445,7 +458,10 @@ class DatabaseAuthService {
       firstName: user.first_name || user.firstName,
       lastName: user.last_name || user.lastName,
       organizationName: user.organization_name || user.organizationName,
-      planTier: user.current_plan || user.plan_tier || user.planTier || 'free'
+      planTier: user.current_plan || user.plan_tier || user.planTier || 'free',
+      role: user.role_name || user.role || 'user',
+      permissions: user.permissions || [],
+      hierarchyLevel: user.hierarchy_level || 10
     };
 
     const accessToken = jwt.sign(payload, JWT_SECRET, {
@@ -574,40 +590,128 @@ class DatabaseAuthService {
   /**
    * Get all users (admin only)
    */
-  async getAllUsers() {
+  async getAllUsers(options = {}) {
+    const {
+      limit = 100,
+      offset = 0,
+      search = '',
+      role = 'all',
+      status = 'active',
+      sortBy = 'created_at',
+      order = 'DESC'
+    } = options;
     try {
       if (this.databaseAvailable && this.useDatabaseStorage) {
-        const usersResult = await db.query(`
-          SELECT u.id, u.email, u.first_name, u.last_name, u.organization_name,
-                 u.referral_code, u.plan_tier, u.status, u.created_at, u.last_login_at,
-                 ba.current_plan, ba.billing_status
-          FROM users u
-          LEFT JOIN billing_accounts ba ON u.id = ba.user_id
-          ORDER BY u.created_at DESC
-        `);
+        let whereConditions = [];
+        let queryParams = [];
+        let paramIndex = 1;
 
-        return usersResult.rows.map(user => ({
+        // Apply search filter
+        if (search && search.length > 0) {
+          whereConditions.push(`(
+            LOWER(u.email) LIKE $${paramIndex} OR 
+            LOWER(u.first_name) LIKE $${paramIndex} OR 
+            LOWER(u.last_name) LIKE $${paramIndex}
+          )`);
+          queryParams.push(`%${search.toLowerCase()}%`);
+          paramIndex++;
+        }
+
+        // Apply role filter
+        if (role && role !== 'all') {
+          whereConditions.push(`u.role = $${paramIndex}`);
+          queryParams.push(role);
+          paramIndex++;
+        }
+
+        // Apply status filter
+        if (status && status !== 'all') {
+          whereConditions.push(`u.status = $${paramIndex}`);
+          queryParams.push(status);
+          paramIndex++;
+        }
+
+        const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+        
+        // Validate sortBy to prevent SQL injection
+        const allowedSortFields = ['created_at', 'updated_at', 'email', 'first_name', 'last_name', 'last_login_at', 'role'];
+        const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'created_at';
+        const safeOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+        const usersResult = await db.query(`
+          SELECT u.id, u.email, u.first_name, u.last_name, u.role,
+                 u.referral_code, u.plan_tier, u.status, u.created_at, u.last_login_at,
+                 o.id as organization_id, o.name as organization_name,
+                 ba.current_plan, ba.billing_status, ba.usage_limit, ba.current_usage,
+                 ur.permissions, ur.hierarchy_level
+          FROM users u
+          LEFT JOIN organization_members om ON u.id = om.user_id
+          LEFT JOIN organizations o ON om.organization_id = o.id
+          LEFT JOIN billing_accounts ba ON u.id = ba.user_id
+          LEFT JOIN user_roles ur ON u.role = ur.name
+          ${whereClause}
+          ORDER BY u.${safeSortBy} ${safeOrder}
+          LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+        `, [...queryParams, limit, offset]);
+
+        // Get total count for pagination
+        const countResult = await db.query(`
+          SELECT COUNT(*) as total
+          FROM users u
+          ${whereClause}
+        `, queryParams);
+
+        const total = parseInt(countResult.rows[0]?.total || 0);
+        const users = usersResult.rows.map(user => ({
           id: user.id,
           email: user.email,
           firstName: user.first_name,
           lastName: user.last_name,
           organizationName: user.organization_name,
+          organizationId: user.organization_id,
           referralCode: user.referral_code,
           planTier: user.current_plan || user.plan_tier,
           status: user.status,
+          role: user.role,
+          permissions: user.permissions || [],
+          hierarchyLevel: user.hierarchy_level || 10,
           billingStatus: user.billing_status,
+          usageLimit: user.usage_limit,
+          currentUsage: user.current_usage,
           createdAt: user.created_at,
           lastLoginAt: user.last_login_at
         }));
+
+        return {
+          users,
+          total,
+          limit,
+          offset,
+          hasMore: offset + limit < total
+        };
       } else {
-        return Array.from(fallbackUsers.values()).map(user => {
+        const allUsers = Array.from(fallbackUsers.values()).map(user => {
           const { hashedPassword: _, ...userWithoutPassword } = user;
           return userWithoutPassword;
         });
+
+        return {
+          users: allUsers.slice(offset, offset + limit),
+          total: allUsers.length,
+          limit,
+          offset,
+          hasMore: offset + limit < allUsers.length
+        };
       }
     } catch (error) {
       console.error('Failed to get all users:', error.message);
-      return [];
+      return {
+        users: [],
+        total: 0,
+        limit,
+        offset,
+        hasMore: false
+      };
     }
   }
 

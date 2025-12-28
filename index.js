@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import openaiService from './services/openai.js';
 import webScraperService from './services/webscraper.js';
 import DatabaseAuthService from './services/auth-database.js';
@@ -801,6 +802,221 @@ app.post('/api/test-openai', async (req, res) => {
     console.error('OpenAI test failed:', error);
     res.status(500).json({
       error: 'OpenAI test failed',
+      message: error.message
+    });
+  }
+});
+
+// Impersonation middleware to check super admin permissions
+const requireSuperAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Authentication required',
+      message: 'You must be logged in to access this endpoint'
+    });
+  }
+
+  // Check if user has impersonation permission
+  if (!req.user.permissions || !req.user.permissions.includes('impersonate_users')) {
+    return res.status(403).json({
+      error: 'Access forbidden',
+      message: 'Super admin privileges required for user impersonation'
+    });
+  }
+
+  next();
+};
+
+// Get all users for admin management
+app.get('/api/v1/admin/users', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { 
+      limit = 50, 
+      offset = 0, 
+      search = '', 
+      role = 'all',
+      status = 'active',
+      sortBy = 'created_at',
+      order = 'DESC'
+    } = req.query;
+
+    // For super admins, get all platform users
+    // For org admins, get only their organization users (future feature)
+    const result = await authService.getAllUsers({
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      search,
+      role,
+      status,
+      sortBy,
+      order
+    });
+
+    res.json({
+      success: true,
+      data: {
+        users: result.users || result,
+        pagination: {
+          total: result.total || result.length,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          hasMore: result.hasMore || false
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get admin users error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve users',
+      message: error.message
+    });
+  }
+});
+
+// Start impersonation session
+app.post('/api/v1/admin/impersonate/:userId', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const adminUserId = req.user.userId;
+
+    // Validate target user exists
+    const targetUser = await authService.getUserById(userId);
+    if (!targetUser) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: 'The specified user does not exist'
+      });
+    }
+
+    // Prevent self-impersonation
+    if (userId === adminUserId) {
+      return res.status(400).json({
+        error: 'Invalid operation',
+        message: 'You cannot impersonate yourself'
+      });
+    }
+
+    // Create impersonation session token
+    const impersonationPayload = {
+      userId: targetUser.id,
+      email: targetUser.email,
+      firstName: targetUser.firstName,
+      lastName: targetUser.lastName,
+      organizationName: targetUser.organizationName,
+      planTier: targetUser.planTier,
+      role: targetUser.role,
+      permissions: targetUser.permissions,
+      hierarchyLevel: targetUser.hierarchyLevel,
+      isImpersonating: true,
+      impersonatedBy: adminUserId,
+      originalAdmin: {
+        userId: req.user.userId,
+        email: req.user.email,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName
+      }
+    };
+
+    const impersonationToken = jwt.sign(impersonationPayload, process.env.JWT_SECRET || 'fallback-secret-for-development', {
+      expiresIn: '2h', // Shorter expiry for security
+      issuer: 'autoblog-api'
+    });
+
+    // Log the impersonation for audit purposes
+    await authService.logUserActivity(adminUserId, 'user_impersonation_started', {
+      target_user_id: userId,
+      target_user_email: targetUser.email,
+      impersonation_duration: '2h'
+    });
+
+    res.json({
+      success: true,
+      message: `Now impersonating ${targetUser.firstName} ${targetUser.lastName}`,
+      impersonationToken,
+      targetUser: {
+        id: targetUser.id,
+        email: targetUser.email,
+        firstName: targetUser.firstName,
+        lastName: targetUser.lastName,
+        organizationName: targetUser.organizationName,
+        role: targetUser.role
+      },
+      expiresIn: '2h'
+    });
+
+  } catch (error) {
+    console.error('Start impersonation error:', error);
+    res.status(500).json({
+      error: 'Failed to start impersonation',
+      message: error.message
+    });
+  }
+});
+
+// End impersonation session
+app.delete('/api/v1/admin/impersonate', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    // Check if currently impersonating
+    if (!req.user.isImpersonating) {
+      return res.status(400).json({
+        error: 'Not impersonating',
+        message: 'You are not currently impersonating any user'
+      });
+    }
+
+    const originalAdminId = req.user.impersonatedBy;
+    const impersonatedUserId = req.user.userId;
+
+    // Log the end of impersonation
+    await authService.logUserActivity(originalAdminId, 'user_impersonation_ended', {
+      target_user_id: impersonatedUserId,
+      target_user_email: req.user.email,
+      impersonation_ended_by: 'admin'
+    });
+
+    res.json({
+      success: true,
+      message: 'Impersonation session ended',
+      originalAdmin: req.user.originalAdmin
+    });
+
+  } catch (error) {
+    console.error('End impersonation error:', error);
+    res.status(500).json({
+      error: 'Failed to end impersonation',
+      message: error.message
+    });
+  }
+});
+
+// Get user details for admin (enhanced user info)
+app.get('/api/v1/admin/users/:userId', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    const user = await authService.getUserById(userId);
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: 'The specified user does not exist'
+      });
+    }
+
+    // Get additional admin-only information
+    // This could include session history, activity logs, etc.
+    res.json({
+      success: true,
+      user: {
+        ...user,
+        canImpersonate: userId !== req.user.userId // Can't impersonate self
+      }
+    });
+
+  } catch (error) {
+    console.error('Get user details error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve user details',
       message: error.message
     });
   }
