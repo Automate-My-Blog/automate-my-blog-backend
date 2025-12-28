@@ -1041,7 +1041,7 @@ app.use((req, res) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 AutoBlog API server running on port ${PORT}`);
+  console.log(`🚀 AutoBlog API server running on port ${PORT} (v2.0 - auth fix deployed)`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 API base: http://localhost:${PORT}/api`);
 });

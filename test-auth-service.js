@@ -1,4 +1,5 @@
-import authService from './services/auth.js';
+import DatabaseAuthService from './services/auth-database.js';
+const authService = new DatabaseAuthService();
 
 // Test authentication service (both database and in-memory modes)
 async function testAuthService() {
