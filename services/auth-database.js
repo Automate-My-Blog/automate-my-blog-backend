@@ -18,12 +18,20 @@ class DatabaseAuthService {
   constructor() {
     this.useDatabaseStorage = process.env.USE_DATABASE === 'true';
     this.databaseAvailable = false;
+    this.connectionChecked = false;
     
-    // Test database availability on startup
-    this.testDatabaseConnection();
+    // Don't test connection in constructor to avoid race conditions
+    // Connection will be tested lazily on first use
   }
 
-  async testDatabaseConnection() {
+  async ensureDatabaseConnection() {
+    // Only check once per instance
+    if (this.connectionChecked) {
+      return this.databaseAvailable;
+    }
+    
+    this.connectionChecked = true;
+    
     try {
       await db.testConnection();
       this.databaseAvailable = true;
@@ -33,6 +41,14 @@ class DatabaseAuthService {
       console.log('⚠️  Auth service falling back to in-memory storage');
       console.log('   Database will be used once connection is established');
     }
+    
+    return this.databaseAvailable;
+  }
+
+  async testDatabaseConnection() {
+    // Reset connection check to force re-test
+    this.connectionChecked = false;
+    return await this.ensureDatabaseConnection();
   }
 
   /**
@@ -42,6 +58,9 @@ class DatabaseAuthService {
     const { email, password, firstName, lastName, organizationName } = userData;
 
     try {
+      // Ensure database connection is checked
+      await this.ensureDatabaseConnection();
+      
       // Use database if available
       if (this.databaseAvailable && this.useDatabaseStorage) {
         return await this.registerToDatabase(userData);
@@ -220,6 +239,9 @@ class DatabaseAuthService {
    */
   async login(email, password) {
     try {
+      // Ensure database connection is checked
+      await this.ensureDatabaseConnection();
+      
       // Use database if available
       if (this.databaseAvailable && this.useDatabaseStorage) {
         return await this.loginFromDatabase(email, password);
@@ -391,6 +413,9 @@ class DatabaseAuthService {
    */
   async getUserById(userId) {
     try {
+      // Ensure database connection is checked
+      await this.ensureDatabaseConnection();
+      
       if (this.databaseAvailable && this.useDatabaseStorage) {
         const userResult = await db.query(`
           SELECT u.*, 
@@ -601,6 +626,9 @@ class DatabaseAuthService {
       order = 'DESC'
     } = options;
     try {
+      // Ensure database connection is checked
+      await this.ensureDatabaseConnection();
+      
       if (this.databaseAvailable && this.useDatabaseStorage) {
         let whereConditions = [];
         let queryParams = [];
