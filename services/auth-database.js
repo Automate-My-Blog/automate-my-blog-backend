@@ -761,6 +761,129 @@ class DatabaseAuthService {
       userCount: this.isDatabaseMode() ? 'N/A' : fallbackUsers.size
     };
   }
+
+  /**
+   * Update user profile
+   */
+  async updateUserProfile(userId, updates) {
+    try {
+      await this.ensureDatabaseConnection();
+      
+      if (this.databaseAvailable && this.useDatabaseStorage) {
+        const setClause = [];
+        const values = [];
+        let paramIndex = 1;
+
+        // Build dynamic update query
+        for (const [key, value] of Object.entries(updates)) {
+          if (value !== undefined) {
+            setClause.push(`${key === 'organizationName' ? 'organization_name' : key.toLowerCase()} = $${paramIndex}`);
+            values.push(value);
+            paramIndex++;
+          }
+        }
+
+        if (setClause.length === 0) {
+          throw new Error('No valid fields to update');
+        }
+
+        const updateQuery = `
+          UPDATE users 
+          SET ${setClause.join(', ')}, updated_at = NOW()
+          WHERE id = $${paramIndex}
+          RETURNING id, email, first_name as "firstName", last_name as "lastName", 
+                   organization_name as "organizationName", role, permissions, created_at as "createdAt"
+        `;
+
+        values.push(userId);
+        const result = await db.query(updateQuery, values);
+
+        if (result.rows.length === 0) {
+          throw new Error('User not found');
+        }
+
+        return result.rows[0];
+      } else {
+        // Memory storage update
+        const user = fallbackUsers.get(userId);
+        if (!user) {
+          throw new Error('User not found');
+        }
+
+        Object.assign(user, updates);
+        const { hashedPassword: _, ...userWithoutPassword } = user;
+        return userWithoutPassword;
+      }
+    } catch (error) {
+      throw new Error(`Failed to update profile: ${error.message}`);
+    }
+  }
+
+  /**
+   * Change user password
+   */
+  async changePassword(userId, oldPassword, newPassword) {
+    try {
+      await this.ensureDatabaseConnection();
+      
+      if (this.databaseAvailable && this.useDatabaseStorage) {
+        // Get current password hash from database
+        const userResult = await db.query(
+          'SELECT password_hash FROM users WHERE id = $1',
+          [userId]
+        );
+
+        if (userResult.rows.length === 0) {
+          throw new Error('User not found');
+        }
+
+        const currentPasswordHash = userResult.rows[0].password_hash;
+
+        // Verify old password
+        const isOldPasswordValid = await bcrypt.compare(oldPassword, currentPasswordHash);
+        if (!isOldPasswordValid) {
+          throw new Error('Current password is incorrect');
+        }
+
+        // Hash new password
+        const saltRounds = 12;
+        const newPasswordHash = await bcrypt.hash(newPassword, saltRounds);
+
+        // Update password in database
+        await db.query(
+          'UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2',
+          [newPasswordHash, userId]
+        );
+
+        // Log the password change
+        await this.logUserActivity(userId, 'password_changed', {
+          timestamp: new Date().toISOString()
+        });
+
+        return { success: true };
+      } else {
+        // Memory storage password change
+        const user = fallbackUsers.get(userId);
+        if (!user) {
+          throw new Error('User not found');
+        }
+
+        // Verify old password
+        const isOldPasswordValid = await bcrypt.compare(oldPassword, user.hashedPassword);
+        if (!isOldPasswordValid) {
+          throw new Error('Current password is incorrect');
+        }
+
+        // Hash and store new password
+        const saltRounds = 12;
+        user.hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+        return { success: true };
+      }
+    } catch (error) {
+      throw new Error(`Failed to change password: ${error.message}`);
+    }
+  }
 }
 
 // Export both the class and a singleton instance

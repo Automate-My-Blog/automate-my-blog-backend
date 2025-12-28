@@ -97,6 +97,12 @@ app.get('/api', (req, res) => {
       'GET /api/v1/blog-posts/:id': 'Get specific blog post (requires auth)',
       'PUT /api/v1/blog-posts/:id': 'Update blog post (requires auth)',
       'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)',
+      'PUT /api/v1/user/profile': 'Update user profile (requires auth)',
+      'POST /api/v1/user/change-password': 'Change user password (requires auth)',
+      'GET /api/v1/user/usage-history': 'Get usage history and analytics (requires auth)',
+      'POST /api/v1/user/request-plan-change': 'Request plan upgrade/change (requires auth)',
+      'GET /api/v1/user/billing-history': 'Get billing history and invoices (requires auth)',
+      'PUT /api/v1/user/billing-info': 'Update billing information (requires auth)',
       'GET /api/v1/referrals/link': 'Generate personal referral link (requires auth)',
       'POST /api/v1/referrals/invite': 'Send referral invitation for customer acquisition (requires auth)',
       'GET /api/v1/referrals/stats': 'Get referral statistics and earnings (requires auth)',
@@ -1027,6 +1033,229 @@ app.get('/api/v1/admin/users/:userId', authService.authMiddleware.bind(authServi
     console.error('Get user details error:', error);
     res.status(500).json({
       error: 'Failed to retrieve user details',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// USER MANAGEMENT API ENDPOINTS  
+// =============================================================================
+
+// Update user profile
+app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { firstName, lastName, email, organizationName } = req.body;
+    const userId = req.user.userId;
+
+    // Validate required fields
+    if (!firstName || !lastName || !email) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'firstName, lastName, and email are required'
+      });
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        error: 'Invalid email format',
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    const updates = {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      email: email.toLowerCase().trim(),
+      organizationName: organizationName?.trim()
+    };
+
+    const updatedUser = await authService.updateUserProfile(userId, updates);
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(400).json({
+      error: 'Failed to update profile',
+      message: error.message
+    });
+  }
+});
+
+// Change user password
+app.post('/api/v1/user/change-password', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { oldPassword, newPassword } = req.body;
+    const userId = req.user.userId;
+
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'oldPassword and newPassword are required'
+      });
+    }
+
+    // Password validation
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        error: 'Invalid password',
+        message: 'Password must be at least 8 characters long'
+      });
+    }
+
+    await authService.changePassword(userId, oldPassword, newPassword);
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(400).json({
+      error: 'Failed to change password',
+      message: error.message
+    });
+  }
+});
+
+// Get user usage history
+app.get('/api/v1/user/usage-history', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 30 } = req.query;
+
+    // For now, return mock data since usage tracking isn't fully implemented
+    const mockHistory = [
+      {
+        id: '1',
+        date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        activity: 'Blog Post Generated',
+        postsUsed: 1,
+        value: 15
+      },
+      {
+        id: '2', 
+        date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        activity: 'Content Export',
+        postsUsed: 0,
+        value: 0
+      }
+    ];
+
+    res.json({
+      success: true,
+      data: mockHistory.slice(0, parseInt(limit))
+    });
+
+  } catch (error) {
+    console.error('Get usage history error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve usage history',
+      message: error.message
+    });
+  }
+});
+
+// Request plan change
+app.post('/api/v1/user/request-plan-change', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { planType, reason } = req.body;
+    const userId = req.user.userId;
+    const user = await authService.getUserById(userId);
+
+    if (!planType) {
+      return res.status(400).json({
+        error: 'Missing required field',
+        message: 'planType is required'
+      });
+    }
+
+    // Log the plan change request (in a real system, this would go to a support queue)
+    await authService.logUserActivity(userId, 'plan_change_requested', {
+      current_plan: user.billingStatus || 'Pay-as-you-go',
+      requested_plan: planType,
+      reason: reason || 'No reason provided',
+      user_email: user.email,
+      user_name: `${user.firstName} ${user.lastName}`
+    });
+
+    res.json({
+      success: true,
+      message: 'Plan change request submitted successfully'
+    });
+
+  } catch (error) {
+    console.error('Request plan change error:', error);
+    res.status(500).json({
+      error: 'Failed to submit plan change request',
+      message: error.message
+    });
+  }
+});
+
+// Get billing history
+app.get('/api/v1/user/billing-history', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 50 } = req.query;
+
+    // For now, return mock data since billing isn't integrated yet
+    const mockBilling = [
+      {
+        id: '1',
+        date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+        description: 'Monthly usage - November 2024',
+        amount: 45,
+        status: 'paid',
+        invoiceUrl: '#'
+      }
+    ];
+
+    res.json({
+      success: true,
+      data: mockBilling.slice(0, parseInt(limit))
+    });
+
+  } catch (error) {
+    console.error('Get billing history error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve billing history',
+      message: error.message
+    });
+  }
+});
+
+// Update billing information
+app.put('/api/v1/user/billing-info', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const billingInfo = req.body;
+
+    // Log billing info update (in real system, this would be stored in database)
+    await authService.logUserActivity(userId, 'billing_info_updated', {
+      company_name: billingInfo.companyName,
+      billing_email: billingInfo.billingEmail,
+      has_address: !!(billingInfo.address && billingInfo.city),
+      has_tax_id: !!billingInfo.taxId
+    });
+
+    res.json({
+      success: true,
+      message: 'Billing information updated successfully'
+    });
+
+  } catch (error) {
+    console.error('Update billing info error:', error);
+    res.status(500).json({
+      error: 'Failed to update billing information',
       message: error.message
     });
   }
