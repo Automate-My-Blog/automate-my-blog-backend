@@ -8,6 +8,7 @@ import webScraperService from './services/webscraper.js';
 import DatabaseAuthService from './services/auth-database.js';
 const authService = new DatabaseAuthService();
 import contentService from './services/content.js';
+import referralService from './services/referrals.js';
 
 // Load environment variables
 dotenv.config();
@@ -95,7 +96,14 @@ app.get('/api', (req, res) => {
       'POST /api/v1/blog-posts': 'Create new blog post (requires auth)',
       'GET /api/v1/blog-posts/:id': 'Get specific blog post (requires auth)',
       'PUT /api/v1/blog-posts/:id': 'Update blog post (requires auth)',
-      'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)'
+      'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)',
+      'GET /api/v1/referrals/link': 'Generate personal referral link (requires auth)',
+      'POST /api/v1/referrals/invite': 'Send referral invitation for customer acquisition (requires auth)',
+      'GET /api/v1/referrals/stats': 'Get referral statistics and earnings (requires auth)',
+      'POST /api/v1/organization/invite': 'Send organization team member invitation (requires auth)',
+      'GET /api/v1/organization/members': 'Get organization members list (requires auth)',
+      'DELETE /api/v1/organization/members/:id': 'Remove organization member (requires auth)',
+      'POST /api/v1/referrals/process-signup': 'Process referral signup and grant rewards'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -1019,6 +1027,186 @@ app.get('/api/v1/admin/users/:userId', authService.authMiddleware.bind(authServi
     console.error('Get user details error:', error);
     res.status(500).json({
       error: 'Failed to retrieve user details',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// REFERRAL SYSTEM API ENDPOINTS
+// =============================================================================
+
+// Generate personal referral link
+app.get('/api/v1/referrals/link', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const result = await referralService.generateReferralLink(req.user.userId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Generate referral link error:', error);
+    res.status(500).json({
+      error: 'Failed to generate referral link',
+      message: error.message
+    });
+  }
+});
+
+// Send referral invitation (for customer acquisition)
+app.post('/api/v1/referrals/invite', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { email, personalMessage } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Missing required field',
+        message: 'Email is required'
+      });
+    }
+
+    const result = await referralService.sendReferralInvite(
+      req.user.userId, 
+      email, 
+      personalMessage
+    );
+    
+    res.json({
+      success: true,
+      message: 'Referral invitation sent successfully',
+      data: result
+    });
+  } catch (error) {
+    console.error('Send referral invite error:', error);
+    res.status(400).json({
+      error: 'Failed to send referral invitation',
+      message: error.message
+    });
+  }
+});
+
+// Get referral statistics
+app.get('/api/v1/referrals/stats', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const stats = await referralService.getReferralStats(req.user.userId);
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Get referral stats error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve referral statistics',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// ORGANIZATION MANAGEMENT API ENDPOINTS
+// =============================================================================
+
+// Send organization member invitation (for team building)
+app.post('/api/v1/organization/invite', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { email, role = 'member' } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Missing required field',
+        message: 'Email is required'
+      });
+    }
+
+    if (!['member', 'admin'].includes(role)) {
+      return res.status(400).json({
+        error: 'Invalid role',
+        message: 'Role must be either "member" or "admin"'
+      });
+    }
+
+    const result = await referralService.sendOrganizationInvite(
+      req.user.userId, 
+      email, 
+      role
+    );
+    
+    res.json({
+      success: true,
+      message: 'Organization invitation sent successfully',
+      data: result
+    });
+  } catch (error) {
+    console.error('Send organization invite error:', error);
+    res.status(400).json({
+      error: 'Failed to send organization invitation',
+      message: error.message
+    });
+  }
+});
+
+// Get organization members
+app.get('/api/v1/organization/members', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const result = await referralService.getOrganizationMembers(req.user.userId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Get organization members error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve organization members',
+      message: error.message
+    });
+  }
+});
+
+// Remove organization member
+app.delete('/api/v1/organization/members/:memberId', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    
+    await referralService.removeOrganizationMember(req.user.userId, memberId);
+    
+    res.json({
+      success: true,
+      message: 'Organization member removed successfully'
+    });
+  } catch (error) {
+    console.error('Remove organization member error:', error);
+    res.status(400).json({
+      error: 'Failed to remove organization member',
+      message: error.message
+    });
+  }
+});
+
+// Process referral signup (called during registration)
+app.post('/api/v1/referrals/process-signup', async (req, res) => {
+  try {
+    const { userId, inviteCode } = req.body;
+
+    if (!userId || !inviteCode) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'userId and inviteCode are required'
+      });
+    }
+
+    const result = await referralService.processReferralSignup(userId, inviteCode);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Process referral signup error:', error);
+    res.status(400).json({
+      error: 'Failed to process referral signup',
       message: error.message
     });
   }
