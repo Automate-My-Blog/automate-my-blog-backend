@@ -35,10 +35,10 @@ class DatabaseAuthService {
     try {
       await db.testConnection();
       this.databaseAvailable = true;
-      console.log('✅ Auth service using database storage');
+      console.log('✅ Auth service using database storage (v2 - race condition fixed)');
     } catch (error) {
       this.databaseAvailable = false;
-      console.log('⚠️  Auth service falling back to in-memory storage');
+      console.log('⚠️  Auth service falling back to in-memory storage (v2)');
       console.log('   Database will be used once connection is established');
     }
     
