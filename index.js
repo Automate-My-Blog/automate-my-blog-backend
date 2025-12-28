@@ -62,6 +62,8 @@ app.get('/health', (req, res) => {
     status: 'healthy', 
     timestamp: new Date().toISOString(),
     service: 'AutoBlog API',
+    version: 'v2.0-auth-fix-deployed',
+    authSystemStatus: authService.getStorageStatus(),
     env: {
       nodeEnv: process.env.NODE_ENV,
       hasOpenAIKey,
