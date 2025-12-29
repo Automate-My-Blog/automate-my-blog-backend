@@ -269,7 +269,7 @@ class DatabaseAuthService {
     // Find user by email with organization, billing, and role data
     const userResult = await db.query(`
       SELECT u.*, 
-             o.id as organization_id, o.name as organization_name, o.slug as organization_slug,
+             o.id as organization_id, o.name as organization_name, o.slug as organization_slug, o.website_url as organization_website,
              om.role as organization_role,
              ba.current_plan, ba.billing_status, ba.usage_limit, ba.current_usage,
              ur.name as role_name, ur.permissions, ur.hierarchy_level
@@ -367,6 +367,7 @@ class DatabaseAuthService {
         organizationId: user.organization_id,
         organizationRole: user.organization_role,
         organizationSlug: user.organization_slug,
+        organizationWebsite: user.organization_website,
         referralCode: user.referral_code,
         planTier: user.current_plan || user.plan_tier,
         billingStatus: user.billing_status,
@@ -423,7 +424,7 @@ class DatabaseAuthService {
       if (this.databaseAvailable && this.useDatabaseStorage) {
         const userResult = await db.query(`
           SELECT u.*, 
-                 o.id as organization_id, o.name as organization_name, o.slug as organization_slug,
+                 o.id as organization_id, o.name as organization_name, o.slug as organization_slug, o.website_url as organization_website,
                  om.role as organization_role,
                  ba.current_plan, ba.billing_status, ba.usage_limit, ba.current_usage
           FROM users u
@@ -449,6 +450,7 @@ class DatabaseAuthService {
           organizationId: user.organization_id,
           organizationRole: user.organization_role,
           organizationSlug: user.organization_slug,
+          organizationWebsite: user.organization_website,
           referralCode: user.referral_code,
           planTier: user.current_plan || user.plan_tier,
           billingStatus: user.billing_status,
