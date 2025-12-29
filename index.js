@@ -9,6 +9,7 @@ import DatabaseAuthService from './services/auth-database.js';
 const authService = new DatabaseAuthService();
 import contentService from './services/content.js';
 import referralService from './services/referrals.js';
+import db from './services/database.js';
 
 // Load environment variables
 dotenv.config();
@@ -1083,6 +1084,94 @@ app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), as
     console.error('Update profile error:', error);
     res.status(500).json({
       error: 'Failed to update profile',
+      message: error.message
+    });
+  }
+});
+
+// Update organization information
+app.put('/api/v1/organization/profile', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { organizationName, websiteUrl } = req.body;
+    const userId = req.user.userId;
+
+    // Validate that user has permission to update organization
+    const userOrgResult = await db.query(`
+      SELECT om.role, o.id as organization_id, o.name as current_name, o.website_url as current_website 
+      FROM organization_members om
+      JOIN organizations o ON om.organization_id = o.id
+      WHERE om.user_id = $1 AND om.status = 'active'
+    `, [userId]);
+
+    if (userOrgResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Organization not found',
+        message: 'User is not a member of any organization'
+      });
+    }
+
+    const userOrg = userOrgResult.rows[0];
+    
+    // Only owners can update organization details
+    if (userOrg.role !== 'owner') {
+      return res.status(403).json({
+        error: 'Permission denied',
+        message: 'Only organization owners can update organization details'
+      });
+    }
+
+    // Build update query
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (organizationName && organizationName.trim() && organizationName.trim() !== userOrg.current_name) {
+      updates.push(`name = $${paramIndex}`);
+      values.push(organizationName.trim());
+      paramIndex++;
+    }
+
+    if (websiteUrl !== undefined && websiteUrl !== userOrg.current_website) {
+      updates.push(`website_url = $${paramIndex}`);
+      values.push(websiteUrl?.trim() || null);
+      paramIndex++;
+    }
+
+    if (updates.length === 0) {
+      return res.json({
+        success: true,
+        message: 'No changes to update',
+        organization: {
+          id: userOrg.organization_id,
+          name: userOrg.current_name,
+          websiteUrl: userOrg.current_website
+        }
+      });
+    }
+
+    // Update organization
+    updates.push(`updated_at = NOW()`);
+    values.push(userOrg.organization_id);
+
+    const updateQuery = `
+      UPDATE organizations 
+      SET ${updates.join(', ')}
+      WHERE id = $${paramIndex}
+      RETURNING id, name, website_url as "websiteUrl", updated_at
+    `;
+
+    const result = await db.query(updateQuery, values);
+
+    res.json({
+      success: true,
+      message: 'Organization updated successfully',
+      organization: result.rows[0]
+    });
+
+  } catch (error) {
+    console.error('Update organization error:', error);
+    res.status(500).json({
+      error: 'Failed to update organization',
       message: error.message
     });
   }
