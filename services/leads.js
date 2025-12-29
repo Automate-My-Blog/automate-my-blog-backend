@@ -47,52 +47,61 @@ class LeadService {
         }
       }
 
-      // Extract lead scoring data from analysis
-      const leadScore = this.calculateLeadScore(analysisData);
+      // Extract business data from analysis
       const businessType = analysisData.businessType || 'unknown';
       const estimatedSize = analysisData.companySize || 'unknown';
       const industry = analysisData.industry || 'unknown';
+      const websiteDomain = new URL(websiteUrl).hostname;
 
-      // Create lead record
+      // Create lead record (without lead_score - will be handled by separate table)
       const leadResult = await db.query(`
         INSERT INTO website_leads (
-          id, website_url, business_name, business_type, industry, 
-          estimated_company_size, lead_source, lead_score, status,
-          ip_address, user_agent, referrer_url, analysis_data,
-          created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())
+          id, website_url, website_domain, business_name, business_type, industry_category, 
+          estimated_company_size, lead_source, status, ip_address, user_agent, referrer, 
+          analysis_data, target_audience, content_focus, brand_voice, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
         RETURNING *
       `, [
         leadId,
         websiteUrl,
+        websiteDomain,
         analysisData.businessName || 'Unknown Business',
         businessType,
         industry,
         estimatedSize,
         leadSource,
-        leadScore,
         'new',
         ipAddress,
         userAgent,
         referrer,
-        JSON.stringify(analysisData)
+        JSON.stringify(analysisData),
+        analysisData.targetAudience || null,
+        analysisData.contentFocus || null,
+        analysisData.brandVoice || null
       ]);
 
       const lead = leadResult.rows[0];
 
-      // Create initial conversion tracking entry
+      // Use database function to automatically score the lead
+      const scoringResult = await db.query(`
+        SELECT auto_score_lead($1) as lead_score
+      `, [leadId]);
+      
+      const leadScore = scoringResult.rows[0]?.lead_score || 0;
+
+      // Use database function to track conversion step
       await db.query(`
-        INSERT INTO conversion_tracking (
-          website_lead_id, conversion_step, step_completed_at, step_data
-        ) VALUES ($1, $2, NOW(), $3)
+        SELECT track_conversion_step($1, $2, $3, $4)
       `, [
         leadId,
         'website_analysis',
         JSON.stringify({
           website_url: websiteUrl,
-          analysis_quality: leadScore,
-          session_info: sessionInfo
-        })
+          analysis_data: analysisData,
+          session_info: sessionInfo,
+          lead_score: leadScore
+        }),
+        sessionInfo.sessionId || null
       ]);
 
       console.log(`📊 Captured new lead: ${lead.business_name} (${websiteUrl}) - Score: ${leadScore}`);
@@ -111,33 +120,20 @@ class LeadService {
   }
 
   /**
-   * Calculate lead score based on website analysis quality
+   * Score a lead using the database's intelligent scoring function
+   * This leverages the built-in auto_score_lead() database function
    */
-  calculateLeadScore(analysisData) {
-    let score = 50; // Base score
-
-    // Business size scoring
-    if (analysisData.companySize === 'large') score += 30;
-    else if (analysisData.companySize === 'medium') score += 20;
-    else if (analysisData.companySize === 'small') score += 10;
-
-    // Industry scoring (higher value industries)
-    const highValueIndustries = ['technology', 'finance', 'healthcare', 'consulting'];
-    if (highValueIndustries.includes(analysisData.industry?.toLowerCase())) {
-      score += 20;
+  async scoreLeadWithDatabase(leadId) {
+    try {
+      const result = await db.query(`
+        SELECT auto_score_lead($1) as score
+      `, [leadId]);
+      
+      return result.rows[0]?.score || 0;
+    } catch (error) {
+      console.error('Error scoring lead:', error);
+      return 0;
     }
-
-    // Website quality indicators
-    if (analysisData.hasContactInfo) score += 10;
-    if (analysisData.hasAboutPage) score += 5;
-    if (analysisData.hasBlog) score += 15; // They already create content
-    if (analysisData.isEcommerce) score += 10;
-
-    // Business maturity
-    if (analysisData.businessName && analysisData.businessName !== 'Unknown Business') score += 10;
-    if (analysisData.description && analysisData.description.length > 100) score += 10;
-
-    return Math.min(100, Math.max(0, score)); // Clamp between 0-100
   }
 
   /**
@@ -195,26 +191,41 @@ class LeadService {
 
       const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
       
-      // Validate sort parameters
+      // Validate sort parameters - update to use proper table aliases
       const allowedSortFields = ['created_at', 'lead_score', 'business_name', 'status', 'updated_at'];
-      const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'created_at';
+      let safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'created_at';
       const safeSortOrder = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      
+      // Map lead_score to the proper column from lead_scoring table
+      if (safeSortBy === 'lead_score') {
+        safeSortBy = 'ls.overall_score';
+      } else {
+        safeSortBy = `wl.${safeSortBy}`;
+      }
 
-      // Get leads with conversion info
+      // Get leads with scoring and conversion info - JOIN with lead_scoring table
       const leadsResult = await db.query(`
         SELECT 
           wl.*,
+          ls.overall_score as lead_score,
+          ls.business_size_score,
+          ls.industry_fit_score,
+          ls.engagement_score,
+          ls.content_quality_score,
+          ls.scoring_factors,
           CASE WHEN wl.converted_to_user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_converted,
           wl.converted_at,
           u.email as converted_user_email,
           COUNT(ct.id) as conversion_steps_count,
           EXTRACT(EPOCH FROM (COALESCE(wl.converted_at, NOW()) - wl.created_at)) / 86400 as days_in_funnel
         FROM website_leads wl
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
         LEFT JOIN users u ON wl.converted_to_user_id = u.id
         LEFT JOIN conversion_tracking ct ON wl.id = ct.website_lead_id
         ${whereClause}
-        GROUP BY wl.id, u.email
-        ORDER BY wl.${safeSortBy} ${safeSortOrder}
+        GROUP BY wl.id, ls.overall_score, ls.business_size_score, ls.industry_fit_score, 
+                 ls.engagement_score, ls.content_quality_score, ls.scoring_factors, u.email
+        ORDER BY ${safeSortBy} ${safeSortOrder}
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
       `, [...queryParams, limit, offset]);
 
@@ -282,16 +293,17 @@ class LeadService {
     try {
       const days = dateRange === 'today' ? 1 : dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 90;
 
-      // Overall metrics
+      // Overall metrics - JOIN with lead_scoring table
       const metricsResult = await db.query(`
         SELECT 
-          COUNT(*) as total_leads,
-          COUNT(CASE WHEN converted_to_user_id IS NOT NULL THEN 1 END) as converted_leads,
-          ROUND(AVG(lead_score), 1) as avg_lead_score,
-          COUNT(CASE WHEN lead_score >= 80 THEN 1 END) as high_quality_leads,
-          COUNT(CASE WHEN status = 'new' THEN 1 END) as new_leads,
-          COUNT(CASE WHEN created_at > NOW() - INTERVAL '${days} days' THEN 1 END) as recent_leads
-        FROM website_leads
+          COUNT(DISTINCT wl.id) as total_leads,
+          COUNT(CASE WHEN wl.converted_to_user_id IS NOT NULL THEN 1 END) as converted_leads,
+          ROUND(AVG(ls.overall_score), 1) as avg_lead_score,
+          COUNT(CASE WHEN ls.overall_score >= 80 THEN 1 END) as high_quality_leads,
+          COUNT(CASE WHEN wl.status = 'new' THEN 1 END) as new_leads,
+          COUNT(CASE WHEN wl.created_at > NOW() - INTERVAL '${days} days' THEN 1 END) as recent_leads
+        FROM website_leads wl
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
       `);
 
       const metrics = metricsResult.rows[0];
@@ -299,16 +311,17 @@ class LeadService {
         ? ((metrics.converted_leads / metrics.total_leads) * 100).toFixed(1)
         : '0.0';
 
-      // Lead sources breakdown
+      // Lead sources breakdown - JOIN with lead_scoring table
       const sourcesResult = await db.query(`
         SELECT 
-          lead_source,
-          COUNT(*) as count,
-          COUNT(CASE WHEN converted_to_user_id IS NOT NULL THEN 1 END) as converted,
-          ROUND(AVG(lead_score), 1) as avg_score
-        FROM website_leads
-        WHERE created_at > NOW() - INTERVAL '${days} days'
-        GROUP BY lead_source
+          wl.lead_source,
+          COUNT(DISTINCT wl.id) as count,
+          COUNT(CASE WHEN wl.converted_to_user_id IS NOT NULL THEN 1 END) as converted,
+          ROUND(AVG(ls.overall_score), 1) as avg_score
+        FROM website_leads wl
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+        WHERE wl.created_at > NOW() - INTERVAL '${days} days'
+        GROUP BY wl.lead_source
         ORDER BY count DESC
       `);
 
@@ -483,6 +496,88 @@ class LeadService {
       };
     } catch (error) {
       console.error('Error updating lead status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Track user registration conversion (called when lead converts to user)
+   */
+  async trackRegistrationConversion(userId, websiteUrl, registrationData = {}) {
+    try {
+      // Find the matching lead based on website URL and recent creation
+      const leadResult = await db.query(`
+        SELECT id FROM website_leads 
+        WHERE website_url = $1 
+          AND converted_to_user_id IS NULL
+          AND created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [websiteUrl]);
+
+      if (leadResult.rows.length > 0) {
+        const leadId = leadResult.rows[0].id;
+        
+        // Mark lead as converted
+        await db.query(`
+          UPDATE website_leads 
+          SET converted_to_user_id = $1, converted_at = NOW(), status = 'converted'
+          WHERE id = $2
+        `, [userId, leadId]);
+
+        // Track registration conversion step using database function
+        await db.query(`
+          SELECT track_conversion_step($1, $2, $3, $4)
+        `, [
+          leadId,
+          'registration',
+          JSON.stringify({
+            user_id: userId,
+            registration_data: registrationData,
+            converted_at: new Date().toISOString()
+          }),
+          registrationData.sessionId || null
+        ]);
+
+        console.log(`🎯 Lead ${leadId} converted to user ${userId}`);
+        
+        return {
+          success: true,
+          leadId,
+          userId,
+          conversionStep: 'registration'
+        };
+      }
+
+      return { success: false, message: 'No matching lead found' };
+    } catch (error) {
+      console.error('Error tracking registration conversion:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Track any conversion step for a lead
+   */
+  async trackConversionStep(leadId, stepName, stepData = {}, sessionId = null) {
+    try {
+      // Use database function to track conversion step
+      const result = await db.query(`
+        SELECT track_conversion_step($1, $2, $3, $4) as conversion_id
+      `, [
+        leadId,
+        stepName,
+        JSON.stringify(stepData),
+        sessionId
+      ]);
+
+      return {
+        success: true,
+        conversionId: result.rows[0]?.conversion_id,
+        step: stepName
+      };
+    } catch (error) {
+      console.error('Error tracking conversion step:', error);
       throw error;
     }
   }
