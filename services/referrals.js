@@ -367,7 +367,7 @@ class ReferralService {
               id, referrer_user_id, referred_user_id, invite_id, 
               referral_code, status, completed_at
             ) VALUES ($1, $2, $3, $4, $5, 'completed', NOW())
-          `, [uuidv4(), invite.inviter_user_id, newUserId, invite.id, inviteCode]);
+          `, [uuidv4(), invite.inviter_user_id, newUserId, invite.id, code]);
 
           // Create rewards for both referrer and referred user
           const rewardId1 = uuidv4();
