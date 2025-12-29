@@ -50,7 +50,7 @@ class LeadService {
       // Extract business data from analysis
       const businessType = analysisData.businessType || 'unknown';
       const estimatedSize = analysisData.companySize || 'unknown';
-      const industry = analysisData.industry || 'unknown';
+      const industry = analysisData.businessType || 'unknown'; // Fixed: Use businessType from OpenAI analysis
       const websiteDomain = new URL(websiteUrl).hostname;
 
       // Create lead record (without lead_score - will be handled by separate table)
