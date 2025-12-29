@@ -55,7 +55,7 @@ class DatabaseAuthService {
    * Register a new user
    */
   async register(userData) {
-    const { email, password, firstName, lastName, organizationName } = userData;
+    const { email, password, firstName, lastName, organizationName, websiteUrl } = userData;
 
     try {
       // Ensure database connection is checked
@@ -81,7 +81,7 @@ class DatabaseAuthService {
    * Register user to database with proper organization relationships
    */
   async registerToDatabase(userData) {
-    const { email, password, firstName, lastName, organizationName } = userData;
+    const { email, password, firstName, lastName, organizationName, websiteUrl } = userData;
 
     // Check if user already exists
     const existingUser = await db.query(
@@ -129,14 +129,15 @@ class DatabaseAuthService {
     
     const orgResult = await db.query(`
       INSERT INTO organizations (
-        id, name, slug, owner_user_id, plan_tier, status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-      RETURNING id, name, slug
+        id, name, slug, owner_user_id, website_url, plan_tier, status, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+      RETURNING id, name, slug, website_url
     `, [
       uuidv4(),
       organizationName,
       organizationSlug + '-' + userId.substring(0, 8), // Ensure unique slug
       userId,
+      websiteUrl || null,
       'free',
       'active'
     ]);
@@ -170,6 +171,9 @@ class DatabaseAuthService {
       organization_id: organization.id
     });
 
+    // Link website lead if user came from website analysis
+    await this.linkWebsiteLeadToUser(user.id, organization.id, websiteUrl);
+
     // Generate tokens
     const tokens = this.generateTokens(user);
 
@@ -194,7 +198,7 @@ class DatabaseAuthService {
    * Register user to memory (fallback)
    */
   async registerToMemory(userData) {
-    const { email, password, firstName, lastName, organizationName } = userData;
+    const { email, password, firstName, lastName, organizationName, websiteUrl } = userData;
 
     // Check if user already exists
     const existingUser = Array.from(fallbackUsers.values()).find(user => user.email === email);
@@ -774,10 +778,12 @@ class DatabaseAuthService {
         const values = [];
         let paramIndex = 1;
 
-        // Build dynamic update query
+        // Build dynamic update query - only for allowed profile fields
+        const allowedFields = ['firstName', 'lastName', 'email'];
         for (const [key, value] of Object.entries(updates)) {
-          if (value !== undefined) {
-            setClause.push(`${key === 'organizationName' ? 'organization_name' : key.toLowerCase()} = $${paramIndex}`);
+          if (value !== undefined && allowedFields.includes(key)) {
+            const dbField = key === 'firstName' ? 'first_name' : key === 'lastName' ? 'last_name' : key.toLowerCase();
+            setClause.push(`${dbField} = $${paramIndex}`);
             values.push(value);
             paramIndex++;
           }
@@ -792,7 +798,7 @@ class DatabaseAuthService {
           SET ${setClause.join(', ')}, updated_at = NOW()
           WHERE id = $${paramIndex}
           RETURNING id, email, first_name as "firstName", last_name as "lastName", 
-                   organization_name as "organizationName", role, permissions, created_at as "createdAt"
+                   role, created_at as "createdAt"
         `;
 
         values.push(userId);
@@ -816,6 +822,50 @@ class DatabaseAuthService {
       }
     } catch (error) {
       throw new Error(`Failed to update profile: ${error.message}`);
+    }
+  }
+
+  /**
+   * Link website lead to user when they convert from anonymous website analysis
+   */
+  async linkWebsiteLeadToUser(userId, organizationId, websiteUrl) {
+    if (!this.databaseAvailable || !websiteUrl) return;
+
+    try {
+      // Find matching website lead based on URL and recent creation
+      const leadResult = await db.query(`
+        SELECT id FROM website_leads 
+        WHERE website_url = $1 
+          AND converted_to_user_id IS NULL
+          AND created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `, [websiteUrl]);
+
+      if (leadResult.rows.length > 0) {
+        const leadId = leadResult.rows[0].id;
+        
+        // Mark lead as converted
+        await db.query(`
+          UPDATE website_leads 
+          SET converted_to_user_id = $1, converted_at = NOW(), status = 'converted'
+          WHERE id = $2
+        `, [userId, leadId]);
+
+        // Track conversion step
+        await db.query(`
+          INSERT INTO conversion_tracking (
+            website_lead_id, conversion_step, step_completed_at, 
+            step_data, total_time_to_conversion
+          ) VALUES ($1, 'registration', NOW(), $2, 
+            EXTRACT(EPOCH FROM (NOW() - (SELECT created_at FROM website_leads WHERE id = $1))) / 60
+          )
+        `, [leadId, JSON.stringify({ userId, organizationId })]);
+
+        console.log(`🔗 Linked website lead ${leadId} to user ${userId}`);
+      }
+    } catch (error) {
+      console.warn('Failed to link website lead:', error.message);
     }
   }
 

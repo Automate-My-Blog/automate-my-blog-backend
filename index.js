@@ -1045,7 +1045,7 @@ app.get('/api/v1/admin/users/:userId', authService.authMiddleware.bind(authServi
 // Update user profile
 app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
-    const { firstName, lastName, email, organizationName } = req.body;
+    const { firstName, lastName, email } = req.body;
     const userId = req.user.userId;
 
     // Validate required fields
@@ -1068,8 +1068,7 @@ app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), as
     const updates = {
       firstName: firstName.trim(),
       lastName: lastName.trim(),
-      email: email.toLowerCase().trim(),
-      organizationName: organizationName?.trim()
+      email: email.toLowerCase().trim()
     };
 
     const updatedUser = await authService.updateUserProfile(userId, updates);
@@ -1082,7 +1081,7 @@ app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), as
 
   } catch (error) {
     console.error('Update profile error:', error);
-    res.status(400).json({
+    res.status(500).json({
       error: 'Failed to update profile',
       message: error.message
     });
