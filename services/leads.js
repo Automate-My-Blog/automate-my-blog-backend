@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import organizationService from './organizations.js';
 
 /**
  * Website Lead Management Service
@@ -26,10 +27,22 @@ class LeadService {
   }
 
   /**
-   * Capture a new lead from website analysis
+   * Capture a new lead from website analysis - Organization-Centric Approach
    */
   async captureLead(websiteUrl, analysisData, sessionInfo = {}) {
     try {
+      console.log('📊 Starting organization-centric lead capture...');
+      
+      // Step 1: Create or update organization with business intelligence
+      const organizationId = await organizationService.createOrUpdateOrganization(websiteUrl, analysisData);
+      
+      // Step 2: Save organization intelligence data  
+      await organizationService.saveOrganizationIntelligence(organizationId, analysisData);
+      
+      // Step 3: Extract and save contact information
+      await organizationService.extractAndSaveContacts(organizationId, analysisData);
+      
+      // Step 4: Create lead record linked to organization
       const leadId = uuidv4();
       const ipAddress = sessionInfo.ipAddress || 'unknown';
       const userAgent = sessionInfo.userAgent || 'unknown';
@@ -47,34 +60,32 @@ class LeadService {
         }
       }
 
-      // Extract business data from analysis
-      const businessType = analysisData.businessType || 'unknown';
-      const estimatedSize = analysisData.companySize || 'unknown';
-      const industry = analysisData.businessType || 'unknown'; // Fixed: Use businessType from OpenAI analysis
       const websiteDomain = new URL(websiteUrl).hostname;
 
-      // Create lead record (without lead_score - will be handled by separate table)
+      // Create simplified lead record that references organization
       const leadResult = await db.query(`
         INSERT INTO website_leads (
-          id, website_url, website_domain, business_name, business_type, industry_category, 
-          estimated_company_size, lead_source, status, ip_address, user_agent, referrer, 
-          analysis_data, target_audience, content_focus, brand_voice, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW(), NOW())
+          id, organization_id, website_url, website_domain, business_name, business_type, 
+          industry_category, estimated_company_size, lead_source, status, ip_address, 
+          user_agent, referrer, analysis_data, target_audience, content_focus, 
+          brand_voice, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
         RETURNING *
       `, [
         leadId,
+        organizationId, // Link to organization
         websiteUrl,
         websiteDomain,
         analysisData.businessName || 'Unknown Business',
-        businessType,
-        industry,
-        estimatedSize,
+        analysisData.businessType || 'unknown',
+        analysisData.businessType || 'unknown', 
+        analysisData.companySize || 'unknown',
         leadSource,
         'new',
         ipAddress,
         userAgent,
         referrer,
-        JSON.stringify(analysisData),
+        JSON.stringify(analysisData), // Keep for backward compatibility
         analysisData.targetAudience || null,
         analysisData.contentFocus || null,
         analysisData.brandVoice || null
@@ -82,20 +93,21 @@ class LeadService {
 
       const lead = leadResult.rows[0];
 
-      // Use database function to automatically score the lead
+      // Step 5: Use database function to automatically score the lead
       const scoringResult = await db.query(`
         SELECT auto_score_lead($1) as lead_score
       `, [leadId]);
       
       const leadScore = scoringResult.rows[0]?.lead_score || 0;
 
-      // Use database function to track conversion step
+      // Step 6: Track conversion step
       await db.query(`
         SELECT track_conversion_step($1, $2, $3, $4)
       `, [
         leadId,
         'website_analysis',
         JSON.stringify({
+          organization_id: organizationId,
           website_url: websiteUrl,
           analysis_data: analysisData,
           session_info: sessionInfo,
@@ -104,10 +116,13 @@ class LeadService {
         sessionInfo.sessionId || null
       ]);
 
-      console.log(`📊 Captured new lead: ${lead.business_name} (${websiteUrl}) - Score: ${leadScore}`);
+      console.log(`✅ Captured new lead: ${lead.business_name} (${websiteUrl})`);
+      console.log(`🏢 Organization: ${organizationId}`);
+      console.log(`📊 Lead Score: ${leadScore}`);
 
       return {
         leadId: lead.id,
+        organizationId,
         leadScore,
         businessName: lead.business_name,
         source: leadSource,
@@ -203,28 +218,48 @@ class LeadService {
         safeSortBy = `wl.${safeSortBy}`;
       }
 
-      // Get leads with scoring and conversion info - JOIN with lead_scoring table
+      // Get leads with organization data, scoring, and conversion info
       const leadsResult = await db.query(`
         SELECT 
           wl.*,
+          -- Organization data
+          o.id as organization_id,
+          o.name as organization_name,
+          o.business_model,
+          o.company_size as org_company_size,
+          o.target_audience as org_target_audience,
+          o.brand_voice as org_brand_voice,
+          -- Lead scoring data
           ls.overall_score as lead_score,
           ls.business_size_score,
           ls.industry_fit_score,
           ls.engagement_score,
           ls.content_quality_score,
           ls.scoring_factors,
+          -- Organization intelligence summary
+          oi.customer_scenarios,
+          oi.business_value_assessment,
+          oi.analysis_confidence_score,
+          -- Decision makers
+          get_organization_decision_makers(o.id) as decision_makers,
+          -- Conversion data
           CASE WHEN wl.converted_to_user_id IS NOT NULL THEN TRUE ELSE FALSE END as is_converted,
           wl.converted_at,
           u.email as converted_user_email,
           COUNT(ct.id) as conversion_steps_count,
           EXTRACT(EPOCH FROM (COALESCE(wl.converted_at, NOW()) - wl.created_at)) / 86400 as days_in_funnel
         FROM website_leads wl
+        LEFT JOIN organizations o ON wl.organization_id = o.id
         LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+        LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
         LEFT JOIN users u ON wl.converted_to_user_id = u.id
         LEFT JOIN conversion_tracking ct ON wl.id = ct.website_lead_id
         ${whereClause}
-        GROUP BY wl.id, ls.overall_score, ls.business_size_score, ls.industry_fit_score, 
-                 ls.engagement_score, ls.content_quality_score, ls.scoring_factors, u.email
+        GROUP BY wl.id, o.id, o.name, o.business_model, o.company_size, o.target_audience, o.brand_voice,
+                 ls.overall_score, ls.business_size_score, ls.industry_fit_score, 
+                 ls.engagement_score, ls.content_quality_score, ls.scoring_factors, 
+                 oi.customer_scenarios, oi.business_value_assessment, oi.analysis_confidence_score,
+                 u.email
         ORDER BY ${safeSortBy} ${safeSortOrder}
         LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
       `, [...queryParams, limit, offset]);
@@ -241,25 +276,42 @@ class LeadService {
 
       return {
         leads: leadsResult.rows.map(lead => ({
+          // Lead information
           id: lead.id,
           websiteUrl: lead.website_url,
           businessName: lead.business_name,
           businessType: lead.business_type,
-          industry: lead.industry,
+          industry: lead.industry_category,
           estimatedCompanySize: lead.estimated_company_size,
           leadSource: lead.lead_source,
-          leadScore: parseInt(lead.lead_score),
+          leadScore: parseInt(lead.lead_score || 0),
           status: lead.status,
           isConverted: lead.is_converted,
           convertedAt: lead.converted_at,
           convertedUserEmail: lead.converted_user_email,
-          conversionStepsCount: parseInt(lead.conversion_steps_count),
-          daysInFunnel: parseFloat(lead.days_in_funnel).toFixed(1),
+          conversionStepsCount: parseInt(lead.conversion_steps_count || 0),
+          daysInFunnel: parseFloat(lead.days_in_funnel || 0).toFixed(1),
           createdAt: lead.created_at,
           updatedAt: lead.updated_at,
           ipAddress: lead.ip_address,
           userAgent: lead.user_agent,
           referrerUrl: lead.referrer_url,
+          
+          // Organization data
+          organizationId: lead.organization_id,
+          organizationName: lead.organization_name,
+          businessModel: lead.business_model,
+          companySize: lead.org_company_size,
+          targetAudience: lead.org_target_audience,
+          brandVoice: lead.org_brand_voice,
+          
+          // Business intelligence
+          decisionMakers: lead.decision_makers || [],
+          customerScenarios: lead.customer_scenarios || [],
+          businessValueAssessment: lead.business_value_assessment || {},
+          analysisConfidenceScore: parseFloat(lead.analysis_confidence_score || 0),
+          
+          // Backward compatibility
           analysisData: lead.analysis_data
         })),
         pagination: {

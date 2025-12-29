@@ -11,6 +11,7 @@ import contentService from './services/content.js';
 import referralService from './services/referrals.js';
 import billingService from './services/billing.js';
 import leadService from './services/leads.js';
+import organizationService from './services/organizations.js';
 import db from './services/database.js';
 
 // Load environment variables
@@ -119,7 +120,11 @@ app.get('/api', (req, res) => {
       'GET /api/v1/admin/leads': 'Get website leads with filters (super admin only)',
       'GET /api/v1/admin/leads/analytics': 'Get lead analytics and metrics (super admin only)',
       'GET /api/v1/admin/leads/:id': 'Get detailed lead information (super admin only)',
-      'PUT /api/v1/admin/leads/:id/status': 'Update lead status (super admin only)'
+      'PUT /api/v1/admin/leads/:id/status': 'Update lead status (super admin only)',
+      'GET /api/v1/admin/organizations': 'Get organizations with business intelligence (super admin only)',
+      'GET /api/v1/admin/organizations/:id': 'Get organization profile with full intelligence data (super admin only)',
+      'GET /api/v1/admin/organizations/:id/contacts': 'Get organization contacts and decision makers (super admin only)',
+      'GET /api/v1/admin/organizations/:id/intelligence': 'Get organization intelligence analysis (super admin only)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -1167,6 +1172,429 @@ app.put('/api/v1/admin/leads/:leadId/status', authService.authMiddleware.bind(au
     console.error('Update lead status error:', error);
     res.status(500).json({
       error: 'Failed to update lead status',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// ORGANIZATION INTELLIGENCE API ENDPOINTS (Super Admin Only)
+// =============================================================================
+
+// Get all organizations with business intelligence data
+app.get('/api/v1/admin/organizations', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const options = {
+      limit: parseInt(req.query.limit) || 50,
+      offset: parseInt(req.query.offset) || 0,
+      search: req.query.search || '',
+      industry: req.query.industry || 'all',
+      sortBy: req.query.sortBy || 'last_analyzed_at',
+      sortOrder: req.query.sortOrder || 'DESC'
+    };
+
+    // Build query for organizations with intelligence data
+    let whereConditions = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    // Industry filter
+    if (options.industry !== 'all') {
+      whereConditions.push(`o.industry_category = $${paramIndex}`);
+      queryParams.push(options.industry);
+      paramIndex++;
+    }
+
+    // Search filter
+    if (options.search && options.search.length > 0) {
+      whereConditions.push(`(
+        LOWER(o.name) LIKE $${paramIndex} OR 
+        LOWER(o.website_url) LIKE $${paramIndex} OR
+        LOWER(o.business_type) LIKE $${paramIndex}
+      )`);
+      queryParams.push(`%${options.search.toLowerCase()}%`);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    
+    // Validate sort parameters
+    const allowedSortFields = ['name', 'last_analyzed_at', 'created_at', 'business_type'];
+    const safeSortBy = allowedSortFields.includes(options.sortBy) ? `o.${options.sortBy}` : 'o.last_analyzed_at';
+    const safeSortOrder = options.sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    // Get organizations with intelligence summary
+    const orgResult = await db.query(`
+      SELECT 
+        o.id,
+        o.name,
+        o.website_url,
+        o.business_type,
+        o.industry_category,
+        o.business_model,
+        o.company_size,
+        o.description,
+        o.target_audience,
+        o.brand_voice,
+        o.website_goals,
+        o.last_analyzed_at,
+        o.created_at,
+        o.updated_at,
+        -- Intelligence summary
+        oi.analysis_confidence_score,
+        (oi.customer_scenarios::jsonb -> 0 ->> 'problem') as primary_customer_problem,
+        COALESCE(jsonb_array_length(oi.customer_scenarios::jsonb), 0) as scenarios_count,
+        -- Contact counts
+        COUNT(oc.id) as contacts_count,
+        COUNT(CASE WHEN oc.role_type = 'decision_maker' THEN 1 END) as decision_makers_count,
+        -- Lead counts
+        COUNT(wl.id) as leads_count,
+        AVG(ls.overall_score) as avg_lead_score
+      FROM organizations o
+      LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
+      LEFT JOIN organization_contacts oc ON o.id = oc.organization_id
+      LEFT JOIN website_leads wl ON o.id = wl.organization_id
+      LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+      ${whereClause}
+      GROUP BY o.id, o.name, o.website_url, o.business_type, o.industry_category, 
+               o.business_model, o.company_size, o.description, o.target_audience, 
+               o.brand_voice, o.website_goals, o.last_analyzed_at, o.created_at, o.updated_at,
+               oi.analysis_confidence_score, oi.customer_scenarios
+      ORDER BY ${safeSortBy} ${safeSortOrder}
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `, [...queryParams, options.limit, options.offset]);
+
+    // Get total count for pagination
+    const countResult = await db.query(`
+      SELECT COUNT(DISTINCT o.id) as total
+      FROM organizations o
+      LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
+      ${whereClause}
+    `, queryParams);
+
+    const total = parseInt(countResult.rows[0]?.total || 0);
+
+    res.json({
+      success: true,
+      data: {
+        organizations: orgResult.rows.map(org => ({
+          id: org.id,
+          name: org.name,
+          websiteUrl: org.website_url,
+          businessType: org.business_type,
+          industryCategory: org.industry_category,
+          businessModel: org.business_model,
+          companySize: org.company_size,
+          description: org.description,
+          targetAudience: org.target_audience,
+          brandVoice: org.brand_voice,
+          websiteGoals: org.website_goals,
+          lastAnalyzedAt: org.last_analyzed_at,
+          createdAt: org.created_at,
+          updatedAt: org.updated_at,
+          // Intelligence metrics
+          analysisConfidenceScore: parseFloat(org.analysis_confidence_score || 0),
+          primaryCustomerProblem: org.primary_customer_problem,
+          scenariosCount: parseInt(org.scenarios_count),
+          contactsCount: parseInt(org.contacts_count),
+          decisionMakersCount: parseInt(org.decision_makers_count),
+          leadsCount: parseInt(org.leads_count),
+          averageLeadScore: parseFloat(org.avg_lead_score || 0).toFixed(1)
+        })),
+        pagination: {
+          total,
+          limit: options.limit,
+          offset: options.offset,
+          hasMore: options.offset + options.limit < total,
+          totalPages: Math.ceil(total / options.limit),
+          currentPage: Math.floor(options.offset / options.limit) + 1
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({
+      error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
+// Get detailed organization profile with full intelligence data
+app.get('/api/v1/admin/organizations/:id', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Import organization service to get full profile
+    const { default: organizationService } = await import('./services/organizations.js');
+    const profile = await organizationService.getOrganizationProfile(id);
+    
+    // Get related leads for this organization
+    const leadsResult = await db.query(`
+      SELECT 
+        wl.id,
+        wl.website_url,
+        wl.business_name,
+        wl.lead_source,
+        wl.status,
+        wl.created_at,
+        ls.overall_score as lead_score
+      FROM website_leads wl
+      LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+      WHERE wl.organization_id = $1
+      ORDER BY wl.created_at DESC
+      LIMIT 10
+    `, [id]);
+
+    res.json({
+      success: true,
+      data: {
+        ...profile,
+        relatedLeads: leadsResult.rows.map(lead => ({
+          id: lead.id,
+          websiteUrl: lead.website_url,
+          businessName: lead.business_name,
+          leadSource: lead.lead_source,
+          status: lead.status,
+          leadScore: parseInt(lead.lead_score || 0),
+          createdAt: lead.created_at
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Get organization details error:', error);
+    res.status(500).json({
+      error: 'Failed to get organization details',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// ORGANIZATION INTELLIGENCE API ENDPOINTS (Super Admin Only)
+// =============================================================================
+
+// Get all organizations with business intelligence
+app.get('/api/v1/admin/organizations', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const options = {
+      limit: parseInt(req.query.limit) || 50,
+      offset: parseInt(req.query.offset) || 0,
+      search: req.query.search || '',
+      industry: req.query.industry || 'all',
+      companySize: req.query.companySize || 'all',
+      sortBy: req.query.sortBy || 'last_analyzed_at',
+      sortOrder: req.query.sortOrder || 'DESC'
+    };
+
+    let whereConditions = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    // Search filter
+    if (options.search && options.search.length > 0) {
+      whereConditions.push(`(
+        LOWER(o.name) LIKE $${paramIndex} OR 
+        LOWER(o.website_url) LIKE $${paramIndex} OR
+        LOWER(o.business_type) LIKE $${paramIndex}
+      )`);
+      queryParams.push(`%${options.search.toLowerCase()}%`);
+      paramIndex++;
+    }
+
+    // Industry filter
+    if (options.industry !== 'all') {
+      whereConditions.push(`o.industry_category = $${paramIndex}`);
+      queryParams.push(options.industry);
+      paramIndex++;
+    }
+
+    // Company size filter
+    if (options.companySize !== 'all') {
+      whereConditions.push(`o.company_size = $${paramIndex}`);
+      queryParams.push(options.companySize);
+      paramIndex++;
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+    
+    // Validate sort parameters
+    const allowedSortFields = ['name', 'last_analyzed_at', 'created_at', 'company_size'];
+    const safeSortBy = allowedSortFields.includes(options.sortBy) ? `o.${options.sortBy}` : 'o.last_analyzed_at';
+    const safeSortOrder = options.sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+    // Get organizations with intelligence summary
+    const result = await db.query(`
+      SELECT 
+        o.*,
+        oi.analysis_confidence_score,
+        (SELECT COUNT(*) FROM organization_contacts WHERE organization_id = o.id) as contact_count,
+        (SELECT COUNT(*) FROM website_leads WHERE organization_id = o.id) as lead_count,
+        oi.customer_scenarios,
+        oi.business_value_assessment
+      FROM organizations o
+      LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
+      ${whereClause}
+      ORDER BY ${safeSortBy} ${safeSortOrder}
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `, [...queryParams, options.limit, options.offset]);
+
+    // Get total count
+    const countResult = await db.query(`
+      SELECT COUNT(DISTINCT o.id) as total
+      FROM organizations o
+      ${whereClause}
+    `, queryParams);
+
+    const total = parseInt(countResult.rows[0]?.total || 0);
+
+    res.json({
+      success: true,
+      data: {
+        organizations: result.rows.map(org => ({
+          id: org.id,
+          name: org.name,
+          slug: org.slug,
+          businessType: org.business_type,
+          industryCategory: org.industry_category,
+          businessModel: org.business_model,
+          companySize: org.company_size,
+          description: org.description,
+          targetAudience: org.target_audience,
+          brandVoice: org.brand_voice,
+          websiteGoals: org.website_goals,
+          websiteUrl: org.website_url,
+          lastAnalyzedAt: org.last_analyzed_at,
+          createdAt: org.created_at,
+          updatedAt: org.updated_at,
+          analysisConfidenceScore: parseFloat(org.analysis_confidence_score || 0),
+          contactCount: parseInt(org.contact_count || 0),
+          leadCount: parseInt(org.lead_count || 0),
+          hasIntelligence: !!org.customer_scenarios,
+          customerScenarios: org.customer_scenarios ? JSON.parse(org.customer_scenarios).length : 0,
+          businessValueAssessment: org.business_value_assessment ? Object.keys(JSON.parse(org.business_value_assessment)).length : 0
+        })),
+        pagination: {
+          total,
+          limit: options.limit,
+          offset: options.offset,
+          hasMore: options.offset + options.limit < total,
+          totalPages: Math.ceil(total / options.limit),
+          currentPage: Math.floor(options.offset / options.limit) + 1
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get organizations error:', error);
+    res.status(500).json({
+      error: 'Failed to get organizations',
+      message: error.message
+    });
+  }
+});
+
+// Get organization profile with full intelligence data
+app.get('/api/v1/admin/organizations/:organizationId', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    const profile = await organizationService.getOrganizationProfile(organizationId);
+    
+    res.json({
+      success: true,
+      data: profile
+    });
+  } catch (error) {
+    console.error('Get organization profile error:', error);
+    res.status(500).json({
+      error: 'Failed to get organization profile',
+      message: error.message
+    });
+  }
+});
+
+// Get organization contacts and decision makers
+app.get('/api/v1/admin/organizations/:organizationId/contacts', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    
+    const contacts = await db.query(`
+      SELECT * FROM organization_contacts 
+      WHERE organization_id = $1 
+      ORDER BY role_type = 'decision_maker' DESC, confidence_level DESC, created_at DESC
+    `, [organizationId]);
+    
+    res.json({
+      success: true,
+      data: {
+        organizationId,
+        contacts: contacts.rows,
+        summary: {
+          total: contacts.rows.length,
+          decisionMakers: contacts.rows.filter(c => c.role_type === 'decision_maker').length,
+          endUsers: contacts.rows.filter(c => c.role_type === 'end_user').length,
+          averageConfidence: contacts.rows.length > 0 
+            ? (contacts.rows.reduce((sum, c) => sum + parseFloat(c.confidence_level || 0), 0) / contacts.rows.length).toFixed(2)
+            : 0
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get organization contacts error:', error);
+    res.status(500).json({
+      error: 'Failed to get organization contacts',
+      message: error.message
+    });
+  }
+});
+
+// Get organization intelligence analysis
+app.get('/api/v1/admin/organizations/:organizationId/intelligence', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    
+    const intelligence = await db.query(`
+      SELECT * FROM organization_intelligence 
+      WHERE organization_id = $1 
+      ORDER BY created_at DESC
+    `, [organizationId]);
+    
+    const currentIntelligence = intelligence.rows.find(i => i.is_current) || intelligence.rows[0];
+    
+    if (!currentIntelligence) {
+      return res.status(404).json({
+        error: 'No intelligence data found',
+        message: 'This organization has no intelligence analysis yet'
+      });
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        organizationId,
+        current: {
+          id: currentIntelligence.id,
+          customerScenarios: currentIntelligence.customer_scenarios,
+          businessValueAssessment: currentIntelligence.business_value_assessment,
+          customerLanguagePatterns: currentIntelligence.customer_language_patterns,
+          searchBehaviorInsights: currentIntelligence.search_behavior_insights,
+          seoOpportunities: currentIntelligence.seo_opportunities,
+          contentStrategyRecommendations: currentIntelligence.content_strategy_recommendations,
+          analysisConfidenceScore: parseFloat(currentIntelligence.analysis_confidence_score || 0),
+          createdAt: currentIntelligence.created_at,
+          isCurrent: currentIntelligence.is_current
+        },
+        history: intelligence.rows.map(i => ({
+          id: i.id,
+          analysisConfidenceScore: parseFloat(i.analysis_confidence_score || 0),
+          createdAt: i.created_at,
+          isCurrent: i.is_current
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Get organization intelligence error:', error);
+    res.status(500).json({
+      error: 'Failed to get organization intelligence',
       message: error.message
     });
   }
