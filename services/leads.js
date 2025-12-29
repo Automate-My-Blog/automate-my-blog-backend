@@ -154,20 +154,20 @@ class LeadService {
         sortOrder = 'DESC'
       } = options;
 
-      let whereConditions = [`lead_score BETWEEN $${1} AND $${2}`];
+      let whereConditions = [`ls.overall_score BETWEEN $${1} AND $${2}`];
       let queryParams = [minScore, maxScore];
       let paramIndex = 3;
 
       // Status filter
       if (status !== 'all') {
-        whereConditions.push(`status = $${paramIndex}`);
+        whereConditions.push(`wl.status = $${paramIndex}`);
         queryParams.push(status);
         paramIndex++;
       }
 
       // Source filter
       if (source !== 'all') {
-        whereConditions.push(`lead_source = $${paramIndex}`);
+        whereConditions.push(`wl.lead_source = $${paramIndex}`);
         queryParams.push(source);
         paramIndex++;
       }
@@ -175,15 +175,15 @@ class LeadService {
       // Date range filter
       if (dateRange !== 'all') {
         const days = dateRange === 'today' ? 1 : dateRange === 'week' ? 7 : dateRange === 'month' ? 30 : 90;
-        whereConditions.push(`created_at > NOW() - INTERVAL '${days} days'`);
+        whereConditions.push(`wl.created_at > NOW() - INTERVAL '${days} days'`);
       }
 
       // Search filter
       if (search && search.length > 0) {
         whereConditions.push(`(
-          LOWER(business_name) LIKE $${paramIndex} OR 
-          LOWER(website_url) LIKE $${paramIndex} OR
-          LOWER(industry) LIKE $${paramIndex}
+          LOWER(wl.business_name) LIKE $${paramIndex} OR 
+          LOWER(wl.website_url) LIKE $${paramIndex} OR
+          LOWER(wl.industry_category) LIKE $${paramIndex}
         )`);
         queryParams.push(`%${search.toLowerCase()}%`);
         paramIndex++;
@@ -231,8 +231,9 @@ class LeadService {
 
       // Get total count for pagination
       const countResult = await db.query(`
-        SELECT COUNT(*) as total
+        SELECT COUNT(DISTINCT wl.id) as total
         FROM website_leads wl
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
         ${whereClause}
       `, queryParams);
 
@@ -341,12 +342,13 @@ class LeadService {
       // Industry breakdown
       const industryResult = await db.query(`
         SELECT 
-          industry,
-          COUNT(*) as count,
-          ROUND(AVG(lead_score), 1) as avg_score
-        FROM website_leads
-        WHERE created_at > NOW() - INTERVAL '${days} days' AND industry IS NOT NULL
-        GROUP BY industry
+          wl.industry_category as industry,
+          COUNT(DISTINCT wl.id) as count,
+          ROUND(AVG(ls.overall_score), 1) as avg_score
+        FROM website_leads wl
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+        WHERE wl.created_at > NOW() - INTERVAL '${days} days' AND wl.industry_category IS NOT NULL
+        GROUP BY wl.industry_category
         ORDER BY count DESC
         LIMIT 10
       `);
