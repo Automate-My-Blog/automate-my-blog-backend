@@ -154,9 +154,9 @@ class LeadService {
         sortOrder = 'DESC'
       } = options;
 
-      let whereConditions = [`ls.overall_score BETWEEN $${1} AND $${2}`];
-      let queryParams = [minScore, maxScore];
-      let paramIndex = 3;
+      let whereConditions = [];
+      let queryParams = [];
+      let paramIndex = 1;
 
       // Status filter
       if (status !== 'all') {
