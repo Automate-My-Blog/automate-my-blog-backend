@@ -1289,6 +1289,33 @@ app.post('/api/v1/referrals/process-signup', authService.authMiddleware.bind(aut
   }
 });
 
+// Debug endpoint to check referral codes in database
+app.get('/api/v1/debug/referral-codes', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    // Get all users with their referral codes for debugging
+    const result = await db.query(`
+      SELECT id, email, first_name, last_name, referral_code, 
+             total_referrals_made, successful_referrals
+      FROM users 
+      WHERE referral_code IS NOT NULL
+      ORDER BY created_at DESC 
+      LIMIT 20
+    `);
+    
+    res.json({
+      success: true,
+      users: result.rows,
+      total: result.rows.length
+    });
+  } catch (error) {
+    console.error('Debug referral codes error:', error);
+    res.status(500).json({
+      error: 'Failed to get referral codes',
+      message: error.message
+    });
+  }
+});
+
 // Change user password
 app.post('/api/v1/user/change-password', authService.authMiddleware.bind(authService), async (req, res) => {
   try {

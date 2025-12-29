@@ -268,10 +268,14 @@ class ReferralService {
    * Process referral signup (when someone signs up with a referral code or invite code)
    */
   async processReferralSignup(newUserId, code) {
+    console.log('🔄 Starting referral signup processing:', { newUserId, code });
+    
     try {
       await db.transaction(async (client) => {
         let invite = null;
         let referrerUserId = null;
+        
+        console.log('🔍 Step 1: Checking for invite code in user_invites table...');
         
         // First, try to find it as an invite code
         const inviteResult = await client.query(`
@@ -280,17 +284,32 @@ class ReferralService {
           WHERE invite_code = $1
         `, [code]);
         
+        console.log('📊 Invite code lookup result:', {
+          found: inviteResult.rows.length > 0,
+          results: inviteResult.rows
+        });
+        
         if (inviteResult.rows.length > 0) {
           // Found an invite code
+          console.log('✅ Found invite code, using invite flow');
           invite = inviteResult.rows[0];
           referrerUserId = invite.inviter_user_id;
         } else {
+          console.log('🔍 Step 2: No invite found, checking for direct referral code in users table...');
+          
           // Not an invite code, try as a direct referral code
           const referrerResult = await client.query(`
-            SELECT id FROM users WHERE referral_code = $1
+            SELECT id, email, first_name, last_name, referral_code FROM users WHERE referral_code = $1
           `, [code]);
           
+          console.log('📊 Referral code lookup result:', {
+            found: referrerResult.rows.length > 0,
+            searchedCode: code,
+            results: referrerResult.rows
+          });
+          
           if (referrerResult.rows.length > 0) {
+            console.log('✅ Found referrer user, creating virtual invite record');
             referrerUserId = referrerResult.rows[0].id;
             
             // Create a virtual invite record for direct referrals
