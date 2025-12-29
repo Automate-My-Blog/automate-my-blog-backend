@@ -40,6 +40,8 @@ async function setupDatabase() {
       '03_referral_analytics_tables.sql',
       '04_admin_security_tables.sql',
       '06_lead_generation_tables.sql',
+      '07_add_website_to_organizations.sql',
+      '08_organization_intelligence_tables.sql', // New organization intelligence structure
       '05_create_all_indexes.sql'  // Run indexes last
     ];
     
