@@ -265,39 +265,80 @@ class ReferralService {
   }
 
   /**
-   * Process referral signup (when someone signs up with a referral code)
+   * Process referral signup (when someone signs up with a referral code or invite code)
    */
-  async processReferralSignup(newUserId, inviteCode) {
+  async processReferralSignup(newUserId, code) {
     try {
       await db.transaction(async (client) => {
-        // Get invite details
+        let invite = null;
+        let referrerUserId = null;
+        
+        // First, try to find it as an invite code
         const inviteResult = await client.query(`
           SELECT id, inviter_user_id, invite_type, status, expires_at
           FROM user_invites 
           WHERE invite_code = $1
-        `, [inviteCode]);
-
-        if (inviteResult.rows.length === 0) {
-          throw new Error('Invalid invite code');
+        `, [code]);
+        
+        if (inviteResult.rows.length > 0) {
+          // Found an invite code
+          invite = inviteResult.rows[0];
+          referrerUserId = invite.inviter_user_id;
+        } else {
+          // Not an invite code, try as a direct referral code
+          const referrerResult = await client.query(`
+            SELECT id FROM users WHERE referral_code = $1
+          `, [code]);
+          
+          if (referrerResult.rows.length > 0) {
+            referrerUserId = referrerResult.rows[0].id;
+            
+            // Create a virtual invite record for direct referrals
+            const virtualInviteId = uuidv4();
+            await client.query(`
+              INSERT INTO user_invites (
+                id, inviter_user_id, email, invite_type, invite_code, 
+                status, expires_at, sent_at, accepted_at, accepted_by_user_id
+              ) 
+              SELECT $1, $2, u.email, 'referral', $3, 'accepted', 
+                     NOW() + INTERVAL '30 days', NOW(), NOW(), $4
+              FROM users u WHERE u.id = $4
+            `, [virtualInviteId, referrerUserId, code, newUserId]);
+            
+            // Create the invite object for processing
+            invite = {
+              id: virtualInviteId,
+              inviter_user_id: referrerUserId,
+              invite_type: 'referral',
+              status: 'accepted',
+              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+            };
+          }
         }
 
-        const invite = inviteResult.rows[0];
-
-        // Check if invite is still valid
-        if (invite.status !== 'pending') {
-          throw new Error('Invite has already been used or cancelled');
+        if (!invite) {
+          throw new Error('Invalid referral or invite code');
         }
 
-        if (new Date(invite.expires_at) < new Date()) {
-          throw new Error('Invite has expired');
+        // For invite codes (not direct referrals), check if invite is still valid
+        if (inviteResult.rows.length > 0) {
+          if (invite.status !== 'pending') {
+            throw new Error('Invite has already been used or cancelled');
+          }
+
+          if (new Date(invite.expires_at) < new Date()) {
+            throw new Error('Invite has expired');
+          }
         }
 
-        // Mark invite as accepted
-        await client.query(`
-          UPDATE user_invites 
-          SET status = 'accepted', accepted_at = NOW(), accepted_by_user_id = $1
-          WHERE id = $2
-        `, [newUserId, invite.id]);
+        // Mark invite as accepted (only if it was a real pending invite)
+        if (inviteResult.rows.length > 0) {
+          await client.query(`
+            UPDATE user_invites 
+            SET status = 'accepted', accepted_at = NOW(), accepted_by_user_id = $1
+            WHERE id = $2
+          `, [newUserId, invite.id]);
+        }
 
         // If this is a referral (not organization invite), create referral record and rewards
         if (invite.invite_type === 'referral') {
