@@ -10,6 +10,7 @@ const authService = new DatabaseAuthService();
 import contentService from './services/content.js';
 import referralService from './services/referrals.js';
 import billingService from './services/billing.js';
+import leadService from './services/leads.js';
 import db from './services/database.js';
 
 // Load environment variables
@@ -114,7 +115,11 @@ app.get('/api', (req, res) => {
       'PUT /api/v1/organization/profile': 'Update organization name and website (requires auth)',
       'POST /api/v1/organization/invite': 'Send organization team member invitation (requires auth)',
       'GET /api/v1/organization/members': 'Get organization members list (requires auth)',
-      'DELETE /api/v1/organization/members/:id': 'Remove organization member (requires auth)'
+      'DELETE /api/v1/organization/members/:id': 'Remove organization member (requires auth)',
+      'GET /api/v1/admin/leads': 'Get website leads with filters (super admin only)',
+      'GET /api/v1/admin/leads/analytics': 'Get lead analytics and metrics (super admin only)',
+      'GET /api/v1/admin/leads/:id': 'Get detailed lead information (super admin only)',
+      'PUT /api/v1/admin/leads/:id/status': 'Update lead status (super admin only)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -313,6 +318,21 @@ app.post('/api/analyze-website', async (req, res) => {
     // Analyze with OpenAI (using smart default colors)
     const analysis = await openaiService.analyzeWebsite(fullContent, url);
     console.log('OpenAI analysis completed:', analysis?.businessType || 'N/A');
+
+    // Capture website lead for anonymous users (for super admin analytics)
+    try {
+      const sessionInfo = {
+        ipAddress: req.ip || req.connection?.remoteAddress || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+        referrer: req.headers['referer'] || req.headers['referrer'] || null
+      };
+      
+      await leadService.captureLead(url, analysis, sessionInfo);
+      console.log('📊 Lead captured for website analysis:', analysis?.businessName || url);
+    } catch (leadError) {
+      // Don't fail the main request if lead capture fails
+      console.warn('Failed to capture lead:', leadError.message);
+    }
 
     const response = {
       success: true,
@@ -1038,6 +1058,106 @@ app.get('/api/v1/admin/users/:userId', authService.authMiddleware.bind(authServi
     console.error('Get user details error:', error);
     res.status(500).json({
       error: 'Failed to retrieve user details',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// WEBSITE LEAD MANAGEMENT API ENDPOINTS (Super Admin Only)
+// =============================================================================
+
+// Get all website leads with filtering and pagination
+app.get('/api/v1/admin/leads', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const options = {
+      limit: parseInt(req.query.limit) || 50,
+      offset: parseInt(req.query.offset) || 0,
+      status: req.query.status || 'all',
+      source: req.query.source || 'all',
+      minScore: parseInt(req.query.minScore) || 0,
+      maxScore: parseInt(req.query.maxScore) || 100,
+      dateRange: req.query.dateRange || 'all',
+      search: req.query.search || '',
+      sortBy: req.query.sortBy || 'created_at',
+      sortOrder: req.query.sortOrder || 'DESC'
+    };
+
+    const result = await leadService.getLeads(options);
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Get leads error:', error);
+    res.status(500).json({
+      error: 'Failed to get leads',
+      message: error.message
+    });
+  }
+});
+
+// Get lead analytics and metrics
+app.get('/api/v1/admin/leads/analytics', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const dateRange = req.query.dateRange || 'month';
+    const analytics = await leadService.getLeadAnalytics(dateRange);
+    
+    res.json({
+      success: true,
+      data: analytics
+    });
+  } catch (error) {
+    console.error('Get lead analytics error:', error);
+    res.status(500).json({
+      error: 'Failed to get lead analytics',
+      message: error.message
+    });
+  }
+});
+
+// Get detailed information for a specific lead
+app.get('/api/v1/admin/leads/:leadId', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const leadDetails = await leadService.getLeadDetails(leadId);
+    
+    res.json({
+      success: true,
+      data: leadDetails
+    });
+  } catch (error) {
+    console.error('Get lead details error:', error);
+    res.status(500).json({
+      error: 'Failed to get lead details',
+      message: error.message
+    });
+  }
+});
+
+// Update lead status
+app.put('/api/v1/admin/leads/:leadId/status', authService.authMiddleware.bind(authService), requireSuperAdmin, async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    const { status, notes } = req.body;
+
+    if (!status) {
+      return res.status(400).json({
+        error: 'Missing required field',
+        message: 'Status is required'
+      });
+    }
+
+    const result = await leadService.updateLeadStatus(leadId, status, notes || '');
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Update lead status error:', error);
+    res.status(500).json({
+      error: 'Failed to update lead status',
       message: error.message
     });
   }
