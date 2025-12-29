@@ -9,6 +9,7 @@ import DatabaseAuthService from './services/auth-database.js';
 const authService = new DatabaseAuthService();
 import contentService from './services/content.js';
 import referralService from './services/referrals.js';
+import billingService from './services/billing.js';
 import db from './services/database.js';
 
 // Load environment variables
@@ -100,6 +101,8 @@ app.get('/api', (req, res) => {
       'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)',
       'PUT /api/v1/user/profile': 'Update user profile (requires auth)',
       'POST /api/v1/user/change-password': 'Change user password (requires auth)',
+      'GET /api/v1/user/credits': 'Get user credits and billing info (requires auth)',
+      'POST /api/v1/user/apply-rewards': 'Apply pending referral rewards (requires auth)', 
       'GET /api/v1/user/usage-history': 'Get usage history and analytics (requires auth)',
       'POST /api/v1/user/request-plan-change': 'Request plan upgrade/change (requires auth)',
       'GET /api/v1/user/billing-history': 'Get billing history and invoices (requires auth)',
@@ -1173,6 +1176,68 @@ app.put('/api/v1/organization/profile', authService.authMiddleware.bind(authServ
     console.error('Update organization error:', error);
     res.status(500).json({
       error: 'Failed to update organization',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// BILLING AND USAGE API ENDPOINTS  
+// =============================================================================
+
+// Get user's credits and billing info
+app.get('/api/v1/user/credits', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const credits = await billingService.getUserCredits(userId);
+    
+    res.json({
+      success: true,
+      data: credits
+    });
+  } catch (error) {
+    console.error('Get user credits error:', error);
+    res.status(500).json({
+      error: 'Failed to get credits',
+      message: error.message
+    });
+  }
+});
+
+// Apply pending referral rewards to user account
+app.post('/api/v1/user/apply-rewards', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const result = await billingService.applyPendingRewards(userId);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Apply rewards error:', error);
+    res.status(500).json({
+      error: 'Failed to apply rewards',
+      message: error.message
+    });
+  }
+});
+
+// Get billing history
+app.get('/api/v1/user/billing-history', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const limit = parseInt(req.query.limit) || 50;
+    const history = await billingService.getBillingHistory(userId, limit);
+    
+    res.json({
+      success: true,
+      data: history
+    });
+  } catch (error) {
+    console.error('Get billing history error:', error);
+    res.status(500).json({
+      error: 'Failed to get billing history',
       message: error.message
     });
   }

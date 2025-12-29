@@ -162,7 +162,7 @@ class DatabaseAuthService {
       INSERT INTO billing_accounts (
         user_id, current_plan, billing_status, usage_limit, current_usage, created_at
       ) VALUES ($1, $2, $3, $4, $5, NOW())
-    `, [user.id, 'free', 'active', 3, 0]); // 3 free blog posts
+    `, [user.id, 'free', 'active', 1, 0]); // 1 free blog post
 
     // Log registration activity
     await this.logUserActivity(user.id, 'user_registered', {
