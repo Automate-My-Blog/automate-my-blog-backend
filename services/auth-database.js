@@ -426,11 +426,13 @@ class DatabaseAuthService {
           SELECT u.*, 
                  o.id as organization_id, o.name as organization_name, o.slug as organization_slug, o.website_url as organization_website,
                  om.role as organization_role,
-                 ba.current_plan, ba.billing_status, ba.usage_limit, ba.current_usage
+                 ba.current_plan, ba.billing_status, ba.usage_limit, ba.current_usage,
+                 ur.name as role_name, ur.permissions, ur.hierarchy_level
           FROM users u
           LEFT JOIN organization_members om ON u.id = om.user_id
           LEFT JOIN organizations o ON om.organization_id = o.id
           LEFT JOIN billing_accounts ba ON u.id = ba.user_id
+          LEFT JOIN user_roles ur ON u.role = ur.name
           WHERE u.id = $1 AND u.status = 'active'
           ORDER BY om.created_at ASC
           LIMIT 1
@@ -456,7 +458,10 @@ class DatabaseAuthService {
           billingStatus: user.billing_status,
           usageLimit: user.usage_limit,
           currentUsage: user.current_usage,
-          lastLoginAt: user.last_login_at
+          lastLoginAt: user.last_login_at,
+          role: user.role_name || user.role || 'user',
+          permissions: user.permissions || [],
+          hierarchyLevel: user.hierarchy_level || 10
         };
       } else {
         const user = fallbackUsers.get(userId);

@@ -217,7 +217,16 @@ app.post('/api/v1/auth/login', async (req, res) => {
 // Get current user endpoint
 app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
-    const user = authService.getUserById(req.user.userId);
+    const user = await authService.getUserById(req.user.userId);
+    
+    // Debug logging to verify role data is being returned
+    console.log('🔍 /me endpoint returning user data:', {
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions,
+      hierarchyLevel: user.hierarchyLevel
+    });
     
     res.json({
       success: true,
