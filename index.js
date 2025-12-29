@@ -107,10 +107,11 @@ app.get('/api', (req, res) => {
       'GET /api/v1/referrals/link': 'Generate personal referral link (requires auth)',
       'POST /api/v1/referrals/invite': 'Send referral invitation for customer acquisition (requires auth)',
       'GET /api/v1/referrals/stats': 'Get referral statistics and earnings (requires auth)',
+      'POST /api/v1/referrals/process-signup': 'Process referral signup and grant rewards (requires auth)',
+      'PUT /api/v1/organization/profile': 'Update organization name and website (requires auth)',
       'POST /api/v1/organization/invite': 'Send organization team member invitation (requires auth)',
       'GET /api/v1/organization/members': 'Get organization members list (requires auth)',
-      'DELETE /api/v1/organization/members/:id': 'Remove organization member (requires auth)',
-      'POST /api/v1/referrals/process-signup': 'Process referral signup and grant rewards'
+      'DELETE /api/v1/organization/members/:id': 'Remove organization member (requires auth)'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -1172,6 +1173,117 @@ app.put('/api/v1/organization/profile', authService.authMiddleware.bind(authServ
     console.error('Update organization error:', error);
     res.status(500).json({
       error: 'Failed to update organization',
+      message: error.message
+    });
+  }
+});
+
+// =============================================================================
+// REFERRAL SYSTEM API ENDPOINTS  
+// =============================================================================
+
+// Get user's referral link and code
+app.get('/api/v1/referrals/link', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const referralData = await referralService.generateReferralLink(userId);
+    
+    res.json({
+      success: true,
+      data: referralData
+    });
+  } catch (error) {
+    console.error('Get referral link error:', error);
+    res.status(500).json({
+      error: 'Failed to get referral link',
+      message: error.message
+    });
+  }
+});
+
+// Send referral invitation
+app.post('/api/v1/referrals/invite', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { email, personalMessage } = req.body;
+    const userId = req.user.userId;
+
+    // Validate input
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'Email address is required'
+      });
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return res.status(400).json({
+        error: 'Invalid email format',
+        message: 'Please provide a valid email address'
+      });
+    }
+
+    const inviteData = await referralService.sendReferralInvite(
+      userId,
+      email.trim(),
+      personalMessage || ''
+    );
+    
+    res.json({
+      success: true,
+      data: inviteData
+    });
+  } catch (error) {
+    console.error('Send referral invite error:', error);
+    res.status(400).json({
+      error: 'Failed to send referral invite',
+      message: error.message
+    });
+  }
+});
+
+// Get referral statistics
+app.get('/api/v1/referrals/stats', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const stats = await referralService.getReferralStats(userId);
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+  } catch (error) {
+    console.error('Get referral stats error:', error);
+    res.status(500).json({
+      error: 'Failed to get referral stats',
+      message: error.message
+    });
+  }
+});
+
+// Process referral signup (called during registration)
+app.post('/api/v1/referrals/process-signup', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { userId, inviteCode } = req.body;
+    
+    if (!userId || !inviteCode) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'userId and inviteCode are required'
+      });
+    }
+
+    const result = await referralService.processReferralSignup(userId, inviteCode);
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  } catch (error) {
+    console.error('Process referral signup error:', error);
+    res.status(400).json({
+      error: 'Failed to process referral signup',
       message: error.message
     });
   }
