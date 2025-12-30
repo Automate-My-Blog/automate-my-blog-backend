@@ -447,14 +447,39 @@ class LeadService {
    */
   async getLeadDetails(leadId) {
     try {
-      // Get lead info
+      // Get lead info with organization intelligence data (same as getLeads query but for single lead)
       const leadResult = await db.query(`
         SELECT 
           wl.*,
+          -- Organization data
+          o.id as organization_id,
+          o.name as organization_name,
+          o.business_model,
+          o.company_size as org_company_size,
+          o.target_audience as org_target_audience,
+          o.brand_voice as org_brand_voice,
+          -- Lead scoring data
+          ls.overall_score as lead_score,
+          ls.business_size_score,
+          ls.industry_fit_score,
+          ls.engagement_score,
+          ls.content_quality_score,
+          ls.scoring_factors,
+          -- Organization intelligence summary
+          oi.customer_scenarios,
+          oi.business_value_assessment,
+          oi.analysis_confidence_score,
+          -- Decision makers
+          get_organization_decision_makers(o.id) as decision_makers,
+          -- Conversion data
           u.email as converted_user_email,
           u.first_name as converted_user_first_name,
-          u.last_name as converted_user_last_name
+          u.last_name as converted_user_last_name,
+          EXTRACT(EPOCH FROM (COALESCE(wl.converted_at, NOW()) - wl.created_at)) / 86400 as days_in_funnel
         FROM website_leads wl
+        LEFT JOIN organizations o ON wl.organization_id = o.id
+        LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
+        LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
         LEFT JOIN users u ON wl.converted_to_user_id = u.id
         WHERE wl.id = $1
       `, [leadId]);
@@ -474,15 +499,16 @@ class LeadService {
       `, [leadId]);
 
       return {
+        // Lead information
         id: lead.id,
         websiteUrl: lead.website_url,
         businessName: lead.business_name,
         businessType: lead.business_type,
-        industry: lead.industry,
+        industry: lead.industry_category,
         estimatedCompanySize: lead.estimated_company_size,
         leadSource: lead.lead_source,
         leadSourceDisplay: this.leadSources[lead.lead_source] || lead.lead_source,
-        leadScore: parseInt(lead.lead_score),
+        leadScore: parseInt(lead.lead_score || 0),
         status: lead.status,
         statusDisplay: this.leadStatuses[lead.status] || lead.status,
         isConverted: !!lead.converted_to_user_id,
@@ -492,11 +518,28 @@ class LeadService {
           firstName: lead.converted_user_first_name,
           lastName: lead.converted_user_last_name
         } : null,
+        daysInFunnel: parseFloat(lead.days_in_funnel || 0).toFixed(1),
         createdAt: lead.created_at,
         updatedAt: lead.updated_at,
         ipAddress: lead.ip_address,
         userAgent: lead.user_agent,
         referrerUrl: lead.referrer_url,
+        
+        // Organization data (NEW)
+        organizationId: lead.organization_id,
+        organizationName: lead.organization_name,
+        businessModel: lead.business_model,
+        companySize: lead.org_company_size,
+        targetAudience: lead.org_target_audience,
+        brandVoice: lead.org_brand_voice,
+        
+        // Business intelligence (NEW)
+        decisionMakers: lead.decision_makers || [],
+        customerScenarios: lead.customer_scenarios || [],
+        businessValueAssessment: lead.business_value_assessment || {},
+        analysisConfidenceScore: parseFloat(lead.analysis_confidence_score || 0),
+        
+        // Backward compatibility
         analysisData: lead.analysis_data,
         conversionSteps: stepsResult.rows.map(step => ({
           step: step.conversion_step,
