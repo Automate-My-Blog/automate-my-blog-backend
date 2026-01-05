@@ -12,6 +12,7 @@ import referralService from './services/referrals.js';
 import billingService from './services/billing.js';
 import leadService from './services/leads.js';
 import organizationService from './services/organizations.js';
+import projectsService from './services/projects.js';
 import db from './services/database.js';
 import sessionRoutes from './routes/session.js';
 
