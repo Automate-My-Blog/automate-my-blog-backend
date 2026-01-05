@@ -31,6 +31,19 @@ router.post('/', async (req, res) => {
     const userContext = extractUserContext(req);
     validateUserContext(userContext);
 
+    // Debug logging for audience creation
+    console.log('🎯 Creating audience with data:', {
+      userContext: { 
+        isAuthenticated: userContext.isAuthenticated, 
+        userId: userContext.userId, 
+        sessionId: userContext.sessionId 
+      },
+      bodyKeys: Object.keys(req.body),
+      target_segment_type: typeof req.body.target_segment,
+      customer_language_type: typeof req.body.customer_language,
+      business_value_type: typeof req.body.business_value
+    });
+
     const {
       organization_intelligence_id,
       project_id,
@@ -50,16 +63,30 @@ router.post('/', async (req, res) => {
       });
     }
 
+    // Safe JSON stringification with error handling
+    const safeStringify = (obj, fieldName) => {
+      if (obj === null || obj === undefined) return null;
+      if (typeof obj === 'string') return obj;
+      
+      try {
+        return JSON.stringify(obj);
+      } catch (error) {
+        console.error(`JSON stringify error for ${fieldName}:`, error);
+        console.error(`Value causing error:`, obj);
+        throw new Error(`Invalid JSON data for ${fieldName}`);
+      }
+    };
+
     const audienceData = {
       user_id: userContext.userId,
       session_id: userContext.sessionId,
       project_id,
       organization_intelligence_id,
-      target_segment: typeof target_segment === 'string' ? target_segment : JSON.stringify(target_segment),
+      target_segment: safeStringify(target_segment, 'target_segment'),
       customer_problem,
-      customer_language: customer_language ? (typeof customer_language === 'string' ? customer_language : JSON.stringify(customer_language)) : null,
+      customer_language: safeStringify(customer_language, 'customer_language'),
       conversion_path,
-      business_value: business_value ? (typeof business_value === 'string' ? business_value : JSON.stringify(business_value)) : null,
+      business_value: safeStringify(business_value, 'business_value'),
       priority
     };
 
