@@ -291,6 +291,39 @@ app.post('/api/v1/auth/logout', (req, res) => {
   });
 });
 
+// Get user's most recent website analysis endpoint
+app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    console.log(`📊 Getting most recent analysis for user: ${userId}`);
+    
+    const recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
+    
+    if (!recentAnalysis) {
+      return res.json({
+        success: true,
+        analysis: null,
+        message: 'No analysis found for this user'
+      });
+    }
+    
+    console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
+    
+    res.json({
+      success: true,
+      analysis: recentAnalysis,
+      message: 'Recent analysis retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Get recent analysis error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve recent analysis',
+      message: error.message
+    });
+  }
+});
+
 // Analyze website endpoint
 app.post('/api/analyze-website', async (req, res) => {
   console.log('=== Website Analysis Request ===');
