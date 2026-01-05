@@ -4,6 +4,15 @@ import db from '../services/database.js';
 const router = express.Router();
 
 const extractUserContext = (req) => {
+  // Debug logging for JWT token verification issues
+  console.log('🔍 extractUserContext debug:', {
+    hasReqUser: !!req.user,
+    userKeys: req.user ? Object.keys(req.user) : null,
+    authHeader: req.headers.authorization ? 'Bearer ***' : null,
+    sessionHeader: req.headers['x-session-id'],
+    bodySessionId: req.body?.session_id
+  });
+  
   if (req.user?.userId) {
     return {
       isAuthenticated: true,
