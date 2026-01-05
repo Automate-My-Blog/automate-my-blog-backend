@@ -3,6 +3,26 @@ import db from '../services/database.js';
 
 const router = express.Router();
 
+// Safe JSON parsing to handle corrupted database records
+const safeParse = (jsonString, fieldName, recordId) => {
+  if (!jsonString) return null;
+  if (typeof jsonString === 'object') return jsonString; // Already parsed
+  
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error(`JSON parse error for ${fieldName} in record ${recordId}:`, {
+      error: error.message,
+      rawValue: jsonString,
+      valueType: typeof jsonString
+    });
+    // Return a fallback object instead of failing
+    return fieldName === 'target_segment' 
+      ? { demographics: 'Data parsing error', psychographics: 'Please recreate audience', searchBehavior: 'N/A' }
+      : null;
+  }
+};
+
 const extractUserContext = (req) => {
   if (req.user?.userId) {
     return {
@@ -120,11 +140,11 @@ router.post('/', async (req, res) => {
         session_id: audience.session_id,
         project_id: audience.project_id,
         organization_intelligence_id: audience.organization_intelligence_id,
-        target_segment: JSON.parse(audience.target_segment),
+        target_segment: safeParse(audience.target_segment, 'target_segment_response', audience.id),
         customer_problem: audience.customer_problem,
-        customer_language: audience.customer_language ? JSON.parse(audience.customer_language) : null,
+        customer_language: safeParse(audience.customer_language, 'customer_language_response', audience.id),
         conversion_path: audience.conversion_path,
-        business_value: audience.business_value ? JSON.parse(audience.business_value) : null,
+        business_value: safeParse(audience.business_value, 'business_value_response', audience.id),
         priority: audience.priority,
         created_at: audience.created_at,
         updated_at: audience.updated_at
@@ -229,25 +249,7 @@ router.get('/', async (req, res) => {
       });
     });
 
-    // Safe JSON parsing to handle corrupted database records
-    const safeParse = (jsonString, fieldName, recordId) => {
-      if (!jsonString) return null;
-      if (typeof jsonString === 'object') return jsonString; // Already parsed
-      
-      try {
-        return JSON.parse(jsonString);
-      } catch (error) {
-        console.error(`JSON parse error for ${fieldName} in record ${recordId}:`, {
-          error: error.message,
-          rawValue: jsonString,
-          valueType: typeof jsonString
-        });
-        // Return a fallback object instead of failing
-        return fieldName === 'target_segment' 
-          ? { demographics: 'Data parsing error', psychographics: 'Please recreate audience', searchBehavior: 'N/A' }
-          : null;
-      }
-    };
+    // Using safeParse function defined at top of file
 
     const audiences = result.rows.map(row => ({
       id: row.id,
@@ -324,11 +326,11 @@ router.get('/:id', async (req, res) => {
       success: true,
       audience: {
         id: audience.id,
-        target_segment: JSON.parse(audience.target_segment),
+        target_segment: safeParse(audience.target_segment, 'target_segment_get', audience.id),
         customer_problem: audience.customer_problem,
-        customer_language: audience.customer_language ? JSON.parse(audience.customer_language) : null,
+        customer_language: safeParse(audience.customer_language, 'customer_language_get', audience.id),
         conversion_path: audience.conversion_path,
-        business_value: audience.business_value ? JSON.parse(audience.business_value) : null,
+        business_value: safeParse(audience.business_value, 'business_value_get', audience.id),
         priority: audience.priority,
         created_at: audience.created_at,
         updated_at: audience.updated_at,
@@ -448,11 +450,11 @@ router.put('/:id', async (req, res) => {
       success: true,
       audience: {
         id: audience.id,
-        target_segment: JSON.parse(audience.target_segment),
+        target_segment: safeParse(audience.target_segment, 'target_segment_update', audience.id),
         customer_problem: audience.customer_problem,
-        customer_language: audience.customer_language ? JSON.parse(audience.customer_language) : null,
+        customer_language: safeParse(audience.customer_language, 'customer_language_update', audience.id),
         conversion_path: audience.conversion_path,
-        business_value: audience.business_value ? JSON.parse(audience.business_value) : null,
+        business_value: safeParse(audience.business_value, 'business_value_update', audience.id),
         priority: audience.priority,
         created_at: audience.created_at,
         updated_at: audience.updated_at
