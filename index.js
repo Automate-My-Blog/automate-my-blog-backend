@@ -16,6 +16,7 @@ import projectsService from './services/projects.js';
 import db from './services/database.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
+import keywordRoutes from './routes/keywords.js';
 
 // Load environment variables
 dotenv.config();
@@ -64,6 +65,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // API Routes
 app.use('/api/v1/session', sessionRoutes);
 app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
+app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
