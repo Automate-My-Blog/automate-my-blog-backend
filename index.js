@@ -46,19 +46,39 @@ const limiter = rateLimit({
 
 // Middleware
 app.use(limiter);
+// Enhanced CORS configuration to fix Authorization header stripping
 app.use(cors({
   origin: [
     'https://automatemyblog.com',
     'https://www.automatemyblog.com',
-    'https://automatemyblog.vercel.app',
+    'https://automatemyblog.vercel.app', 
     'http://localhost:3000',
     'http://localhost:3001',
     'http://localhost:3002'
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id'],
-  credentials: true
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization', 
+    'x-session-id',
+    'Accept',
+    'X-Requested-With',
+    'Access-Control-Allow-Headers'
+  ],
+  exposedHeaders: ['Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 200, // Some legacy browsers choke on 204
+  preflightContinue: false
 }));
+
+// Explicit preflight handling for Authorization header
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,x-session-id,Accept,X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.status(200).send();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
