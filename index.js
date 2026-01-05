@@ -102,6 +102,18 @@ app.get('/api/v1/debug/headers', (req, res) => {
   });
 });
 
+// Test direct audiences endpoint without router (for comparison)
+app.get('/api/v1/audiences-direct', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
+  console.log('🧪 DIRECT AUDIENCES ENDPOINT - Header comparison test');
+  res.json({
+    success: true,
+    message: 'Direct audiences endpoint for header testing',
+    hasAuth: !!req.user,
+    userId: req.user?.userId || null,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // API routes index
 app.get('/api', (req, res) => {
   res.json({

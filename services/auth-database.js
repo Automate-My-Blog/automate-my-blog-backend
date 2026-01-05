@@ -608,6 +608,19 @@ class DatabaseAuthService {
    * Optional auth middleware
    */
   optionalAuthMiddleware(req, res, next) {
+    // Comprehensive header debugging
+    console.log('🔍 optionalAuthMiddleware FULL DEBUG:', {
+      endpoint: req.path,
+      originalUrl: req.originalUrl,
+      method: req.method,
+      allHeaders: req.headers,
+      authHeaderExists: !!req.headers.authorization,
+      authHeaderValue: req.headers.authorization ? req.headers.authorization.substring(0, 30) + '...' : null,
+      sessionHeaderExists: !!req.headers['x-session-id'],
+      sessionHeaderValue: req.headers['x-session-id'],
+      userAgent: req.headers['user-agent']
+    });
+
     const authHeader = req.headers.authorization;
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -632,7 +645,8 @@ class DatabaseAuthService {
     } else {
       console.log('🔍 No auth header in optionalAuth:', {
         endpoint: req.path,
-        hasSessionHeader: !!req.headers['x-session-id']
+        hasSessionHeader: !!req.headers['x-session-id'],
+        receivedHeaders: Object.keys(req.headers)
       });
     }
 
