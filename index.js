@@ -89,6 +89,19 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Debug endpoint to check what headers are actually received
+app.get('/api/v1/debug/headers', (req, res) => {
+  res.json({
+    success: true,
+    headers: req.headers,
+    hasAuth: !!req.headers.authorization,
+    hasSessionId: !!req.headers['x-session-id'],
+    authHeader: req.headers.authorization ? 'Bearer ***' : null,
+    sessionId: req.headers['x-session-id'] || null,
+    timestamp: new Date().toISOString()
+  });
+});
+
 // API routes index
 app.get('/api', (req, res) => {
   res.json({
