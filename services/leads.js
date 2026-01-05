@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
 import organizationService from './organizations.js';
+import projectsService from './projects.js';
 
 /**
  * Website Lead Management Service
@@ -30,19 +31,86 @@ class LeadService {
    * Capture a new lead from website analysis - Organization-Centric Approach
    */
   async captureLead(websiteUrl, analysisData, sessionInfo = {}) {
+    const requestId = sessionInfo.requestId || `lead_${Date.now()}`;
+    
     try {
-      console.log('📊 Starting organization-centric lead capture...');
+      console.log(`🔄 [${requestId}] LeadService.captureLead() - Starting organization-centric lead capture...`);
+      console.log(`   📍 URL: ${websiteUrl}`);
+      console.log(`   📊 Analysis Data Keys: ${analysisData ? Object.keys(analysisData).join(', ') : 'None'}`);
+      console.log(`   👤 Session Info Keys: ${Object.keys(sessionInfo).join(', ')}`);
       
       // Step 1: Create or update organization with business intelligence
+      console.log(`🏢 [${requestId}] Step 1: Creating/updating organization...`);
+      const orgStart = Date.now();
       const organizationId = await organizationService.createOrUpdateOrganization(websiteUrl, analysisData);
+      const orgTime = Date.now() - orgStart;
+      console.log(`✅ [${requestId}] Organization created/updated in ${orgTime}ms: ${organizationId}`);
       
       // Step 2: Save organization intelligence data  
+      console.log(`🧠 [${requestId}] Step 2: Saving organization intelligence...`);
+      const intelStart = Date.now();
       await organizationService.saveOrganizationIntelligence(organizationId, analysisData);
+      const intelTime = Date.now() - intelStart;
+      console.log(`✅ [${requestId}] Organization intelligence saved in ${intelTime}ms`);
       
       // Step 3: Extract and save contact information
+      console.log(`👥 [${requestId}] Step 3: Extracting and saving contacts...`);
+      const contactStart = Date.now();
       await organizationService.extractAndSaveContacts(organizationId, analysisData);
+      const contactTime = Date.now() - contactStart;
+      console.log(`✅ [${requestId}] Contacts extracted and saved in ${contactTime}ms`);
+      
+      // Step 3.5: Create anonymous project with structured fields to preserve OpenAI analysis
+      console.log(`📝 [${requestId}] Step 3.5: Creating anonymous project with structured fields...`);
+      const projectStart = Date.now();
+      let anonymousUserId = null;
+      let anonymousProjectId = null;
+      
+      try {
+        // Create temporary anonymous user ID for the project
+        anonymousUserId = uuidv4();
+        
+        // Create user record for the anonymous analysis
+        await db.query(`
+          INSERT INTO users (id, email, first_name, last_name, password_hash, role, status) 
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          ON CONFLICT (email) DO NOTHING
+        `, [
+          anonymousUserId, 
+          `anonymous-${anonymousUserId}@temp.local`, 
+          'Anonymous', 
+          'User', 
+          'no-password-required',
+          'user',
+          'active'
+        ]);
+        
+        // Create project with structured OpenAI fields
+        const projectResult = await projectsService.createProject(
+          anonymousUserId,
+          websiteUrl,
+          analysisData,
+          `Anonymous Analysis: ${analysisData.businessName || 'Website Analysis'}`
+        );
+        
+        if (projectResult.success) {
+          anonymousProjectId = projectResult.projectId;
+          console.log(`✅ [${requestId}] Anonymous project created: ${anonymousProjectId}`);
+        } else {
+          console.warn(`⚠️ [${requestId}] Failed to create anonymous project: ${projectResult.message}`);
+        }
+        
+        const projectTime = Date.now() - projectStart;
+        console.log(`✅ [${requestId}] Anonymous project processing completed in ${projectTime}ms`);
+        
+      } catch (projectError) {
+        console.error(`❌ [${requestId}] Anonymous project creation failed:`, projectError.message);
+        // Don't fail the entire lead capture if project creation fails
+      }
       
       // Step 4: Create lead record linked to organization
+      console.log(`📝 [${requestId}] Step 4: Creating lead record...`);
+      const leadRecordStart = Date.now();
       const leadId = uuidv4();
       const ipAddress = sessionInfo.ipAddress || 'unknown';
       const userAgent = sessionInfo.userAgent || 'unknown';
@@ -55,21 +123,38 @@ class LeadService {
           leadSource = 'organic_search';
         } else if (referrer.includes('facebook.com') || referrer.includes('linkedin.com')) {
           leadSource = 'social';
-        } else if (referrer !== window.location.origin) {
-          leadSource = 'referral';
+        } else if (referrer.includes('automatemyblog.com')) {
+          // Check for actual referral parameters
+          if (referrer.includes('?ref=') || referrer.includes('&ref=')) {
+            leadSource = 'referral';
+          } else {
+            leadSource = 'direct'; // From own domain without ref parameter
+          }
+        } else {
+          leadSource = 'referral'; // External domain
         }
       }
 
       const websiteDomain = new URL(websiteUrl).hostname;
+      
+      console.log(`   📊 [${requestId}] Lead details:`);
+      console.log(`      Lead ID: ${leadId}`);
+      console.log(`      Organization ID: ${organizationId}`);
+      console.log(`      Website URL: ${websiteUrl}`);
+      console.log(`      Domain: ${websiteDomain}`);
+      console.log(`      Business Name: ${analysisData.businessName || 'Unknown Business'}`);
+      console.log(`      Lead Source: ${leadSource}`);
+      console.log(`      IP Address: ${ipAddress}`);
 
       // Create simplified lead record that references organization
+      console.log(`   💾 [${requestId}] Inserting lead into website_leads table...`);
       const leadResult = await db.query(`
         INSERT INTO website_leads (
           id, organization_id, website_url, website_domain, business_name, business_type, 
           industry_category, estimated_company_size, lead_source, status, ip_address, 
           user_agent, referrer, analysis_data, target_audience, content_focus, 
-          brand_voice, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+          brand_voice, project_id, anonymous_user_id, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
         RETURNING *
       `, [
         leadId,
@@ -88,19 +173,37 @@ class LeadService {
         JSON.stringify(analysisData), // Keep for backward compatibility
         analysisData.targetAudience || null,
         analysisData.contentFocus || null,
-        analysisData.brandVoice || null
+        analysisData.brandVoice || null,
+        anonymousProjectId || null, // Link to anonymous project
+        anonymousUserId || null // Link to anonymous user
       ]);
 
       const lead = leadResult.rows[0];
+      const leadRecordTime = Date.now() - leadRecordStart;
+      console.log(`✅ [${requestId}] Lead record created in ${leadRecordTime}ms - Lead ID: ${lead.id}`);
+      
+      // Log project linkage if successful
+      if (anonymousProjectId && anonymousUserId) {
+        console.log(`🔗 [${requestId}] Anonymous project linked to lead:`);
+        console.log(`      Project ID: ${anonymousProjectId}`);
+        console.log(`      Anonymous User ID: ${anonymousUserId}`);
+        console.log(`      ✅ OpenAI structured data preserved for logged-out user`);
+      }
 
       // Step 5: Use database function to automatically score the lead
+      console.log(`🎯 [${requestId}] Step 5: Scoring lead...`);
+      const scoringStart = Date.now();
       const scoringResult = await db.query(`
         SELECT auto_score_lead($1) as lead_score
       `, [leadId]);
       
       const leadScore = scoringResult.rows[0]?.lead_score || 0;
+      const scoringTime = Date.now() - scoringStart;
+      console.log(`✅ [${requestId}] Lead scored in ${scoringTime}ms - Score: ${leadScore}`);
 
       // Step 6: Track conversion step
+      console.log(`📈 [${requestId}] Step 6: Tracking conversion step...`);
+      const conversionStart = Date.now();
       await db.query(`
         SELECT track_conversion_step($1, $2, $3, $4)
       `, [
@@ -115,7 +218,12 @@ class LeadService {
         }),
         sessionInfo.sessionId || null
       ]);
-
+      
+      const conversionTime = Date.now() - conversionStart;
+      console.log(`✅ [${requestId}] Conversion step tracked in ${conversionTime}ms`);
+      
+      const totalTime = Date.now() - orgStart;
+      console.log(`\n🎉 [${requestId}] LEAD CAPTURE COMPLETED SUCCESSFULLY in ${totalTime}ms`);
       console.log(`✅ Captured new lead: ${lead.business_name} (${websiteUrl})`);
       console.log(`🏢 Organization: ${organizationId}`);
       console.log(`📊 Lead Score: ${leadScore}`);
@@ -126,10 +234,26 @@ class LeadService {
         leadScore,
         businessName: lead.business_name,
         source: leadSource,
-        status: 'new'
+        status: 'new',
+        // Include anonymous project information if created
+        anonymousProject: anonymousProjectId ? {
+          projectId: anonymousProjectId,
+          userId: anonymousUserId,
+          structuredDataSaved: true
+        } : null
       };
     } catch (error) {
-      console.error('Error capturing lead:', error);
+      console.error(`❌ [${requestId}] LEAD CAPTURE FAILED:`, error);
+      console.error(`   Error Type: ${error.name || 'Unknown'}`);
+      console.error(`   Error Message: ${error.message || 'No message'}`);
+      console.error(`   Stack: ${error.stack || 'No stack trace'}`);
+      
+      // Log the current state for debugging
+      console.error(`   🔍 Debug Info:`);
+      console.error(`      Website URL: ${websiteUrl}`);
+      console.error(`      Has Analysis Data: ${!!analysisData}`);
+      console.error(`      Session Info Keys: ${Object.keys(sessionInfo).join(', ')}`);
+      
       throw error;
     }
   }
@@ -458,16 +582,25 @@ class LeadService {
           o.company_size as org_company_size,
           o.target_audience as org_target_audience,
           o.brand_voice as org_brand_voice,
+          o.description as org_description,
+          o.website_goals as org_website_goals,
           -- Lead scoring data
           ls.overall_score as lead_score,
           ls.business_size_score,
           ls.industry_fit_score,
           ls.engagement_score,
           ls.content_quality_score,
+          ls.technical_readiness_score,
+          ls.budget_indicator_score,
+          ls.urgency_score,
           ls.scoring_factors,
           -- Organization intelligence summary
           oi.customer_scenarios,
           oi.business_value_assessment,
+          oi.customer_language_patterns,
+          oi.search_behavior_insights,
+          oi.seo_opportunities,
+          oi.content_strategy_recommendations,
           oi.analysis_confidence_score,
           -- Decision makers
           get_organization_decision_makers(o.id) as decision_makers,
@@ -523,7 +656,7 @@ class LeadService {
         updatedAt: lead.updated_at,
         ipAddress: lead.ip_address,
         userAgent: lead.user_agent,
-        referrerUrl: lead.referrer_url,
+        referrerUrl: lead.referrer,
         
         // Organization data (NEW)
         organizationId: lead.organization_id,
@@ -532,12 +665,40 @@ class LeadService {
         companySize: lead.org_company_size,
         targetAudience: lead.org_target_audience,
         brandVoice: lead.org_brand_voice,
+        organizationDescription: lead.org_description,
+        websiteGoals: lead.org_website_goals,
+        
+        // Lead scoring breakdown (NEW)
+        scoringBreakdown: {
+          overall: parseInt(lead.lead_score || 0),
+          businessSize: parseInt(lead.business_size_score || 0),
+          industryFit: parseInt(lead.industry_fit_score || 0),
+          engagement: parseInt(lead.engagement_score || 0),
+          contentQuality: parseInt(lead.content_quality_score || 0),
+          technicalReadiness: parseInt(lead.technical_readiness_score || 0),
+          budgetIndicator: parseInt(lead.budget_indicator_score || 0),
+          urgency: parseInt(lead.urgency_score || 0)
+        },
+        scoringFactors: lead.scoring_factors || {},
         
         // Business intelligence (NEW)
         decisionMakers: lead.decision_makers || [],
         customerScenarios: lead.customer_scenarios || [],
         businessValueAssessment: lead.business_value_assessment || {},
+        customerLanguagePatterns: lead.customer_language_patterns || {},
+        searchBehaviorInsights: lead.search_behavior_insights || {},
+        seoOpportunities: lead.seo_opportunities || {},
+        contentStrategyRecommendations: lead.content_strategy_recommendations || {},
         analysisConfidenceScore: parseFloat(lead.analysis_confidence_score || 0),
+        
+        // OpenAI Analysis Data (expose specific fields)
+        blogStrategy: lead.analysis_data?.blogStrategy,
+        searchBehavior: lead.analysis_data?.searchBehavior, 
+        connectionMessage: lead.analysis_data?.connectionMessage,
+        brandColors: lead.analysis_data?.brandColors,
+        contentFocus: lead.analysis_data?.contentFocus,
+        websiteGoals: lead.analysis_data?.websiteGoals,
+        endUsers: lead.analysis_data?.endUsers,
         
         // Backward compatibility
         analysisData: lead.analysis_data,
