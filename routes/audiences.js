@@ -516,58 +516,161 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// Admin endpoint to clean up corrupted data
+// Admin endpoint to clean up corrupted data and related records
 router.delete('/cleanup-corrupted', async (req, res) => {
   try {
-    console.log('🧹 Starting cleanup of corrupted audience data');
+    console.log('🧹 Starting comprehensive cleanup of corrupted audience data and related records');
 
-    // Find and log corrupted records before deletion
-    const corruptedRecords = await db.query(`
-      SELECT id, user_id, session_id, target_segment, customer_problem, created_at
-      FROM audiences 
-      WHERE target_segment LIKE '%General Audience%' 
-         OR target_segment LIKE '%[object Object]%'
-         OR target_segment = '[object Object]'
-         OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
-    `);
+    // Start transaction for atomic cleanup
+    await db.query('BEGIN');
 
-    console.log('🔍 Found corrupted records:', {
-      count: corruptedRecords.rows.length,
-      records: corruptedRecords.rows.map(row => ({
-        id: row.id,
-        user_id: row.user_id,
-        session_id: row.session_id,
-        customer_problem: row.customer_problem,
-        target_segment_preview: String(row.target_segment).substring(0, 50) + '...'
-      }))
-    });
-
-    // Delete corrupted records
-    if (corruptedRecords.rows.length > 0) {
-      const deleteResult = await db.query(`
-        DELETE FROM audiences 
+    try {
+      // Step 1: Find corrupted audience records
+      const corruptedAudiences = await db.query(`
+        SELECT id, user_id, session_id, target_segment, customer_problem, created_at
+        FROM audiences 
         WHERE target_segment LIKE '%General Audience%' 
            OR target_segment LIKE '%[object Object]%'
            OR target_segment = '[object Object]'
            OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
       `);
 
-      console.log('🗑️ Deleted corrupted records:', deleteResult.rowCount);
+      const corruptedAudienceIds = corruptedAudiences.rows.map(row => row.id);
+
+      console.log('🔍 Found corrupted audience records:', {
+        count: corruptedAudiences.rows.length,
+        audienceIds: corruptedAudienceIds,
+        records: corruptedAudiences.rows.map(row => ({
+          id: row.id,
+          user_id: row.user_id,
+          session_id: row.session_id,
+          customer_problem: row.customer_problem,
+          target_segment_preview: String(row.target_segment).substring(0, 50) + '...'
+        }))
+      });
+
+      let cleanupResults = {
+        audiencesDeleted: 0,
+        keywordsDeleted: 0,
+        topicsOrphaned: 0,
+        strategiesOrphaned: 0,
+        orphanedTopicsDeleted: 0,
+        orphanedStrategiesDeleted: 0
+      };
+
+      if (corruptedAudienceIds.length > 0) {
+        // Step 2: Check related records before cleanup
+        const relatedKeywords = await db.query(`
+          SELECT COUNT(*) as count FROM seo_keywords 
+          WHERE audience_id = ANY($1)
+        `, [corruptedAudienceIds]);
+
+        const relatedTopics = await db.query(`
+          SELECT COUNT(*) as count FROM content_topics 
+          WHERE audience_id = ANY($1)
+        `, [corruptedAudienceIds]);
+
+        const relatedStrategies = await db.query(`
+          SELECT COUNT(*) as count FROM content_strategies 
+          WHERE audience_id = ANY($1)
+        `, [corruptedAudienceIds]);
+
+        console.log('📊 Related records found:', {
+          keywords: parseInt(relatedKeywords.rows[0].count),
+          topics: parseInt(relatedTopics.rows[0].count),
+          strategies: parseInt(relatedStrategies.rows[0].count)
+        });
+
+        // Step 3: Delete corrupted audiences (CASCADE will handle keywords)
+        const deleteAudiencesResult = await db.query(`
+          DELETE FROM audiences 
+          WHERE target_segment LIKE '%General Audience%' 
+             OR target_segment LIKE '%[object Object]%'
+             OR target_segment = '[object Object]'
+             OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
+        `);
+
+        cleanupResults.audiencesDeleted = deleteAudiencesResult.rowCount;
+        cleanupResults.keywordsDeleted = parseInt(relatedKeywords.rows[0].count); // CASCADE deleted
+        cleanupResults.topicsOrphaned = parseInt(relatedTopics.rows[0].count); // SET NULL
+        cleanupResults.strategiesOrphaned = parseInt(relatedStrategies.rows[0].count); // SET NULL
+
+        console.log('🗑️ Deleted corrupted audiences (CASCADE handled keywords):', {
+          audiencesDeleted: cleanupResults.audiencesDeleted,
+          keywordsCascadeDeleted: cleanupResults.keywordsDeleted
+        });
+      }
+
+      // Step 4: Clean up orphaned content_topics (audience_id = NULL)
+      const orphanedTopicsResult = await db.query(`
+        DELETE FROM content_topics 
+        WHERE audience_id IS NULL
+      `);
+
+      cleanupResults.orphanedTopicsDeleted = orphanedTopicsResult.rowCount;
+
+      // Step 5: Clean up orphaned content_strategies (audience_id = NULL)  
+      const orphanedStrategiesResult = await db.query(`
+        DELETE FROM content_strategies 
+        WHERE audience_id IS NULL
+      `);
+
+      cleanupResults.orphanedStrategiesDeleted = orphanedStrategiesResult.rowCount;
+
+      console.log('🧽 Cleaned up orphaned records:', {
+        orphanedTopicsDeleted: cleanupResults.orphanedTopicsDeleted,
+        orphanedStrategiesDeleted: cleanupResults.orphanedStrategiesDeleted
+      });
+
+      // Step 6: Check for any remaining data integrity issues
+      const integrityCheck = await db.query(`
+        SELECT 
+          (SELECT COUNT(*) FROM audiences WHERE target_segment LIKE '%[object Object]%') as remaining_corrupted,
+          (SELECT COUNT(*) FROM content_topics WHERE audience_id IS NULL) as orphaned_topics,
+          (SELECT COUNT(*) FROM content_strategies WHERE audience_id IS NULL) as orphaned_strategies,
+          (SELECT COUNT(*) FROM seo_keywords sk LEFT JOIN audiences a ON sk.audience_id = a.id WHERE a.id IS NULL) as orphaned_keywords
+      `);
+
+      const integrityData = integrityCheck.rows[0];
+
+      // Commit transaction
+      await db.query('COMMIT');
+
+      console.log('✅ Comprehensive cleanup completed:', {
+        ...cleanupResults,
+        integrityCheck: {
+          remainingCorrupted: parseInt(integrityData.remaining_corrupted),
+          orphanedTopics: parseInt(integrityData.orphaned_topics),
+          orphanedStrategies: parseInt(integrityData.orphaned_strategies), 
+          orphanedKeywords: parseInt(integrityData.orphaned_keywords)
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Comprehensive cleanup completed successfully',
+        cleanupResults,
+        corruptedAudiencesFound: corruptedAudiences.rows.length,
+        integrityCheck: {
+          remainingCorrupted: parseInt(integrityData.remaining_corrupted),
+          orphanedTopics: parseInt(integrityData.orphaned_topics),
+          orphanedStrategies: parseInt(integrityData.orphaned_strategies),
+          orphanedKeywords: parseInt(integrityData.orphaned_keywords)
+        },
+        cleanedRecords: corruptedAudiences.rows
+      });
+
+    } catch (cleanupError) {
+      // Rollback transaction on error
+      await db.query('ROLLBACK');
+      throw cleanupError;
     }
 
-    res.json({
-      success: true,
-      message: `Cleanup completed`,
-      corruptedFound: corruptedRecords.rows.length,
-      recordsDeleted: corruptedRecords.rows.length,
-      cleanedRecords: corruptedRecords.rows
-    });
-
   } catch (error) {
-    console.error('Cleanup error:', error);
+    console.error('Comprehensive cleanup error:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to cleanup corrupted data',
+      error: 'Failed to perform comprehensive cleanup',
       message: error.message
     });
   }
