@@ -615,10 +615,25 @@ class DatabaseAuthService {
       try {
         const decoded = this.verifyToken(token);
         req.user = decoded;
+        console.log('✅ Token verified successfully for optional auth:', {
+          userId: decoded.userId,
+          endpoint: req.path
+        });
       } catch (error) {
-        // Ignore invalid tokens for optional auth - this is likely a JWT secret mismatch
-        console.log('⚠️ Token verification failed:', error.message);
+        // Log detailed error for debugging JWT secret mismatches
+        console.log('⚠️ Token verification failed in optionalAuth:', {
+          error: error.message,
+          endpoint: req.path,
+          tokenStart: token.substring(0, 20) + '...',
+          jwtSecret: process.env.JWT_SECRET ? 'SET' : 'NOT_SET',
+          secretLength: process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0
+        });
       }
+    } else {
+      console.log('🔍 No auth header in optionalAuth:', {
+        endpoint: req.path,
+        hasSessionHeader: !!req.headers['x-session-id']
+      });
     }
 
     next();
