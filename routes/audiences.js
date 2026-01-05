@@ -4,14 +4,6 @@ import db from '../services/database.js';
 const router = express.Router();
 
 const extractUserContext = (req) => {
-  console.log('🔍 extractUserContext debug:', {
-    hasUser: !!req.user,
-    user: req.user,
-    userId: req.user?.userId,
-    authHeader: req.headers.authorization?.substring(0, 20) + '...',
-    sessionHeader: req.headers['x-session-id']
-  });
-  
   if (req.user?.userId) {
     return {
       isAuthenticated: true,

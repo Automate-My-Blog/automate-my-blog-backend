@@ -609,27 +609,18 @@ class DatabaseAuthService {
    */
   optionalAuthMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
-    console.log('🔍 optionalAuthMiddleware debug:', {
-      hasAuthHeader: !!authHeader,
-      authHeaderStart: authHeader?.substring(0, 20) + '...',
-      path: req.path
-    });
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
         const decoded = this.verifyToken(token);
         req.user = decoded;
-        console.log('✅ Token decoded successfully:', { userId: decoded.userId, email: decoded.email });
       } catch (error) {
-        console.log('⚠️ Token decode failed:', error.message);
-        // Ignore invalid tokens for optional auth
+        // Ignore invalid tokens for optional auth - this is likely a JWT secret mismatch
+        console.log('⚠️ Token verification failed:', error.message);
       }
-    } else {
-      console.log('🚫 No valid auth header found');
     }
 
-    console.log('🔍 Final req.user:', req.user ? { userId: req.user.userId, email: req.user.email } : null);
     next();
   }
 
