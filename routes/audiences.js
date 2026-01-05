@@ -185,8 +185,8 @@ router.get('/', async (req, res) => {
     }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
-
-    const result = await db.query(`
+    
+    const fullQuery = `
       SELECT 
         a.*,
         COUNT(sk.id) as keywords_count,
@@ -198,18 +198,35 @@ router.get('/', async (req, res) => {
       GROUP BY a.id
       ORDER BY a.created_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
-    `, [...queryParams, parseInt(limit), parseInt(offset)]);
+    `;
+
+    // Debug: Log exact query being executed
+    console.log('🗃️ Executing query:', {
+      query: fullQuery,
+      params: [...queryParams, parseInt(limit), parseInt(offset)],
+      whereClause: whereClause,
+      userContext: userContext
+    });
+
+    const result = await db.query(fullQuery, [...queryParams, parseInt(limit), parseInt(offset)]);
 
     // Debug logging for raw database results
     console.log('📊 Database query returned:', {
-      rowCount: result.rows.length,
-      sampleRow: result.rows[0] ? {
-        id: result.rows[0].id,
-        target_segment_type: typeof result.rows[0].target_segment,
-        target_segment_preview: String(result.rows[0].target_segment).substring(0, 50) + '...',
-        user_id: result.rows[0].user_id,
-        session_id: result.rows[0].session_id
-      } : 'No rows found'
+      rowCount: result.rows.length
+    });
+    
+    // Log each individual record to identify corrupted data
+    result.rows.forEach((row, index) => {
+      console.log(`📝 Record ${index + 1}/${result.rows.length}:`, {
+        id: row.id,
+        user_id: row.user_id,
+        session_id: row.session_id,
+        customer_problem: row.customer_problem,
+        target_segment_type: typeof row.target_segment,
+        target_segment_preview: String(row.target_segment).substring(0, 100),
+        created_at: row.created_at,
+        isGenericAudience: String(row.target_segment).includes('General Audience')
+      });
     });
 
     // Safe JSON parsing to handle corrupted database records
@@ -492,6 +509,63 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to delete audience',
+      message: error.message
+    });
+  }
+});
+
+// Admin endpoint to clean up corrupted data
+router.delete('/cleanup-corrupted', async (req, res) => {
+  try {
+    console.log('🧹 Starting cleanup of corrupted audience data');
+
+    // Find and log corrupted records before deletion
+    const corruptedRecords = await db.query(`
+      SELECT id, user_id, session_id, target_segment, customer_problem, created_at
+      FROM audiences 
+      WHERE target_segment LIKE '%General Audience%' 
+         OR target_segment LIKE '%[object Object]%'
+         OR target_segment = '[object Object]'
+         OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
+    `);
+
+    console.log('🔍 Found corrupted records:', {
+      count: corruptedRecords.rows.length,
+      records: corruptedRecords.rows.map(row => ({
+        id: row.id,
+        user_id: row.user_id,
+        session_id: row.session_id,
+        customer_problem: row.customer_problem,
+        target_segment_preview: String(row.target_segment).substring(0, 50) + '...'
+      }))
+    });
+
+    // Delete corrupted records
+    if (corruptedRecords.rows.length > 0) {
+      const deleteResult = await db.query(`
+        DELETE FROM audiences 
+        WHERE target_segment LIKE '%General Audience%' 
+           OR target_segment LIKE '%[object Object]%'
+           OR target_segment = '[object Object]'
+           OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
+      `);
+
+      console.log('🗑️ Deleted corrupted records:', deleteResult.rowCount);
+    }
+
+    res.json({
+      success: true,
+      message: `Cleanup completed`,
+      corruptedFound: corruptedRecords.rows.length,
+      recordsDeleted: corruptedRecords.rows.length,
+      cleanedRecords: corruptedRecords.rows
+    });
+
+  } catch (error) {
+    console.error('Cleanup error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to cleanup corrupted data',
       message: error.message
     });
   }
