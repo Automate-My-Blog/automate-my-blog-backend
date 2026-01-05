@@ -14,10 +14,10 @@ import leadService from './services/leads.js';
 import organizationService from './services/organizations.js';
 import projectsService from './services/projects.js';
 import db from './services/database.js';
-// Temporarily disabled for debugging deployment
+// Testing routes one by one to isolate Vercel deployment issue
+import sessionRoutes from './routes/session.js';
 // import audienceRoutes from './routes/audiences.js';
 // import keywordRoutes from './routes/keywords.js';
-// import sessionRoutes from './routes/session.js';
 // import userRoutes from './routes/users.js';
 
 // Load environment variables
@@ -64,11 +64,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// API Routes
-// Temporarily disabled for debugging deployment
+// API Routes - Testing one by one
+app.use('/api/v1/session', sessionRoutes);
 // app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
 // app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
-// app.use('/api/v1/session', sessionRoutes);
 // app.use('/api/v1/users', authService.authMiddleware.bind(authService), userRoutes);
 
 // Health check endpoint
