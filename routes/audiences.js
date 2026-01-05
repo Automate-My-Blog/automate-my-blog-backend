@@ -146,6 +146,16 @@ router.get('/', async (req, res) => {
     const userContext = extractUserContext(req);
     validateUserContext(userContext);
 
+    // Debug logging for audience retrieval
+    console.log('📖 Getting audiences with context:', {
+      userContext: { 
+        isAuthenticated: userContext.isAuthenticated, 
+        userId: userContext.userId, 
+        sessionId: userContext.sessionId 
+      },
+      queryParams: req.query
+    });
+
     const { organization_intelligence_id, project_id, limit = 25, offset = 0 } = req.query;
 
     let whereConditions = [];
@@ -190,9 +200,41 @@ router.get('/', async (req, res) => {
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `, [...queryParams, parseInt(limit), parseInt(offset)]);
 
+    // Debug logging for raw database results
+    console.log('📊 Database query returned:', {
+      rowCount: result.rows.length,
+      sampleRow: result.rows[0] ? {
+        id: result.rows[0].id,
+        target_segment_type: typeof result.rows[0].target_segment,
+        target_segment_preview: String(result.rows[0].target_segment).substring(0, 50) + '...',
+        user_id: result.rows[0].user_id,
+        session_id: result.rows[0].session_id
+      } : 'No rows found'
+    });
+
+    // Safe JSON parsing to handle corrupted database records
+    const safeParse = (jsonString, fieldName, recordId) => {
+      if (!jsonString) return null;
+      if (typeof jsonString === 'object') return jsonString; // Already parsed
+      
+      try {
+        return JSON.parse(jsonString);
+      } catch (error) {
+        console.error(`JSON parse error for ${fieldName} in record ${recordId}:`, {
+          error: error.message,
+          rawValue: jsonString,
+          valueType: typeof jsonString
+        });
+        // Return a fallback object instead of failing
+        return fieldName === 'target_segment' 
+          ? { demographics: 'Data parsing error', psychographics: 'Please recreate audience', searchBehavior: 'N/A' }
+          : null;
+      }
+    };
+
     const audiences = result.rows.map(row => ({
       id: row.id,
-      target_segment: JSON.parse(row.target_segment),
+      target_segment: safeParse(row.target_segment, 'target_segment', row.id),
       customer_problem: row.customer_problem,
       priority: row.priority,
       topics_count: parseInt(row.topics_count),
