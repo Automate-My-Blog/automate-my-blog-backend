@@ -12,7 +12,12 @@ import referralService from './services/referrals.js';
 import billingService from './services/billing.js';
 import leadService from './services/leads.js';
 import organizationService from './services/organizations.js';
+import projectsService from './services/projects.js';
 import db from './services/database.js';
+import audienceRoutes from './routes/audiences.js';
+import keywordRoutes from './routes/keywords.js';
+import sessionRoutes from './routes/session.js';
+import userRoutes from './routes/users.js';
 
 // Load environment variables
 dotenv.config();
@@ -51,12 +56,18 @@ app.use(cors({
     'http://localhost:3002'
   ],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id'],
   credentials: true
 }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// API Routes
+app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
+app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
+app.use('/api/v1/session', sessionRoutes);
+app.use('/api/v1/users', authService.authMiddleware.bind(authService), userRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -124,7 +135,18 @@ app.get('/api', (req, res) => {
       'GET /api/v1/admin/organizations': 'Get organizations with business intelligence (super admin only)',
       'GET /api/v1/admin/organizations/:id': 'Get organization profile with full intelligence data (super admin only)',
       'GET /api/v1/admin/organizations/:id/contacts': 'Get organization contacts and decision makers (super admin only)',
-      'GET /api/v1/admin/organizations/:id/intelligence': 'Get organization intelligence analysis (super admin only)'
+      'GET /api/v1/admin/organizations/:id/intelligence': 'Get organization intelligence analysis (super admin only)',
+      'POST /api/v1/audiences': 'Create audience strategy (authenticated or anonymous with session)',
+      'GET /api/v1/audiences': 'List user audiences (authenticated or anonymous with session)',
+      'GET /api/v1/audiences/:id': 'Get specific audience with topics and keywords (authenticated or anonymous with session)',
+      'PUT /api/v1/audiences/:id': 'Update audience (authenticated or anonymous with session)',
+      'DELETE /api/v1/audiences/:id': 'Delete audience (authenticated or anonymous with session)',
+      'POST /api/v1/keywords': 'Add keywords to audience (authenticated or anonymous with session)',
+      'GET /api/v1/keywords': 'Get keywords for audience (authenticated or anonymous with session)',
+      'PUT /api/v1/keywords/:id': 'Update keyword (authenticated or anonymous with session)',
+      'DELETE /api/v1/keywords/:id': 'Delete keyword (authenticated or anonymous with session)',
+      'POST /api/v1/session/create': 'Create anonymous session',
+      'GET /api/v1/session/:sessionId': 'Get session data with audiences, topics, and keywords'
     },
     documentation: 'https://github.com/james-frankel-123/automatemyblog-backend'
   });
@@ -286,15 +308,50 @@ app.post('/api/v1/auth/logout', (req, res) => {
   });
 });
 
-// Analyze website endpoint
-app.post('/api/analyze-website', async (req, res) => {
+// Get user's most recent website analysis endpoint
+app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    console.log(`📊 Getting most recent analysis for user: ${userId}`);
+    
+    const recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
+    
+    if (!recentAnalysis) {
+      return res.json({
+        success: true,
+        analysis: null,
+        message: 'No analysis found for this user'
+      });
+    }
+    
+    console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
+    
+    res.json({
+      success: true,
+      analysis: recentAnalysis,
+      message: 'Recent analysis retrieved successfully'
+    });
+
+  } catch (error) {
+    console.error('Get recent analysis error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve recent analysis',
+      message: error.message
+    });
+  }
+});
+
+// Analyze website endpoint with database-first approach
+app.post('/api/analyze-website', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   console.log('=== Website Analysis Request ===');
   console.log('Request body:', req.body);
   console.log('Headers:', req.headers);
-  console.log('User-Agent:', req.headers['user-agent']);
+  console.log('User authenticated:', !!req.user);
+  console.log('User ID:', req.user?.userId || 'anonymous');
   
   try {
     const { url } = req.body;
+    const userId = req.user?.userId;
 
     console.log('Analyzing URL:', url);
 
@@ -314,8 +371,44 @@ app.post('/api/analyze-website', async (req, res) => {
       });
     }
 
+    let analysis = null;
+    let isFromCache = false;
+
+    // DATABASE-FIRST APPROACH: Check for cached analysis if user is logged in
+    if (userId) {
+      console.log(`🔍 Checking database for existing analysis: User ${userId}, URL ${url}`);
+      
+      const existingProject = await projectsService.getProjectByUserAndUrl(userId, url);
+      
+      if (existingProject && projectsService.isAnalysisFresh(existingProject.updatedAt, 30)) {
+        console.log(`✅ Found fresh cached analysis (age: ${Math.floor((Date.now() - new Date(existingProject.updatedAt)) / (1000 * 60 * 60 * 24))} days)`);
+        
+        analysis = existingProject.businessAnalysis;
+        isFromCache = true;
+        
+        // Return cached data immediately
+        return res.json({
+          success: true,
+          url,
+          analysis,
+          isFromCache: true,
+          cachedAt: existingProject.updatedAt,
+          metadata: {
+            title: analysis.businessName || 'Cached Analysis',
+            headings: []
+          }
+        });
+      } else if (existingProject) {
+        console.log(`⚠️ Found stale cached analysis (age: ${Math.floor((Date.now() - new Date(existingProject.updatedAt)) / (1000 * 60 * 60 * 24))} days), will refresh`);
+      } else {
+        console.log('📝 No existing analysis found, will generate new');
+      }
+    } else {
+      console.log('👤 Anonymous user, generating fresh analysis');
+    }
+
+    // GENERATE NEW ANALYSIS: Either no cache or cache is stale
     console.log('Starting website scraping...');
-    // Scrape website content
     const scrapedContent = await webScraperService.scrapeWebsite(url);
     console.log('Scraping completed. Title:', scrapedContent.title);
     console.log('Content length:', scrapedContent.content?.length || 0);
@@ -329,23 +422,66 @@ app.post('/api/analyze-website', async (req, res) => {
     `.trim();
 
     console.log('Starting OpenAI analysis...');
-    // Analyze with OpenAI (using smart default colors)
-    const analysis = await openaiService.analyzeWebsite(fullContent, url);
+    analysis = await openaiService.analyzeWebsite(fullContent, url);
     console.log('OpenAI analysis completed:', analysis?.businessType || 'N/A');
 
-    // Capture website lead for anonymous users (for super admin analytics)
-    try {
-      const sessionInfo = {
-        ipAddress: req.ip || req.connection?.remoteAddress || 'unknown',
-        userAgent: req.headers['user-agent'] || 'unknown',
-        referrer: req.headers['referer'] || req.headers['referrer'] || null
-      };
+    // SAVE TO DATABASE: Store analysis if user is logged in
+    if (userId && analysis) {
+      try {
+        // Check if user is admin/super_admin to determine if we should update organization website
+        const isAdmin = await projectsService.isUserAdmin(userId);
+        
+        if (isAdmin) {
+          // ADMIN USERS: Update organization website_url as single source of truth
+          console.log(`👑 Admin user detected, updating organization website to: ${url}`);
+          const orgUpdateResult = await projectsService.updateOrganizationWebsite(userId, url);
+          
+          if (orgUpdateResult.success) {
+            console.log(`✅ Organization website updated for admin user`);
+          } else {
+            console.warn(`⚠️ Could not update organization website: ${orgUpdateResult.reason}`);
+          }
+        }
+        
+        // Always create/update project for analysis storage
+        const existingProject = await projectsService.getProjectByUserAndUrl(userId, url);
+        
+        if (existingProject) {
+          console.log(`💾 Updating existing project ${existingProject.id} with fresh analysis`);
+          await projectsService.updateProjectAnalysis(existingProject.id, analysis);
+        } else {
+          console.log(`💾 Creating new project for user ${userId}`);
+          const createResult = await projectsService.createProject(userId, url, analysis);
+          console.log(`✅ Project created: ${createResult.projectId}`);
+        }
+      } catch (saveError) {
+        console.error('Failed to save analysis to database:', saveError.message);
+        // Continue with response even if save fails
+      }
+    }
+
+    // LEAD CAPTURE: For anonymous users only (logged-in users have projects instead)
+    if (!userId) {
+      const requestId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log(`📊 [${requestId}] Starting lead capture process for anonymous user...`);
       
-      await leadService.captureLead(url, analysis, sessionInfo);
-      console.log('📊 Lead captured for website analysis:', analysis?.businessName || url);
-    } catch (leadError) {
-      // Don't fail the main request if lead capture fails
-      console.warn('Failed to capture lead:', leadError.message);
+      try {
+        const sessionInfo = {
+          ipAddress: req.ip || req.connection?.remoteAddress || 'unknown',
+          userAgent: req.headers['user-agent'] || 'unknown',
+          referrer: req.headers['referer'] || req.headers['referrer'] || null,
+          requestId: requestId
+        };
+        
+        const leadCaptureStart = Date.now();
+        await leadService.captureLead(url, analysis, sessionInfo);
+        const leadCaptureTime = Date.now() - leadCaptureStart;
+        
+        console.log(`✅ [${requestId}] Lead captured successfully in ${leadCaptureTime}ms:`, analysis?.businessName || url);
+        
+      } catch (leadError) {
+        console.error(`❌ [${requestId}] Lead capture failed: ${leadError.message}`);
+      }
     }
 
     const response = {
@@ -353,6 +489,8 @@ app.post('/api/analyze-website', async (req, res) => {
       url,
       scrapedAt: scrapedContent.scrapedAt,
       analysis,
+      isFromCache: false,
+      savedToDatabase: !!userId,
       metadata: {
         title: scrapedContent.title,
         headings: scrapedContent.headings
