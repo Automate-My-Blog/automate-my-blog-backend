@@ -86,7 +86,18 @@ router.post('/', async (req, res) => {
     // Safe JSON stringification with error handling
     const safeStringify = (obj, fieldName) => {
       if (obj === null || obj === undefined) return null;
-      if (typeof obj === 'string') return obj;
+      
+      // If it's already a string, check if it's valid JSON, if not, wrap it
+      if (typeof obj === 'string') {
+        try {
+          // Try to parse it to see if it's already valid JSON
+          JSON.parse(obj);
+          return obj; // It's already valid JSON string
+        } catch {
+          // Not valid JSON, so stringify it to make it a valid JSON string
+          return JSON.stringify(obj);
+        }
+      }
       
       try {
         return JSON.stringify(obj);
