@@ -3,7 +3,7 @@ import db from '../services/database.js';
 
 const router = express.Router();
 
-// Safe JSON parsing to handle corrupted database records
+// Safe JSON parsing to handle corrupted database records with monitoring
 const safeParse = (jsonString, fieldName, recordId) => {
   if (!jsonString) return null;
   if (typeof jsonString === 'object') return jsonString; // Already parsed
@@ -11,11 +11,35 @@ const safeParse = (jsonString, fieldName, recordId) => {
   try {
     return JSON.parse(jsonString);
   } catch (error) {
-    console.error(`JSON parse error for ${fieldName} in record ${recordId}:`, {
-      error: error.message,
-      rawValue: jsonString,
-      valueType: typeof jsonString
-    });
+    // Enhanced logging for corruption detection
+    const corruptionAlert = {
+      alert_type: 'JSON_PARSE_ERROR',
+      field_name: fieldName,
+      record_id: recordId,
+      error_message: error.message,
+      raw_value: jsonString,
+      value_type: typeof jsonString,
+      timestamp: new Date().toISOString(),
+      is_corruption: jsonString && jsonString.includes('[object Object]'),
+      corruption_patterns: {
+        contains_object_object: jsonString && jsonString.includes('[object Object]'),
+        contains_general_audience: jsonString && jsonString.includes('General Audience'),
+        is_empty_object: jsonString === '{}',
+        is_null_string: jsonString === 'null'
+      }
+    };
+    
+    console.error(`🚨 CORRUPTION DETECTED - JSON Parse Error:`, corruptionAlert);
+    
+    // If this looks like serious corruption, also log to a structured format
+    if (corruptionAlert.is_corruption) {
+      console.error(`🔥 SERIOUS CORRUPTION ALERT:`, JSON.stringify({
+        severity: 'HIGH',
+        component: 'audience_data_parsing',
+        ...corruptionAlert
+      }));
+    }
+    
     // Return a fallback object instead of failing
     return fieldName === 'target_segment' 
       ? { demographics: 'Data parsing error', psychographics: 'Please recreate audience', searchBehavior: 'N/A' }
@@ -44,6 +68,130 @@ const validateUserContext = (context) => {
   if (!context.isAuthenticated && !context.sessionId) {
     throw new Error('Either authentication or session ID is required');
   }
+};
+
+// Validation function to prevent data corruption with monitoring
+const validateAudienceData = (data) => {
+  const errors = [];
+  const suspiciousPatterns = [];
+
+  // Validate target_segment
+  if (data.target_segment !== undefined) {
+    if (!data.target_segment) {
+      errors.push('target_segment is required');
+    } else if (typeof data.target_segment === 'string') {
+      // Check for corruption patterns with monitoring
+      if (data.target_segment === '[object Object]' || data.target_segment.includes('[object Object]')) {
+        errors.push('target_segment contains corrupted data: "[object Object]"');
+        suspiciousPatterns.push({
+          field: 'target_segment',
+          pattern: '[object Object]',
+          severity: 'CRITICAL',
+          value: data.target_segment
+        });
+      }
+      
+      // Try to parse if it's a JSON string
+      try {
+        const parsed = JSON.parse(data.target_segment);
+        if (typeof parsed !== 'object' || parsed === null) {
+          errors.push('target_segment must be an object');
+        } else {
+          // Validate required structure
+          if (!parsed.demographics || !parsed.psychographics || !parsed.searchBehavior) {
+            errors.push('target_segment must contain demographics, psychographics, and searchBehavior fields');
+          }
+        }
+      } catch (error) {
+        errors.push(`target_segment contains invalid JSON: ${error.message}`);
+      }
+    } else if (typeof data.target_segment === 'object') {
+      // Validate object structure
+      if (!data.target_segment.demographics || !data.target_segment.psychographics || !data.target_segment.searchBehavior) {
+        errors.push('target_segment must contain demographics, psychographics, and searchBehavior fields');
+      }
+    } else {
+      errors.push('target_segment must be an object or valid JSON string');
+    }
+  }
+
+  // Validate customer_language if provided
+  if (data.customer_language !== undefined && data.customer_language !== null) {
+    if (typeof data.customer_language === 'string') {
+      if (data.customer_language === '[object Object]' || data.customer_language.includes('[object Object]')) {
+        errors.push('customer_language contains corrupted data: "[object Object]"');
+        suspiciousPatterns.push({
+          field: 'customer_language',
+          pattern: '[object Object]',
+          severity: 'CRITICAL',
+          value: data.customer_language
+        });
+      }
+      
+      // Try to parse if it's a JSON string
+      try {
+        const parsed = JSON.parse(data.customer_language);
+        if (typeof parsed !== 'object' || parsed === null) {
+          errors.push('customer_language must be an object');
+        }
+      } catch (error) {
+        errors.push(`customer_language contains invalid JSON: ${error.message}`);
+      }
+    } else if (typeof data.customer_language !== 'object') {
+      errors.push('customer_language must be an object or valid JSON string');
+    }
+  }
+
+  // Validate business_value if provided
+  if (data.business_value !== undefined && data.business_value !== null) {
+    if (typeof data.business_value === 'string') {
+      if (data.business_value === '[object Object]' || data.business_value.includes('[object Object]')) {
+        errors.push('business_value contains corrupted data: "[object Object]"');
+        suspiciousPatterns.push({
+          field: 'business_value',
+          pattern: '[object Object]',
+          severity: 'CRITICAL',
+          value: data.business_value
+        });
+      }
+      
+      // Try to parse if it's a JSON string
+      try {
+        const parsed = JSON.parse(data.business_value);
+        if (typeof parsed !== 'object' || parsed === null) {
+          errors.push('business_value must be an object');
+        }
+      } catch (error) {
+        errors.push(`business_value contains invalid JSON: ${error.message}`);
+      }
+    } else if (typeof data.business_value !== 'object') {
+      errors.push('business_value must be an object or valid JSON string');
+    }
+  }
+
+  // Log any suspicious patterns found for monitoring
+  if (suspiciousPatterns.length > 0) {
+    console.error(`🚨 CORRUPTION PATTERNS DETECTED IN VALIDATION:`, {
+      timestamp: new Date().toISOString(),
+      patterns: suspiciousPatterns,
+      total_patterns: suspiciousPatterns.length,
+      validation_errors: errors.length,
+      component: 'audience_data_validation'
+    });
+    
+    // Log critical patterns in structured format for monitoring systems
+    suspiciousPatterns.filter(p => p.severity === 'CRITICAL').forEach(pattern => {
+      console.error(`🔥 CRITICAL CORRUPTION PATTERN:`, JSON.stringify({
+        severity: 'CRITICAL',
+        component: 'audience_data_validation',
+        field: pattern.field,
+        pattern: pattern.pattern,
+        timestamp: new Date().toISOString()
+      }));
+    });
+  }
+
+  return errors;
 };
 
 router.post('/', async (req, res) => {
@@ -75,20 +223,44 @@ router.post('/', async (req, res) => {
       priority = 1
     } = req.body;
 
-    if (!target_segment) {
+    // Validate input data to prevent corruption
+    const validationErrors = validateAudienceData({
+      target_segment,
+      customer_language,
+      business_value
+    });
+
+    if (validationErrors.length > 0) {
+      console.warn('🚨 Validation failed for audience data:', {
+        errors: validationErrors,
+        userContext,
+        requestBody: {
+          target_segment_type: typeof target_segment,
+          customer_language_type: typeof customer_language,
+          business_value_type: typeof business_value
+        }
+      });
+
       return res.status(400).json({
         success: false,
-        error: 'Missing required field',
-        message: 'target_segment is required'
+        error: 'Invalid input data',
+        message: 'Data validation failed',
+        details: validationErrors
       });
     }
 
-    // Safe JSON stringification with error handling
+    // Enhanced safe JSON stringification with corruption detection
     const safeStringify = (obj, fieldName) => {
       if (obj === null || obj === undefined) return null;
       
-      // If it's already a string, check if it's valid JSON, if not, wrap it
+      // If it's already a string, validate and process
       if (typeof obj === 'string') {
+        // Detect corruption patterns
+        if (obj === '[object Object]' || obj.includes('[object Object]')) {
+          console.error(`🚨 Corruption detected in ${fieldName}:`, obj);
+          throw new Error(`Corrupted data detected in ${fieldName}: Contains "[object Object]" pattern`);
+        }
+        
         try {
           // Try to parse it to see if it's already valid JSON
           JSON.parse(obj);
@@ -99,12 +271,39 @@ router.post('/', async (req, res) => {
         }
       }
       
+      // For objects, check for corruption patterns before stringifying
+      if (typeof obj === 'object') {
+        const stringified = JSON.stringify(obj);
+        
+        // Check if JSON.stringify resulted in corruption
+        if (stringified === '{}' && Object.keys(obj).length > 0) {
+          console.error(`🚨 Object stringification failure for ${fieldName}:`, obj);
+          throw new Error(`Failed to properly stringify object for ${fieldName}`);
+        }
+        
+        // Check for [object Object] pattern in result
+        if (stringified.includes('[object Object]')) {
+          console.error(`🚨 Stringified object contains corruption in ${fieldName}:`, stringified);
+          throw new Error(`Stringified object contains "[object Object]" pattern in ${fieldName}`);
+        }
+        
+        return stringified;
+      }
+      
       try {
-        return JSON.stringify(obj);
+        const result = JSON.stringify(obj);
+        
+        // Final check for corruption in result
+        if (result.includes('[object Object]')) {
+          console.error(`🚨 Final result contains corruption in ${fieldName}:`, result);
+          throw new Error(`JSON stringify result contains "[object Object]" pattern in ${fieldName}`);
+        }
+        
+        return result;
       } catch (error) {
         console.error(`JSON stringify error for ${fieldName}:`, error);
         console.error(`Value causing error:`, obj);
-        throw new Error(`Invalid JSON data for ${fieldName}`);
+        throw new Error(`Invalid JSON data for ${fieldName}: ${error.message}`);
       }
     };
 
@@ -398,13 +597,98 @@ router.put('/:id', async (req, res) => {
       priority
     } = req.body;
 
+    // Validate input data to prevent corruption
+    const validationErrors = validateAudienceData({
+      target_segment,
+      customer_language,
+      business_value
+    });
+
+    if (validationErrors.length > 0) {
+      console.warn('🚨 PUT validation failed for audience data:', {
+        errors: validationErrors,
+        audienceId: id,
+        userContext,
+        requestBody: {
+          target_segment_type: typeof target_segment,
+          customer_language_type: typeof customer_language,
+          business_value_type: typeof business_value
+        }
+      });
+
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid input data',
+        message: 'Data validation failed',
+        details: validationErrors
+      });
+    }
+
     const updates = [];
     const updateValues = [id];
     let paramIndex = 2;
 
+    // Enhanced safe JSON stringification (same as POST route)
+    const safeStringifyUpdate = (obj, fieldName) => {
+      if (obj === null || obj === undefined) return null;
+      
+      // If it's already a string, validate and process
+      if (typeof obj === 'string') {
+        // Detect corruption patterns
+        if (obj === '[object Object]' || obj.includes('[object Object]')) {
+          console.error(`🚨 Corruption detected in ${fieldName}:`, obj);
+          throw new Error(`Corrupted data detected in ${fieldName}: Contains "[object Object]" pattern`);
+        }
+        
+        try {
+          // Try to parse it to see if it's already valid JSON
+          JSON.parse(obj);
+          return obj; // It's already valid JSON string
+        } catch {
+          // Not valid JSON, so stringify it to make it a valid JSON string
+          return JSON.stringify(obj);
+        }
+      }
+      
+      // For objects, check for corruption patterns before stringifying
+      if (typeof obj === 'object') {
+        const stringified = JSON.stringify(obj);
+        
+        // Check if JSON.stringify resulted in corruption
+        if (stringified === '{}' && Object.keys(obj).length > 0) {
+          console.error(`🚨 Object stringification failure for ${fieldName}:`, obj);
+          throw new Error(`Failed to properly stringify object for ${fieldName}`);
+        }
+        
+        // Check for [object Object] pattern in result
+        if (stringified.includes('[object Object]')) {
+          console.error(`🚨 Stringified object contains corruption in ${fieldName}:`, stringified);
+          throw new Error(`Stringified object contains "[object Object]" pattern in ${fieldName}`);
+        }
+        
+        return stringified;
+      }
+      
+      try {
+        const result = JSON.stringify(obj);
+        
+        // Final check for corruption in result
+        if (result.includes('[object Object]')) {
+          console.error(`🚨 Final result contains corruption in ${fieldName}:`, result);
+          throw new Error(`JSON stringify result contains "[object Object]" pattern in ${fieldName}`);
+        }
+        
+        return result;
+      } catch (error) {
+        console.error(`JSON stringify error for ${fieldName}:`, error);
+        console.error(`Value causing error:`, obj);
+        throw new Error(`Invalid JSON data for ${fieldName}: ${error.message}`);
+      }
+    };
+
     if (target_segment !== undefined) {
       updates.push(`target_segment = $${paramIndex}`);
-      updateValues.push(JSON.stringify(target_segment));
+      updateValues.push(safeStringifyUpdate(target_segment, 'target_segment'));
       paramIndex++;
     }
 
@@ -416,7 +700,7 @@ router.put('/:id', async (req, res) => {
 
     if (customer_language !== undefined) {
       updates.push(`customer_language = $${paramIndex}`);
-      updateValues.push(customer_language ? JSON.stringify(customer_language) : null);
+      updateValues.push(customer_language ? safeStringifyUpdate(customer_language, 'customer_language') : null);
       paramIndex++;
     }
 
@@ -428,7 +712,7 @@ router.put('/:id', async (req, res) => {
 
     if (business_value !== undefined) {
       updates.push(`business_value = $${paramIndex}`);
-      updateValues.push(business_value ? JSON.stringify(business_value) : null);
+      updateValues.push(business_value ? safeStringifyUpdate(business_value, 'business_value') : null);
       paramIndex++;
     }
 
@@ -482,55 +766,10 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
-  try {
-    const userContext = extractUserContext(req);
-    validateUserContext(userContext);
-    const { id } = req.params;
-
-    let whereCondition = 'id = $1';
-    let queryParams = [id];
-    
-    if (userContext.isAuthenticated) {
-      whereCondition += ' AND user_id = $2';
-      queryParams.push(userContext.userId);
-    } else {
-      whereCondition += ' AND session_id = $2';
-      queryParams.push(userContext.sessionId);
-    }
-
-    const result = await db.query(`
-      DELETE FROM audiences WHERE ${whereCondition}
-      RETURNING id
-    `, queryParams);
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Audience not found',
-        message: 'The requested audience does not exist or you do not have access to it'
-      });
-    }
-
-    res.json({
-      success: true,
-      message: 'Audience deleted successfully'
-    });
-
-  } catch (error) {
-    console.error('Delete audience error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete audience',
-      message: error.message
-    });
-  }
-});
-
 // Admin endpoint to clean up corrupted data and related records
 router.delete('/cleanup-corrupted', async (req, res) => {
   try {
-    console.log('🧹 Starting comprehensive cleanup of corrupted audience data and related records');
+    console.log('🧹 Starting comprehensive cleanup of corrupted audience data and related records (ADMIN ENDPOINT)');
 
     // Start transaction for atomic cleanup
     await db.query('BEGIN');
@@ -540,10 +779,10 @@ router.delete('/cleanup-corrupted', async (req, res) => {
       const corruptedAudiences = await db.query(`
         SELECT id, user_id, session_id, target_segment, customer_problem, created_at
         FROM audiences 
-        WHERE target_segment LIKE '%General Audience%' 
-           OR target_segment LIKE '%[object Object]%'
-           OR target_segment = '[object Object]'
-           OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
+        WHERE target_segment::text LIKE '%General Audience%' 
+           OR target_segment::text LIKE '%[object Object]%'
+           OR target_segment::text = '"[object Object]"'
+           OR (target_segment IS NOT NULL AND target_segment::text !~ '^{.*}$')
       `);
 
       const corruptedAudienceIds = corruptedAudiences.rows.map(row => row.id);
@@ -595,10 +834,10 @@ router.delete('/cleanup-corrupted', async (req, res) => {
         // Step 3: Delete corrupted audiences (CASCADE will handle keywords)
         const deleteAudiencesResult = await db.query(`
           DELETE FROM audiences 
-          WHERE target_segment LIKE '%General Audience%' 
-             OR target_segment LIKE '%[object Object]%'
-             OR target_segment = '[object Object]'
-             OR (target_segment IS NOT NULL AND target_segment !~ '^{.*}$')
+          WHERE target_segment::text LIKE '%General Audience%' 
+             OR target_segment::text LIKE '%[object Object]%'
+             OR target_segment::text = '"[object Object]"'
+             OR (target_segment IS NOT NULL AND target_segment::text !~ '^{.*}$')
         `);
 
         cleanupResults.audiencesDeleted = deleteAudiencesResult.rowCount;
@@ -636,7 +875,7 @@ router.delete('/cleanup-corrupted', async (req, res) => {
       // Step 6: Check for any remaining data integrity issues
       const integrityCheck = await db.query(`
         SELECT 
-          (SELECT COUNT(*) FROM audiences WHERE target_segment LIKE '%[object Object]%') as remaining_corrupted,
+          (SELECT COUNT(*) FROM audiences WHERE target_segment::text LIKE '%[object Object]%') as remaining_corrupted,
           (SELECT COUNT(*) FROM content_topics WHERE audience_id IS NULL) as orphaned_topics,
           (SELECT COUNT(*) FROM content_strategies WHERE audience_id IS NULL) as orphaned_strategies,
           (SELECT COUNT(*) FROM seo_keywords sk LEFT JOIN audiences a ON sk.audience_id = a.id WHERE a.id IS NULL) as orphaned_keywords
@@ -682,6 +921,51 @@ router.delete('/cleanup-corrupted', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to perform comprehensive cleanup',
+      message: error.message
+    });
+  }
+});
+
+router.delete('/:id', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+    const { id } = req.params;
+
+    let whereCondition = 'id = $1';
+    let queryParams = [id];
+    
+    if (userContext.isAuthenticated) {
+      whereCondition += ' AND user_id = $2';
+      queryParams.push(userContext.userId);
+    } else {
+      whereCondition += ' AND session_id = $2';
+      queryParams.push(userContext.sessionId);
+    }
+
+    const result = await db.query(`
+      DELETE FROM audiences WHERE ${whereCondition}
+      RETURNING id
+    `, queryParams);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Audience not found',
+        message: 'The requested audience does not exist or you do not have access to it'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Audience deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete audience error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to delete audience',
       message: error.message
     });
   }

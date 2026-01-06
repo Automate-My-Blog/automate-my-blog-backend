@@ -3,6 +3,26 @@ import db from '../services/database.js';
 
 const router = express.Router();
 
+// Safe JSON parsing to handle corrupted database records (same as in audiences.js)
+const safeParse = (jsonString, fieldName, recordId) => {
+  if (!jsonString) return null;
+  if (typeof jsonString === 'object') return jsonString; // Already parsed
+  
+  try {
+    return JSON.parse(jsonString);
+  } catch (error) {
+    console.error(`JSON parse error for ${fieldName} in record ${recordId}:`, {
+      error: error.message,
+      rawValue: jsonString,
+      valueType: typeof jsonString
+    });
+    // Return a fallback object instead of failing
+    return fieldName === 'target_segment' 
+      ? { demographics: 'Data parsing error', psychographics: 'Please recreate audience', searchBehavior: 'N/A' }
+      : null;
+  }
+};
+
 // POST /api/v1/users/adopt-session
 router.post('/adopt-session', async (req, res) => {
   try {
@@ -73,7 +93,7 @@ router.post('/adopt-session', async (req, res) => {
         data: {
           audiences: audiencesResult.rows.map(row => ({
             id: row.id,
-            target_segment: typeof row.target_segment === 'string' ? JSON.parse(row.target_segment) : row.target_segment,
+            target_segment: safeParse(row.target_segment, 'target_segment', row.id),
             customer_problem: row.customer_problem,
             priority: row.priority
           })),
