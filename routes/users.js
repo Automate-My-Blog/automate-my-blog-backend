@@ -26,7 +26,15 @@ const safeParse = (jsonString, fieldName, recordId) => {
 // POST /api/v1/users/adopt-session
 router.post('/adopt-session', async (req, res) => {
   try {
-    const userId = req.user?.userId;
+    // Support mock user ID for testing in non-production environments
+    let userId = req.user?.userId;
+    
+    // Check for mock user ID (for testing adoption flow)
+    const mockUserId = req.headers['x-mock-user-id'];
+    if (mockUserId && process.env.NODE_ENV !== 'production') {
+      userId = mockUserId;
+    }
+    
     const { session_id } = req.body;
 
     if (!userId) {
@@ -86,21 +94,53 @@ router.post('/adopt-session', async (req, res) => {
 
       console.log(`✅ Session adoption completed:`, adoptedCounts);
 
-      res.json({
-        success: true,
-        message: 'Session data successfully adopted',
-        adopted: adoptedCounts,
-        data: {
-          audiences: audiencesResult.rows.map(row => ({
-            id: row.id,
-            target_segment: safeParse(row.target_segment, 'target_segment', row.id),
-            customer_problem: row.customer_problem,
-            priority: row.priority
-          })),
-          keywords: keywordsResult.rows,
-          topics: topicsResult.rows
-        }
+      // Add detailed logging and error handling for response construction
+      console.log(`🔍 Raw adoption results:`, {
+        audiences: audiencesResult.rows.length,
+        firstAudience: audiencesResult.rows[0],
+        keywords: keywordsResult.rows.length,
+        topics: topicsResult.rows.length
       });
+
+      try {
+        const responseData = {
+          success: true,
+          message: 'Session data successfully adopted',
+          adopted: adoptedCounts,
+          data: {
+            audiences: audiencesResult.rows.map(row => {
+              console.log(`🔍 Processing audience row:`, {
+                id: row.id,
+                target_segment_raw: row.target_segment,
+                target_segment_type: typeof row.target_segment
+              });
+              
+              const parsedSegment = safeParse(row.target_segment, 'target_segment', row.id);
+              console.log(`🔍 Parsed segment:`, parsedSegment);
+              
+              return {
+                id: row.id,
+                target_segment: parsedSegment,
+                customer_problem: row.customer_problem,
+                priority: row.priority
+              };
+            }),
+            keywords: keywordsResult.rows,
+            topics: topicsResult.rows
+          }
+        };
+
+        console.log(`🔍 Final response data:`, JSON.stringify(responseData, null, 2));
+        res.json(responseData);
+      } catch (responseError) {
+        console.error(`💥 Error constructing adoption response:`, responseError);
+        res.json({
+          success: false,
+          error: 'Response construction failed',
+          message: responseError.message,
+          adopted: adoptedCounts
+        });
+      }
 
     } catch (transactionError) {
       // Rollback on any error
