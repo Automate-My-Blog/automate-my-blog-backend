@@ -92,6 +92,11 @@ const validateUserContext = (context) => {
   if (!context.isAuthenticated && !context.sessionId) {
     throw new Error('Either authentication or session ID is required');
   }
+  console.log('✅ validateUserContext passed:', {
+    isAuthenticated: context.isAuthenticated,
+    hasSessionId: !!context.sessionId,
+    userId: context.userId
+  });
 };
 
 // Validation function to prevent data corruption with monitoring
