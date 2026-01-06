@@ -68,7 +68,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/v1/session', sessionRoutes);
 app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
 app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
-app.use('/api/v1/users', authService.authMiddleware.bind(authService), userRoutes);
+app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -113,6 +113,110 @@ app.get('/api/v1/audiences-direct', authService.optionalAuthMiddleware.bind(auth
     userId: req.user?.userId || null,
     timestamp: new Date().toISOString()
   });
+});
+
+// Production Environment Validation Endpoint
+app.get('/api/v1/debug/production-env', async (req, res) => {
+  const debugId = `env_debug_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  console.log(`🔍 [${debugId}] Production environment validation requested`);
+  
+  try {
+    // Test database connection with full debugging
+    const dbTestResult = await db.testConnection();
+    const dbHealthStats = await db.getHealthStats();
+    const authStatus = authService.getStorageStatus();
+    
+    // Test auth service database connection specifically
+    const authDbTestResult = await authService.testDatabaseConnection();
+    
+    const envValidation = {
+      timestamp: new Date().toISOString(),
+      debugId: debugId,
+      environment: {
+        nodeEnv: process.env.NODE_ENV,
+        isProduction: process.env.NODE_ENV === 'production',
+        platform: process.platform,
+        nodeVersion: process.version
+      },
+      database: {
+        connectionTest: dbTestResult,
+        healthStats: dbHealthStats,
+        hasUrl: !!process.env.DATABASE_URL,
+        urlStart: process.env.DATABASE_URL?.substring(0, 20) || 'Not set',
+        urlLength: process.env.DATABASE_URL?.length || 0,
+        urlProtocol: process.env.DATABASE_URL?.split('://')[0] || 'none'
+      },
+      authService: {
+        ...authStatus,
+        connectionTest: authDbTestResult,
+        useDatabaseStorage: process.env.USE_DATABASE === 'true'
+      },
+      environment: {
+        databaseUrl: {
+          exists: !!process.env.DATABASE_URL,
+          format: process.env.DATABASE_URL ? 'connection_string' : 'individual_params'
+        },
+        individualParams: {
+          dbUser: !!process.env.DB_USER,
+          dbHost: !!process.env.DB_HOST,
+          dbName: !!process.env.DB_NAME,
+          dbPassword: !!process.env.DB_PASSWORD,
+          dbPort: !!process.env.DB_PORT
+        },
+        apiKeys: {
+          hasOpenAI: !!process.env.OPENAI_API_KEY,
+          hasJwtSecret: !!process.env.JWT_SECRET,
+          hasJwtRefreshSecret: !!process.env.JWT_REFRESH_SECRET
+        }
+      },
+      diagnostics: {
+        canConnectToDatabase: dbTestResult,
+        authUsingDatabase: authDbTestResult,
+        potentialIssues: []
+      }
+    };
+    
+    // Add potential issue detection
+    if (!dbTestResult) {
+      envValidation.diagnostics.potentialIssues.push('Database connection test failed');
+    }
+    
+    if (!authDbTestResult) {
+      envValidation.diagnostics.potentialIssues.push('Auth service cannot connect to database - will use memory fallback');
+    }
+    
+    if (process.env.NODE_ENV === 'production' && !process.env.DATABASE_URL) {
+      envValidation.diagnostics.potentialIssues.push('Production environment missing DATABASE_URL');
+    }
+    
+    if (!process.env.OPENAI_API_KEY) {
+      envValidation.diagnostics.potentialIssues.push('Missing OPENAI_API_KEY');
+    }
+    
+    console.log(`✅ [${debugId}] Environment validation completed:`, {
+      dbTest: dbTestResult,
+      authTest: authDbTestResult,
+      issues: envValidation.diagnostics.potentialIssues.length
+    });
+    
+    res.json({
+      success: true,
+      validation: envValidation
+    });
+    
+  } catch (error) {
+    console.error(`❌ [${debugId}] Environment validation failed:`, {
+      message: error.message,
+      stack: error.stack?.split('\n')[0]
+    });
+    
+    res.status(500).json({
+      success: false,
+      error: 'Environment validation failed',
+      message: error.message,
+      debugId: debugId
+    });
+  }
 });
 
 // API routes index

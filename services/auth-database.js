@@ -25,21 +25,42 @@ class DatabaseAuthService {
   }
 
   async ensureDatabaseConnection() {
+    const checkId = `auth_check_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    console.log(`🔍 [${checkId}] Auth service checking database connection...`);
+    
     // Only check once per instance
     if (this.connectionChecked) {
+      console.log(`🔍 [${checkId}] Using cached connection status: ${this.databaseAvailable ? 'available' : 'unavailable'}`);
       return this.databaseAvailable;
     }
     
     this.connectionChecked = true;
     
     try {
-      await db.testConnection();
-      this.databaseAvailable = true;
-      console.log('✅ Auth service using database storage (v2 - race condition fixed)');
+      console.log(`🔍 [${checkId}] Testing database connection for auth service...`);
+      const connectionSuccess = await db.testConnection();
+      
+      if (connectionSuccess) {
+        this.databaseAvailable = true;
+        console.log(`✅ [${checkId}] Auth service using database storage (connection verified)`);
+      } else {
+        this.databaseAvailable = false;
+        console.error(`❌ [${checkId}] Database connection test returned false`);
+      }
     } catch (error) {
       this.databaseAvailable = false;
-      console.log('⚠️  Auth service falling back to in-memory storage (v2)');
-      console.log('   Database will be used once connection is established');
+      console.error(`❌ [${checkId}] Database connection test threw error:`, {
+        message: error.message,
+        code: error.code,
+        stack: error.stack?.split('\n')[0]
+      });
+    }
+    
+    if (!this.databaseAvailable) {
+      console.warn(`⚠️  [${checkId}] Auth service falling back to in-memory storage`);
+      console.warn(`⚠️  [${checkId}] WARNING: Session adoption will NOT work with memory storage`);
+      console.warn(`⚠️  [${checkId}] Users will exist in memory but not in database`);
+      console.warn(`⚠️  [${checkId}] This will cause session adoption foreign key violations`);
     }
     
     return this.databaseAvailable;
@@ -56,24 +77,52 @@ class DatabaseAuthService {
    */
   async register(userData) {
     const { email, password, firstName, lastName, organizationName, websiteUrl } = userData;
+    const registrationId = `reg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    
+    console.log(`🔍 [${registrationId}] Starting user registration process:`, {
+      email: email,
+      hasPassword: !!password,
+      firstName: firstName,
+      lastName: lastName,
+      organizationName: organizationName,
+      hasWebsiteUrl: !!websiteUrl
+    });
+
+    // First check if database is available
+    const dbAvailable = await this.ensureDatabaseConnection();
+    console.log(`🔍 [${registrationId}] Database availability check: ${dbAvailable ? 'available' : 'unavailable'}`);
 
     try {
-      // Ensure database connection is checked
-      await this.ensureDatabaseConnection();
-      
-      // Use database if available
-      if (this.databaseAvailable && this.useDatabaseStorage) {
-        return await this.registerToDatabase(userData);
+      if (dbAvailable) {
+        // Try database registration first for session adoption to work
+        console.log(`🔄 [${registrationId}] Attempting database registration...`);
+        const result = await this.registerToDatabase(userData);
+        console.log(`✅ [${registrationId}] Database registration successful for user: ${result.user.id}`);
+        return result;
       } else {
-        return await this.registerToMemory(userData);
+        console.warn(`⚠️  [${registrationId}] Skipping database registration - connection unavailable`);
+        throw new Error('Database connection unavailable - cannot register to database');
       }
-    } catch (error) {
-      // If database fails, try memory as fallback
-      if (this.databaseAvailable && error.message.includes('database')) {
-        console.warn('Database registration failed, using memory fallback:', error.message);
-        return await this.registerToMemory(userData);
-      }
-      throw error;
+    } catch (databaseError) {
+      console.error(`❌ [${registrationId}] Database registration failed:`, {
+        message: databaseError.message,
+        code: databaseError.code,
+        stack: databaseError.stack?.split('\n')[0]
+      });
+      
+      // For session adoption to work, we need database registration
+      // But don't break the app - use memory fallback and log the issue
+      console.warn(`🚨 [${registrationId}] CRITICAL: Using memory fallback - session adoption will NOT work`);
+      console.warn(`🚨 [${registrationId}] Issue: User will exist in memory but not database`);
+      console.warn(`🚨 [${registrationId}] Impact: Session data will not persist after registration`);
+      console.warn(`🚨 [${registrationId}] Impact: User will be unable to access their audiences after login`);
+      
+      // Track this critical failure for monitoring
+      const fallbackResult = await this.registerToMemory(userData);
+      console.error(`🔥 [${registrationId}] PRODUCTION ISSUE: Memory fallback used for user ${fallbackResult.user.id}`);
+      console.error(`🔥 [${registrationId}] This user's session data CANNOT be adopted without manual intervention`);
+      
+      return fallbackResult;
     }
   }
 
@@ -82,67 +131,136 @@ class DatabaseAuthService {
    */
   async registerToDatabase(userData) {
     const { email, password, firstName, lastName, organizationName, websiteUrl } = userData;
+    const dbRegId = `db_reg_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    
+    console.log(`🔍 [${dbRegId}] Starting database registration for email: ${email}`);
 
-    // Check if user already exists
-    const existingUser = await db.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email.toLowerCase()]
-    );
+    try {
+      // Check if user already exists
+      console.log(`🔍 [${dbRegId}] Checking for existing user with email: ${email}`);
+      const existingUser = await db.query(
+        'SELECT id FROM users WHERE email = $1',
+        [email.toLowerCase()]
+      );
 
-    if (existingUser.rows.length > 0) {
-      throw new Error('User already exists with this email');
+      if (existingUser.rows.length > 0) {
+        console.warn(`⚠️  [${dbRegId}] User already exists with email: ${email}`);
+        throw new Error('User already exists with this email');
+      }
+      
+      console.log(`✅ [${dbRegId}] Email ${email} is available for registration`);
+    } catch (queryError) {
+      console.error(`❌ [${dbRegId}] Failed to check existing user:`, {
+        message: queryError.message,
+        code: queryError.code,
+        query: 'SELECT id FROM users WHERE email = $1'
+      });
+      throw new Error(`Database query failed during user check: ${queryError.message}`);
     }
 
     // Hash password
     const saltRounds = 12; // Higher security for production
+    console.log(`🔍 [${dbRegId}] Hashing password with ${saltRounds} salt rounds...`);
     const hashedPassword = await bcrypt.hash(password, saltRounds);
     
     // Generate referral code
     const referralCode = this.generateReferralCode(firstName, lastName);
     const userId = uuidv4();
-
-    // Insert user into database (without organization_name - use proper JOINs)
-    const userResult = await db.query(`
-      INSERT INTO users (
-        id, email, first_name, last_name,
-        password_hash, referral_code, plan_tier, status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-      RETURNING id, email, first_name, last_name, 
-               referral_code, plan_tier, status, created_at
-    `, [
-      userId,
-      email.toLowerCase(),
-      firstName,
-      lastName,
-      hashedPassword,
-      referralCode,
-      'free', // Default plan
-      'active' // Default status
-    ]);
-
-    const user = userResult.rows[0];
-
-    // Create default organization for user
-    const organizationSlug = organizationName.toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
     
-    const orgResult = await db.query(`
-      INSERT INTO organizations (
-        id, name, slug, owner_user_id, website_url, plan_tier, status, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-      RETURNING id, name, slug, website_url
-    `, [
-      uuidv4(),
-      organizationName,
-      organizationSlug + '-' + userId.substring(0, 8), // Ensure unique slug
-      userId,
-      websiteUrl || null,
-      'free',
-      'active'
-    ]);
+    console.log(`🔍 [${dbRegId}] Generated user data:`, {
+      userId: userId,
+      email: email.toLowerCase(),
+      firstName: firstName,
+      lastName: lastName,
+      referralCode: referralCode,
+      hasHashedPassword: !!hashedPassword
+    });
 
-    const organization = orgResult.rows[0];
+    let user, organization, userResult, orgResult;
+    
+    try {
+      // Insert user into database (without organization_name - use proper JOINs)
+      console.log(`🔍 [${dbRegId}] Inserting user record into database...`);
+      userResult = await db.query(`
+        INSERT INTO users (
+          id, email, first_name, last_name,
+          password_hash, referral_code, plan_tier, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        RETURNING id, email, first_name, last_name, 
+                 referral_code, plan_tier, status, created_at
+      `, [
+        userId,
+        email.toLowerCase(),
+        firstName,
+        lastName,
+        hashedPassword,
+        referralCode,
+        'free', // Default plan
+        'active' // Default status
+      ]);
+
+      user = userResult.rows[0];
+      console.log(`✅ [${dbRegId}] User record created successfully:`, {
+        userId: user.id,
+        email: user.email,
+        createdAt: user.created_at
+      });
+    } catch (userInsertError) {
+      console.error(`❌ [${dbRegId}] Failed to insert user record:`, {
+        message: userInsertError.message,
+        code: userInsertError.code,
+        constraint: userInsertError.constraint,
+        detail: userInsertError.detail,
+        table: userInsertError.table
+      });
+      throw new Error(`User creation failed: ${userInsertError.message}`);
+    }
+
+    try {
+      // Create default organization for user
+      const organizationSlug = organizationName.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      
+      console.log(`🔍 [${dbRegId}] Creating organization for user ${user.id}:`, {
+        organizationName: organizationName,
+        slug: organizationSlug + '-' + userId.substring(0, 8),
+        ownerUserId: userId,
+        hasWebsiteUrl: !!websiteUrl
+      });
+      
+      orgResult = await db.query(`
+        INSERT INTO organizations (
+          id, name, slug, owner_user_id, website_url, plan_tier, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        RETURNING id, name, slug, website_url
+      `, [
+        uuidv4(),
+        organizationName,
+        organizationSlug + '-' + userId.substring(0, 8), // Ensure unique slug
+        userId,
+        websiteUrl || null,
+        'free',
+        'active'
+      ]);
+
+      organization = orgResult.rows[0];
+      console.log(`✅ [${dbRegId}] Organization created successfully:`, {
+        organizationId: organization.id,
+        name: organization.name,
+        slug: organization.slug
+      });
+    } catch (orgInsertError) {
+      console.error(`❌ [${dbRegId}] Failed to create organization:`, {
+        message: orgInsertError.message,
+        code: orgInsertError.code,
+        constraint: orgInsertError.constraint,
+        detail: orgInsertError.detail
+      });
+      // Organization creation failure shouldn't block user registration
+      console.warn(`⚠️  [${dbRegId}] User created but organization creation failed - continuing with default org`);
+      throw new Error(`Organization creation failed: ${orgInsertError.message}`);
+    }
 
     // Add user as owner to organization_members
     await db.query(`

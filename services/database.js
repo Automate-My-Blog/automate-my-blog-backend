@@ -8,16 +8,37 @@ const { Pool } = pg;
 
 // Database configuration for Vercel/Cloud hosting
 const getDatabaseConfig = () => {
+  console.log('🔍 Database Configuration Debug:', {
+    timestamp: new Date().toISOString(),
+    nodeEnv: process.env.NODE_ENV,
+    hasRawDatabaseUrl: !!process.env.DATABASE_URL,
+    databaseUrlLength: process.env.DATABASE_URL?.length || 0,
+    databaseUrlStart: process.env.DATABASE_URL?.substring(0, 20) || 'Not set',
+    hasDbUser: !!process.env.DB_USER,
+    hasDbHost: !!process.env.DB_HOST,
+    hasDbName: !!process.env.DB_NAME,
+    hasDbPassword: !!process.env.DB_PASSWORD,
+    hasDbPort: !!process.env.DB_PORT
+  });
+
   // Check if we have a full connection string (production/vercel)
   if (process.env.DATABASE_URL) {
-    return {
+    const config = {
       connectionString: process.env.DATABASE_URL,
       ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
     };
+    
+    console.log('✅ Using DATABASE_URL connection with config:', {
+      hasConnectionString: !!config.connectionString,
+      sslConfig: config.ssl,
+      urlProtocol: process.env.DATABASE_URL?.split('://')[0] || 'unknown'
+    });
+    
+    return config;
   }
   
   // Fallback to individual connection parameters (development/local)
-  return {
+  const config = {
     user: process.env.DB_USER || 'postgres',
     host: process.env.DB_HOST || 'localhost',
     database: process.env.DB_NAME || 'automate_my_blog',
@@ -25,6 +46,17 @@ const getDatabaseConfig = () => {
     port: process.env.DB_PORT || 5432,
     ssl: false
   };
+  
+  console.log('📋 Using individual connection parameters:', {
+    user: config.user,
+    host: config.host,
+    database: config.database,
+    hasPassword: !!config.password,
+    port: config.port,
+    ssl: config.ssl
+  });
+  
+  return config;
 };
 
 // Connection pool configuration optimized for Vercel serverless
@@ -36,11 +68,15 @@ const dbConfig = {
   connectionTimeoutMillis: 5000, // Quicker connection timeout
 };
 
-console.log('🔗 Connecting to database:', {
+console.log('🔗 Initializing database connection pool:', {
   ssl: dbConfig.ssl,
   host: dbConfig.host || 'connection_string',
   database: dbConfig.database || 'from_url',
-  environment: process.env.NODE_ENV
+  environment: process.env.NODE_ENV,
+  maxConnections: dbConfig.max,
+  idleTimeout: dbConfig.idleTimeoutMillis,
+  connectionTimeout: dbConfig.connectionTimeoutMillis,
+  configType: process.env.DATABASE_URL ? 'DATABASE_URL' : 'individual_params'
 });
 
 // Create connection pool
@@ -129,29 +165,125 @@ class DatabaseService {
   }
 
   /**
-   * Test database connection
+   * Test database connection with enhanced debugging
    * @returns {Promise<boolean>} Connection status
    */
   async testConnection() {
+    const connectionId = `conn_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+    const startTime = Date.now();
+    
+    console.log(`🔍 [${connectionId}] Starting database connection test...`);
+    
     try {
-      const result = await this.query('SELECT NOW() as current_time, version() as db_version');
-      console.log('✅ Database connection successful');
-      console.log('⏰ Server time:', result.rows[0].current_time);
-      console.log('🗄️ Database version:', result.rows[0].db_version.split(' ')[0]);
+      // Test basic connectivity first
+      console.log(`🔍 [${connectionId}] Attempting to acquire pool connection...`);
+      const client = await this.pool.connect();
+      
+      console.log(`🔍 [${connectionId}] Pool connection acquired, executing test query...`);
+      const result = await client.query('SELECT NOW() as current_time, version() as db_version, current_database() as db_name');
+      client.release();
+      
+      const duration = Date.now() - startTime;
+      
+      console.log(`✅ [${connectionId}] Database connection successful (${duration}ms)`);
+      console.log(`⏰ Server time: ${result.rows[0].current_time}`);
+      console.log(`🗄️ Database version: ${result.rows[0].db_version.split(' ')[0]}`);
+      console.log(`📁 Database name: ${result.rows[0].db_name}`);
+      console.log(`📊 Pool status: Total=${this.pool.totalCount}, Idle=${this.pool.idleCount}, Waiting=${this.pool.waitingCount}`);
+      
       return true;
     } catch (error) {
-      console.error('❌ Database connection failed:', error.message);
+      const duration = Date.now() - startTime;
       
-      // Provide helpful error messages
+      console.error(`❌ [${connectionId}] Database connection failed (${duration}ms):`, {
+        message: error.message,
+        code: error.code,
+        errno: error.errno,
+        syscall: error.syscall,
+        hostname: error.hostname,
+        address: error.address,
+        port: error.port,
+        stack: error.stack?.split('\n')[0] // First line of stack for brevity
+      });
+      
+      // Enhanced error analysis with production-specific hints
       if (error.code === 'ECONNREFUSED') {
-        console.log('\n🚨 Connection refused. Check database server status.');
+        console.error(`🚨 [${connectionId}] Connection refused:`, {
+          issue: 'Database server not accepting connections',
+          possibleCauses: [
+            'Database server is down',
+            'Firewall blocking connection',
+            'Wrong host/port configuration',
+            'Vercel IP not whitelisted (if using external DB)'
+          ],
+          checkItems: [
+            'Verify DATABASE_URL host and port',
+            'Check database server status',
+            'Verify Vercel IP whitelist if using external DB'
+          ]
+        });
       } else if (error.code === '3D000') {
-        console.log('\n🚨 Database does not exist.');
+        console.error(`🚨 [${connectionId}] Database does not exist:`, {
+          issue: 'Specified database name not found',
+          possibleCauses: [
+            'Wrong database name in connection string',
+            'Database not created on server',
+            'Typo in DATABASE_URL'
+          ]
+        });
       } else if (error.code === '28P01') {
-        console.log('\n🚨 Authentication failed. Check credentials.');
+        console.error(`🚨 [${connectionId}] Authentication failed:`, {
+          issue: 'Invalid credentials',
+          possibleCauses: [
+            'Wrong username/password in DATABASE_URL',
+            'User permissions insufficient',
+            'Password contains special characters not properly encoded'
+          ]
+        });
       } else if (error.code === 'ENOTFOUND') {
-        console.log('\n🚨 Database host not found. Check connection string.');
+        console.error(`🚨 [${connectionId}] Host not found:`, {
+          issue: 'DNS resolution failed',
+          possibleCauses: [
+            'Wrong hostname in DATABASE_URL',
+            'DNS resolution issues in Vercel environment',
+            'Private network configuration issues'
+          ],
+          hostname: error.hostname
+        });
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+        console.error(`🚨 [${connectionId}] Connection timeout/reset:`, {
+          issue: 'Network connectivity issues',
+          possibleCauses: [
+            'Database server overloaded',
+            'Network latency too high',
+            'Connection pool misconfiguration',
+            'Vercel timeout limits'
+          ],
+          timeout: this.pool.options?.connectionTimeoutMillis || 'default'
+        });
+      } else if (error.message?.includes('SSL')) {
+        console.error(`🚨 [${connectionId}] SSL/TLS issues:`, {
+          issue: 'SSL configuration problems',
+          possibleCauses: [
+            'SSL required but not configured',
+            'Invalid SSL certificate',
+            'SSL version mismatch'
+          ],
+          currentSSLConfig: this.pool.options?.ssl || 'none'
+        });
+      } else {
+        console.error(`🚨 [${connectionId}] Unknown connection error:`, {
+          issue: 'Unrecognized error type',
+          needsInvestigation: true,
+          errorDetails: {
+            code: error.code,
+            message: error.message,
+            name: error.name
+          }
+        });
       }
+      
+      console.error(`📊 [${connectionId}] Pool status on failure: Total=${this.pool.totalCount}, Idle=${this.pool.idleCount}, Waiting=${this.pool.waitingCount}`);
       
       return false;
     }
