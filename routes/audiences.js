@@ -50,6 +50,17 @@ const safeParse = (jsonString, fieldName, recordId) => {
 const extractUserContext = (req) => {
   const sessionId = req.headers['x-session-id'] || req.body?.session_id;
   
+  // Enhanced debugging for authentication issues
+  console.log('🔍 extractUserContext debug:', {
+    hasAuthHeader: !!req.headers.authorization,
+    authHeaderStart: req.headers.authorization?.substring(0, 20),
+    hasReqUser: !!req.user,
+    reqUserKeys: req.user ? Object.keys(req.user) : [],
+    reqUserId: req.user?.userId,
+    sessionId: sessionId,
+    endpoint: req.path
+  });
+  
   // Check for mock user ID (for testing session adoption flow)
   const mockUserId = req.headers['x-mock-user-id'];
   if (mockUserId && process.env.NODE_ENV !== 'production') {
@@ -61,6 +72,7 @@ const extractUserContext = (req) => {
   }
   
   if (req.user?.userId) {
+    console.log('✅ extractUserContext: Authenticated user found:', req.user.userId);
     return {
       isAuthenticated: true,
       userId: req.user.userId,
@@ -68,6 +80,7 @@ const extractUserContext = (req) => {
     };
   }
   
+  console.log('❌ extractUserContext: No authenticated user, falling back to session');
   return {
     isAuthenticated: false,
     userId: null,
