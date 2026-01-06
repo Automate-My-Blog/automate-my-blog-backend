@@ -48,15 +48,26 @@ const safeParse = (jsonString, fieldName, recordId) => {
 };
 
 const extractUserContext = (req) => {
+  const sessionId = req.headers['x-session-id'] || req.body?.session_id;
+  
+  // Check for mock user ID (for testing session adoption flow)
+  const mockUserId = req.headers['x-mock-user-id'];
+  if (mockUserId && process.env.NODE_ENV !== 'production') {
+    return {
+      isAuthenticated: true,
+      userId: mockUserId,
+      sessionId: sessionId || null
+    };
+  }
+  
   if (req.user?.userId) {
     return {
       isAuthenticated: true,
       userId: req.user.userId,
-      sessionId: null
+      sessionId: sessionId || null // Keep session ID even when authenticated for adoption
     };
   }
   
-  const sessionId = req.headers['x-session-id'] || req.body?.session_id;
   return {
     isAuthenticated: false,
     userId: null,
@@ -192,6 +203,72 @@ const validateAudienceData = (data) => {
   }
 
   return errors;
+};
+
+// Helper function to automatically adopt session data for authenticated users
+const attemptSessionAdoption = async (userContext) => {
+  if (!userContext.isAuthenticated || !userContext.sessionId) {
+    console.log(`🔍 Session adoption skipped: authenticated=${userContext.isAuthenticated}, sessionId=${userContext.sessionId}`);
+    return { adopted: false, reason: 'No session to adopt or user not authenticated' };
+  }
+
+  try {
+    console.log(`🔄 Attempting automatic session adoption for user ${userContext.userId}, session ${userContext.sessionId}`);
+
+    // Check if there's any session data to adopt
+    const sessionDataCheck = await db.query(`
+      SELECT COUNT(*) as audience_count
+      FROM audiences 
+      WHERE session_id = $1
+    `, [userContext.sessionId]);
+
+    const sessionAudienceCount = parseInt(sessionDataCheck.rows[0].audience_count);
+    console.log(`📊 Found ${sessionAudienceCount} audience(s) for session ${userContext.sessionId}`);
+    
+    if (sessionAudienceCount === 0) {
+      return { adopted: false, reason: 'No session data found to adopt' };
+    }
+
+    // Check if user already has data (to avoid unnecessary adoption)
+    const userDataCheck = await db.query(`
+      SELECT COUNT(*) as user_audience_count
+      FROM audiences 
+      WHERE user_id = $1
+    `, [userContext.userId]);
+
+    const userAudienceCount = parseInt(userDataCheck.rows[0].user_audience_count);
+    console.log(`📊 User ${userContext.userId} currently has ${userAudienceCount} audience(s)`);
+    
+    if (userAudienceCount > 0) {
+      return { adopted: false, reason: 'User already has audience data, skipping adoption' };
+    }
+
+    // Perform automatic session adoption
+    const adoptionResult = await db.query(`
+      UPDATE audiences 
+      SET user_id = $1, session_id = NULL, updated_at = NOW()
+      WHERE session_id = $2
+      RETURNING id, target_segment, customer_problem, priority
+    `, [userContext.userId, userContext.sessionId]);
+
+    console.log(`✅ Automatic session adoption completed: ${adoptionResult.rows.length} audiences adopted`);
+
+    return {
+      adopted: true,
+      audiencesAdopted: adoptionResult.rows.length,
+      reason: 'Session data successfully adopted automatically'
+    };
+
+  } catch (error) {
+    console.error(`❌ Automatic session adoption failed:`, error);
+    
+    // Check if it's a foreign key constraint error (user doesn't exist)
+    if (error.code === '23503' && error.constraint === 'audiences_user_id_fkey') {
+      return { adopted: false, reason: 'Adoption failed: User does not exist in database' };
+    }
+    
+    return { adopted: false, reason: `Adoption failed: ${error.message}` };
+  }
 };
 
 router.post('/', async (req, res) => {
@@ -383,8 +460,28 @@ router.get('/', async (req, res) => {
         userId: userContext.userId, 
         sessionId: userContext.sessionId 
       },
-      queryParams: req.query
+      queryParams: req.query,
+      headers: {
+        mockUserId: req.headers['x-mock-user-id'],
+        sessionId: req.headers['x-session-id']
+      }
     });
+
+    // Attempt automatic session adoption for authenticated users
+    let adoptionResult = null;
+    console.log(`🔍 Checking adoption conditions: isAuthenticated=${userContext.isAuthenticated}, sessionId=${userContext.sessionId}`);
+    
+    if (userContext.isAuthenticated && userContext.sessionId) {
+      console.log(`🚀 Starting session adoption process...`);
+      adoptionResult = await attemptSessionAdoption(userContext);
+      if (adoptionResult.adopted) {
+        console.log(`🎯 Session data automatically adopted: ${adoptionResult.reason}`);
+      } else {
+        console.log(`⚠️ Session adoption skipped: ${adoptionResult.reason}`);
+      }
+    } else {
+      console.log(`❌ Session adoption conditions not met`);
+    }
 
     const { organization_intelligence_id, project_id, limit = 25, offset = 0 } = req.query;
 
@@ -471,11 +568,22 @@ router.get('/', async (req, res) => {
       created_at: row.created_at
     }));
 
-    res.json({
+    const response = {
       success: true,
       audiences,
       total: audiences.length
-    });
+    };
+
+    // Include adoption information if it occurred
+    if (adoptionResult && adoptionResult.adopted) {
+      response.sessionAdoption = {
+        adopted: true,
+        audiencesAdopted: adoptionResult.audiencesAdopted,
+        message: 'Your previous session data has been automatically saved to your account'
+      };
+    }
+
+    res.json(response);
 
   } catch (error) {
     console.error('Get audiences error:', error);
