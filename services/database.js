@@ -62,10 +62,12 @@ const getDatabaseConfig = () => {
 // Connection pool configuration optimized for Vercel serverless
 const dbConfig = {
   ...getDatabaseConfig(),
-  // Serverless-optimized pool settings
-  max: process.env.NODE_ENV === 'production' ? 2 : 10,  // Lower max for serverless
-  idleTimeoutMillis: 10000,     // Shorter idle timeout for serverless
-  connectionTimeoutMillis: 5000, // Quicker connection timeout
+  // Serverless-optimized pool settings with extended timeouts for slow databases
+  max: process.env.NODE_ENV === 'production' ? 1 : 10,  // Single connection for serverless to avoid pool conflicts
+  idleTimeoutMillis: 3000,      // Shorter idle timeout for serverless cleanup
+  connectionTimeoutMillis: 30000, // Extended timeout for slow database connections (was 5000)
+  acquireTimeoutMillis: 30000,  // Time to wait for connection from pool
+  createTimeoutMillis: 30000,   // Time to wait for new connection creation
 };
 
 console.log('🔗 Initializing database connection pool:', {
@@ -76,7 +78,10 @@ console.log('🔗 Initializing database connection pool:', {
   maxConnections: dbConfig.max,
   idleTimeout: dbConfig.idleTimeoutMillis,
   connectionTimeout: dbConfig.connectionTimeoutMillis,
-  configType: process.env.DATABASE_URL ? 'DATABASE_URL' : 'individual_params'
+  acquireTimeout: dbConfig.acquireTimeoutMillis,
+  createTimeout: dbConfig.createTimeoutMillis,
+  configType: process.env.DATABASE_URL ? 'DATABASE_URL' : 'individual_params',
+  timeoutFix: 'Extended timeouts for slow database connections'
 });
 
 // Create connection pool
@@ -250,16 +255,18 @@ class DatabaseService {
           ],
           hostname: error.hostname
         });
-      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET') {
+      } else if (error.code === 'ETIMEDOUT' || error.code === 'ECONNRESET' || error.message?.includes('connection timeout')) {
         console.error(`🚨 [${connectionId}] Connection timeout/reset:`, {
-          issue: 'Network connectivity issues',
+          issue: 'Network connectivity or database performance issues',
           possibleCauses: [
-            'Database server overloaded',
-            'Network latency too high',
+            'Database server overloaded or slow',
+            'Network latency too high between Vercel and database',
+            'Database plan limitations (free tier throttling)',
             'Connection pool misconfiguration',
-            'Vercel timeout limits'
+            'Database suspended or under maintenance'
           ],
-          timeout: this.pool.options?.connectionTimeoutMillis || 'default'
+          currentTimeout: this.pool.options?.connectionTimeoutMillis || 'default',
+          recommendedAction: 'Check database performance and consider upgrading database plan'
         });
       } else if (error.message?.includes('SSL')) {
         console.error(`🚨 [${connectionId}] SSL/TLS issues:`, {
