@@ -207,23 +207,35 @@ const validateAudienceData = (data) => {
 
 // Helper function to automatically adopt session data for authenticated users
 const attemptSessionAdoption = async (userContext) => {
+  const adoptionId = `adoption_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  
   if (!userContext.isAuthenticated || !userContext.sessionId) {
-    console.log(`🔍 Session adoption skipped: authenticated=${userContext.isAuthenticated}, sessionId=${userContext.sessionId}`);
+    console.log(`🔍 [${adoptionId}] Session adoption skipped: authenticated=${userContext.isAuthenticated}, sessionId=${userContext.sessionId}`);
     return { adopted: false, reason: 'No session to adopt or user not authenticated' };
   }
 
   try {
-    console.log(`🔄 Attempting automatic session adoption for user ${userContext.userId}, session ${userContext.sessionId}`);
+    console.log(`🔄 [${adoptionId}] Attempting automatic session adoption for user ${userContext.userId}, session ${userContext.sessionId}`);
+
+    // ENHANCED: Verify user exists in database first
+    const userExistsCheck = await db.query('SELECT id FROM users WHERE id = $1', [userContext.userId]);
+    if (userExistsCheck.rows.length === 0) {
+      console.error(`❌ [${adoptionId}] CRITICAL: User ${userContext.userId} does not exist in database - cannot adopt session data`);
+      return { adopted: false, reason: 'User does not exist in database' };
+    }
+    console.log(`✅ [${adoptionId}] User ${userContext.userId} exists in database`);
 
     // Check if there's any session data to adopt
     const sessionDataCheck = await db.query(`
-      SELECT COUNT(*) as audience_count
+      SELECT COUNT(*) as audience_count, 
+             string_agg(id::text, ', ') as audience_ids
       FROM audiences 
       WHERE session_id = $1
     `, [userContext.sessionId]);
 
     const sessionAudienceCount = parseInt(sessionDataCheck.rows[0].audience_count);
-    console.log(`📊 Found ${sessionAudienceCount} audience(s) for session ${userContext.sessionId}`);
+    const audienceIds = sessionDataCheck.rows[0].audience_ids;
+    console.log(`📊 [${adoptionId}] Found ${sessionAudienceCount} audience(s) for session ${userContext.sessionId}:`, audienceIds);
     
     if (sessionAudienceCount === 0) {
       return { adopted: false, reason: 'No session data found to adopt' };
@@ -231,39 +243,76 @@ const attemptSessionAdoption = async (userContext) => {
 
     // Check if user already has data (to avoid unnecessary adoption)
     const userDataCheck = await db.query(`
-      SELECT COUNT(*) as user_audience_count
+      SELECT COUNT(*) as user_audience_count,
+             string_agg(id::text, ', ') as user_audience_ids
       FROM audiences 
       WHERE user_id = $1
     `, [userContext.userId]);
 
     const userAudienceCount = parseInt(userDataCheck.rows[0].user_audience_count);
-    console.log(`📊 User ${userContext.userId} currently has ${userAudienceCount} audience(s)`);
+    const userAudienceIds = userDataCheck.rows[0].user_audience_ids;
+    console.log(`📊 [${adoptionId}] User ${userContext.userId} currently has ${userAudienceCount} audience(s):`, userAudienceIds);
     
     if (userAudienceCount > 0) {
       return { adopted: false, reason: 'User already has audience data, skipping adoption' };
     }
 
-    // Perform automatic session adoption
-    const adoptionResult = await db.query(`
-      UPDATE audiences 
-      SET user_id = $1, session_id = NULL, updated_at = NOW()
-      WHERE session_id = $2
-      RETURNING id, target_segment, customer_problem, priority
-    `, [userContext.userId, userContext.sessionId]);
+    // ENHANCED: Start transaction for atomic operation
+    console.log(`🔄 [${adoptionId}] Starting transaction for session adoption...`);
+    await db.query('BEGIN');
 
-    console.log(`✅ Automatic session adoption completed: ${adoptionResult.rows.length} audiences adopted`);
+    try {
+      // Perform automatic session adoption
+      const adoptionResult = await db.query(`
+        UPDATE audiences 
+        SET user_id = $1, session_id = NULL, updated_at = NOW()
+        WHERE session_id = $2
+        RETURNING id, target_segment, customer_problem, priority
+      `, [userContext.userId, userContext.sessionId]);
 
-    return {
-      adopted: true,
-      audiencesAdopted: adoptionResult.rows.length,
-      reason: 'Session data successfully adopted automatically'
-    };
+      console.log(`🔍 [${adoptionId}] Adoption UPDATE query affected ${adoptionResult.rows.length} rows`);
+
+      if (adoptionResult.rows.length !== sessionAudienceCount) {
+        console.error(`⚠️ [${adoptionId}] Adoption count mismatch: expected ${sessionAudienceCount}, got ${adoptionResult.rows.length}`);
+      }
+
+      // Verify adoption was successful
+      const verificationCheck = await db.query(`
+        SELECT COUNT(*) as adopted_count
+        FROM audiences 
+        WHERE user_id = $1 AND session_id IS NULL
+      `, [userContext.userId]);
+
+      const adoptedCount = parseInt(verificationCheck.rows[0].adopted_count);
+      console.log(`🔍 [${adoptionId}] Verification: User now has ${adoptedCount} audiences after adoption`);
+
+      // Commit transaction
+      await db.query('COMMIT');
+      console.log(`✅ [${adoptionId}] Transaction committed successfully`);
+
+      return {
+        adopted: true,
+        audiencesAdopted: adoptionResult.rows.length,
+        reason: 'Session data successfully adopted automatically'
+      };
+
+    } catch (transactionError) {
+      await db.query('ROLLBACK');
+      console.error(`❌ [${adoptionId}] Transaction rolled back due to error:`, transactionError);
+      throw transactionError;
+    }
 
   } catch (error) {
-    console.error(`❌ Automatic session adoption failed:`, error);
+    console.error(`❌ [${adoptionId}] Automatic session adoption failed:`, {
+      message: error.message,
+      code: error.code,
+      constraint: error.constraint,
+      detail: error.detail
+    });
     
     // Check if it's a foreign key constraint error (user doesn't exist)
     if (error.code === '23503' && error.constraint === 'audiences_user_id_fkey') {
+      console.error(`🚨 [${adoptionId}] Foreign key constraint violation: User ${userContext.userId} does not exist in users table`);
       return { adopted: false, reason: 'Adoption failed: User does not exist in database' };
     }
     
@@ -467,6 +516,24 @@ router.get('/', async (req, res) => {
       }
     });
 
+    // CRITICAL DEBUG: Compare with /me endpoint user ID
+    if (userContext.isAuthenticated) {
+      console.log('🔍 AUDIENCES endpoint - User ID comparison:', {
+        audienceUserId: userContext.userId,
+        reqUserUserId: req.user?.userId,
+        userIdsMatch: userContext.userId === req.user?.userId,
+        authHeaderPresent: !!req.headers.authorization
+      });
+      
+      // Check if this user exists in database for audience queries
+      const userExistsCheck = await db.query('SELECT id, email FROM users WHERE id = $1', [userContext.userId]);
+      console.log('🔍 AUDIENCES endpoint - User exists in database check:', {
+        requestUserId: userContext.userId,
+        userFoundInDb: userExistsCheck.rows.length > 0,
+        dbUserData: userExistsCheck.rows[0] || 'NOT_FOUND'
+      });
+    }
+
     // Attempt automatic session adoption for authenticated users
     let adoptionResult = null;
     console.log(`🔍 Checking adoption conditions: isAuthenticated=${userContext.isAuthenticated}, sessionId=${userContext.sessionId}`);
@@ -474,6 +541,7 @@ router.get('/', async (req, res) => {
     if (userContext.isAuthenticated && userContext.sessionId) {
       console.log(`🚀 Starting session adoption process...`);
       adoptionResult = await attemptSessionAdoption(userContext);
+      console.log(`🔍 DEBUG: Adoption result:`, adoptionResult);
       if (adoptionResult.adopted) {
         console.log(`🎯 Session data automatically adopted: ${adoptionResult.reason}`);
       } else {
@@ -541,6 +609,41 @@ router.get('/', async (req, res) => {
     console.log('📊 Database query returned:', {
       rowCount: result.rows.length
     });
+
+    // CRITICAL DEBUG: If no results, check what data actually exists for this user
+    if (result.rows.length === 0 && userContext.isAuthenticated) {
+      console.log('🔍 ZERO RESULTS - Investigating what data exists for user:');
+      
+      // Check all audiences for this user (ignore session_id)
+      const allUserAudiences = await db.query(`
+        SELECT id, user_id, session_id, customer_problem, created_at,
+               target_segment::text as target_segment_text
+        FROM audiences 
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+      `, [userContext.userId]);
+      
+      console.log('🔍 All audiences for user:', {
+        userId: userContext.userId,
+        totalAudiences: allUserAudiences.rows.length,
+        audiences: allUserAudiences.rows
+      });
+      
+      // Check if session still has data
+      if (userContext.sessionId) {
+        const sessionAudiences = await db.query(`
+          SELECT id, user_id, session_id, customer_problem, created_at
+          FROM audiences 
+          WHERE session_id = $1
+        `, [userContext.sessionId]);
+        
+        console.log('🔍 Remaining session audiences:', {
+          sessionId: userContext.sessionId,
+          sessionAudiences: sessionAudiences.rows.length,
+          audiences: sessionAudiences.rows
+        });
+      }
+    }
     
     // Log each individual record to identify corrupted data
     result.rows.forEach((row, index) => {

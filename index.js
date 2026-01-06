@@ -374,6 +374,14 @@ app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (
       hierarchyLevel: user.hierarchyLevel
     });
     
+    // CRITICAL DEBUG: Check if this user exists in database for audience queries
+    const userExistsCheck = await db.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
+    console.log('🔍 /me endpoint - User exists in database check:', {
+      requestUserId: req.user.userId,
+      userFoundInDb: userExistsCheck.rows.length > 0,
+      dbUserData: userExistsCheck.rows[0] || 'NOT_FOUND'
+    });
+    
     res.json({
       success: true,
       user
