@@ -12,12 +12,14 @@ import referralService from './services/referrals.js';
 import billingService from './services/billing.js';
 import leadService from './services/leads.js';
 import organizationService from './services/organizations.js';
-import projectsService from './services/projects.js';
+// import projectsService from './services/projects.js'; // Removed - using organization intelligence instead
 import db from './services/database.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
+import postsRoutes from './routes/posts.js';
+import analysisRoutes from './routes/analysis.js';
 
 // Load environment variables
 dotenv.config();
@@ -65,27 +67,66 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API Routes
+console.log('🔧 Registering API routes...');
 app.use('/api/v1/session', sessionRoutes);
+console.log('✅ Session routes registered');
 app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
+console.log('✅ Audiences routes registered');
 app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
+console.log('✅ Keywords routes registered');
 app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
+console.log('✅ Users routes registered');
+app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
+console.log('✅ Posts routes registered');
+app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
+console.log('✅ Analysis routes registered');
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
   const keyLength = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.length : 0;
   
+  // Check if analysis routes are registered by testing the router stack
+  const getAnalysisRoutesCount = (app) => {
+    if (!app._router || !app._router.stack) return 0;
+    
+    let analysisRouterFound = false;
+    let analysisRouteCount = 0;
+    
+    app._router.stack.forEach(layer => {
+      if (layer.name === 'router' && layer.regexp.source.includes('/api/v1/analysis')) {
+        analysisRouterFound = true;
+        if (layer.handle && layer.handle.stack) {
+          analysisRouteCount = layer.handle.stack.length;
+        }
+      }
+    });
+    
+    return { found: analysisRouterFound, routeCount: analysisRouteCount };
+  };
+  
+  const analysisInfo = getAnalysisRoutesCount(app);
+  
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
     service: 'AutoBlog API',
-    version: 'v2.0-auth-fix-deployed',
+    version: 'v2.1-route-debug-deployed',
     authSystemStatus: authService.getStorageStatus(),
+    routes: {
+      analysisRouterRegistered: analysisInfo.found,
+      analysisRouteCount: analysisInfo.routeCount,
+      totalMiddleware: app._router ? app._router.stack.length : 0
+    },
     env: {
       nodeEnv: process.env.NODE_ENV,
       hasOpenAIKey,
       openaiKeyLength: keyLength,
-      openaiModel: process.env.OPENAI_MODEL || 'gpt-3.5-turbo'
+      openaiModel: process.env.OPENAI_MODEL || 'gpt-3.5-turbo',
+      platform: process.platform,
+      nodeVersion: process.version,
+      isVercelDeployment: !!process.env.VERCEL,
+      vercelEnv: process.env.VERCEL_ENV || 'not-vercel'
     }
   });
 });
@@ -99,6 +140,58 @@ app.get('/api/v1/debug/headers', (req, res) => {
     hasSessionId: !!req.headers['x-session-id'],
     authHeader: req.headers.authorization ? 'Bearer ***' : null,
     sessionId: req.headers['x-session-id'] || null,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Debug endpoint to list all registered routes
+app.get('/api/v1/debug/routes', (req, res) => {
+  const getRoutes = (app) => {
+    const routes = [];
+    
+    const addRoutes = (layer, basePath = '') => {
+      if (layer.route) {
+        // This is a route layer
+        const methods = Object.keys(layer.route.methods);
+        routes.push({
+          path: basePath + layer.route.path,
+          methods: methods,
+          stack: layer.route.stack.length
+        });
+      } else if (layer.name === 'router') {
+        // This is a router layer
+        const routerPath = layer.regexp.source
+          .replace('^\\', '')
+          .replace('\\/?(?=\\/|$)', '')
+          .replace(/\\\//g, '/')
+          .replace('(?:', '')
+          .replace(')', '');
+        
+        if (layer.handle && layer.handle.stack) {
+          layer.handle.stack.forEach(subLayer => {
+            addRoutes(subLayer, routerPath);
+          });
+        }
+      }
+    };
+    
+    if (app._router && app._router.stack) {
+      app._router.stack.forEach(layer => {
+        addRoutes(layer);
+      });
+    }
+    
+    return routes;
+  };
+  
+  const routes = getRoutes(app);
+  const analysisRoutes = routes.filter(route => route.path.includes('/api/v1/analysis'));
+  
+  res.json({
+    success: true,
+    totalRoutes: routes.length,
+    analysisRoutes: analysisRoutes,
+    allRoutes: routes.sort((a, b) => a.path.localeCompare(b.path)),
     timestamp: new Date().toISOString()
   });
 });
@@ -435,15 +528,52 @@ app.post('/api/v1/auth/logout', (req, res) => {
   });
 });
 
-// Get user's most recent website analysis endpoint
+// Get user's most recent website analysis endpoint (deprecated - use /api/v1/analysis/recent)
 app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const userId = req.user.userId;
-    console.log(`📊 Getting most recent analysis for user: ${userId}`);
+    console.log(`📊 Getting most recent organization intelligence for user: ${userId} (deprecated endpoint)`);
     
-    const recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
-    
-    if (!recentAnalysis) {
+    // Get most recent organization and intelligence data
+    const result = await db.query(`
+      SELECT 
+        o.id as org_id,
+        o.name as organization_name,
+        o.website_url,
+        o.business_type,
+        o.industry_category,
+        o.business_model,
+        o.company_size,
+        o.description,
+        o.target_audience,
+        o.brand_voice,
+        o.website_goals,
+        o.search_behavior_summary,
+        o.last_analyzed_at,
+        o.updated_at as org_updated_at,
+        
+        oi.customer_scenarios,
+        oi.business_value_assessment,
+        oi.customer_language_patterns,
+        oi.search_behavior_insights,
+        oi.seo_opportunities,
+        oi.content_strategy_recommendations,
+        oi.competitive_intelligence,
+        oi.analysis_confidence_score,
+        oi.data_sources,
+        oi.ai_model_used,
+        oi.raw_openai_response,
+        oi.is_current,
+        oi.created_at as intelligence_created_at
+        
+      FROM organizations o
+      LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
+      WHERE o.owner_user_id = $1 
+      ORDER BY o.last_analyzed_at DESC NULLS LAST, o.updated_at DESC
+      LIMIT 1
+    `, [userId]);
+
+    if (result.rows.length === 0) {
       return res.json({
         success: true,
         analysis: null,
@@ -451,11 +581,25 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
       });
     }
     
-    console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
+    const record = result.rows[0];
+    
+    // Build analysis response for backward compatibility
+    const analysis = {
+      websiteUrl: record.website_url,
+      businessName: record.organization_name,
+      businessType: record.business_type,
+      targetAudience: record.target_audience,
+      contentFocus: record.description,
+      brandVoice: record.brand_voice,
+      updatedAt: record.org_updated_at,
+      createdAt: record.intelligence_created_at
+    };
+    
+    console.log(`✅ Found recent organization intelligence: ${analysis.websiteUrl} (analyzed: ${record.last_analyzed_at})`);
     
     res.json({
       success: true,
-      analysis: recentAnalysis,
+      analysis,
       message: 'Recent analysis retrieved successfully'
     });
 
@@ -528,6 +672,170 @@ app.post('/api/analyze-website', async (req, res) => {
     } catch (leadError) {
       // Don't fail the main request if lead capture fails
       console.warn('Failed to capture lead:', leadError.message);
+    }
+
+    // Save analysis to organizations and organization intelligence tables with session support
+    try {
+      const sessionId = req.headers['x-session-id'];
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      let userId = null;
+      
+      // Extract user ID from JWT token if authenticated
+      if (token) {
+        try {
+          const jwt = await import('jsonwebtoken');
+          const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+          userId = payload.userId;
+          console.log('🔍 Authenticated user found for organization intelligence save:', userId);
+        } catch (jwtError) {
+          console.warn('Failed to extract user from JWT:', jwtError.message);
+        }
+      }
+      
+      // Only save if we have either userId or sessionId
+      if (userId || sessionId) {
+        const { v4: uuidv4 } = await import('uuid');
+        const now = new Date();
+        
+        // Create organization name from business name or URL
+        const organizationName = analysis?.businessName || analysis?.companyName || new URL(url).hostname;
+        
+        const organizationData = {
+          name: organizationName,
+          website_url: url,
+          business_type: analysis?.businessType,
+          industry_category: analysis?.industryCategory,
+          business_model: analysis?.businessModel,
+          company_size: analysis?.companySize,
+          description: analysis?.description,
+          target_audience: analysis?.targetAudience,
+          brand_voice: analysis?.brandVoice,
+          website_goals: analysis?.websiteGoals,
+          search_behavior_summary: analysis?.searchBehavior,
+          last_analyzed_at: now
+        };
+        
+        const intelligenceData = {
+          customer_scenarios: analysis?.customerScenarios ? JSON.stringify(analysis.customerScenarios) : null,
+          business_value_assessment: analysis?.businessValueAssessment ? JSON.stringify(analysis.businessValueAssessment) : null,
+          customer_language_patterns: analysis?.customerLanguagePatterns ? JSON.stringify(analysis.customerLanguagePatterns) : null,
+          search_behavior_insights: analysis?.searchBehaviorInsights ? JSON.stringify(analysis.searchBehaviorInsights) : null,
+          seo_opportunities: analysis?.seoOpportunities ? JSON.stringify(analysis.seoOpportunities) : null,
+          content_strategy_recommendations: analysis?.contentStrategyRecommendations ? JSON.stringify(analysis.contentStrategyRecommendations) : null,
+          competitive_intelligence: analysis?.competitiveIntelligence ? JSON.stringify(analysis.competitiveIntelligence) : null,
+          analysis_confidence_score: analysis?.analysisConfidenceScore || 0.75,
+          data_sources: analysis?.dataSources ? JSON.stringify(analysis.dataSources) : JSON.stringify(['website_analysis']),
+          ai_model_used: analysis?.aiModelUsed || 'gpt-4',
+          raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null,
+          is_current: true
+        };
+        
+        // Check if organization already exists for this user/session and URL
+        let existingOrganization = null;
+        if (userId) {
+          const existingResult = await db.query(
+            'SELECT id FROM organizations WHERE owner_user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+            [userId, url]
+          );
+          existingOrganization = existingResult.rows[0];
+        } else if (sessionId) {
+          const existingResult = await db.query(
+            'SELECT id FROM organizations WHERE session_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+            [sessionId, url]
+          );
+          existingOrganization = existingResult.rows[0];
+        }
+        
+        let organizationId;
+        
+        if (existingOrganization) {
+          // Update existing organization
+          organizationId = existingOrganization.id;
+          
+          const updateFields = [];
+          const updateValues = [];
+          let paramIndex = 1;
+          
+          for (const [key, value] of Object.entries(organizationData)) {
+            if (key !== 'name') { // Don't update name usually
+              updateFields.push(`${key} = $${paramIndex}`);
+              updateValues.push(value);
+              paramIndex++;
+            }
+          }
+          updateFields.push(`updated_at = NOW()`);
+          updateValues.push(organizationId);
+          
+          await db.query(
+            `UPDATE organizations SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+            updateValues
+          );
+          
+          console.log('✅ Updated existing organization:', organizationId);
+          
+          // Mark previous intelligence records as not current
+          await db.query(
+            'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',
+            [organizationId]
+          );
+          
+        } else {
+          // Create new organization
+          organizationId = uuidv4();
+          
+          const insertFields = ['id', 'slug', ...Object.keys(organizationData), 'created_at', 'updated_at'];
+          const orgSlug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
+          const insertValues = [organizationId, orgSlug, ...Object.values(organizationData), now, now];
+          
+          // Add owner_user_id or session_id
+          if (userId) {
+            insertFields.push('owner_user_id');
+            insertValues.push(userId);
+          } else {
+            insertFields.push('session_id');
+            insertValues.push(sessionId);
+          }
+          
+          const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+          
+          await db.query(
+            `INSERT INTO organizations (${insertFields.join(', ')}) VALUES (${insertPlaceholders})`,
+            insertValues
+          );
+          
+          console.log('✅ Created new organization for:', userId ? `user ${userId}` : `session ${sessionId}`);
+        }
+        
+        // Create new intelligence record
+        const intelligenceId = uuidv4();
+        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'created_at', 'updated_at'];
+        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), now, now];
+        
+        // Add session_id for session-based intelligence (organization_id will be null for sessions)
+        if (!userId && sessionId) {
+          intelInsertFields.push('session_id');
+          intelInsertValues.push(sessionId);
+          // Remove organization_id for session-based records
+          const orgIdIndex = intelInsertFields.indexOf('organization_id');
+          intelInsertFields.splice(orgIdIndex, 1);
+          intelInsertValues.splice(orgIdIndex, 1);
+        }
+        
+        const intelInsertPlaceholders = intelInsertFields.map((_, i) => `$${i + 1}`).join(', ');
+        
+        await db.query(
+          `INSERT INTO organization_intelligence (${intelInsertFields.join(', ')}) VALUES (${intelInsertPlaceholders})`,
+          intelInsertValues
+        );
+        
+        console.log('✅ Created new organization intelligence record');
+        
+      } else {
+        console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
+      }
+    } catch (saveError) {
+      // Don't fail the main request if saving to database fails
+      console.error('Failed to save organization intelligence to database:', saveError.message);
     }
 
     const response = {
