@@ -198,21 +198,21 @@ router.get('/recent', async (req, res) => {
     console.log(`📊 Getting most recent organization intelligence for user: ${userContext.userId}`);
     
     // Get most recent organization and intelligence data
+    // Use a more robust query that handles missing columns gracefully
     const result = await db.query(`
       SELECT 
         o.id as org_id,
         o.name as organization_name,
         o.website_url,
-        o.business_type,
-        o.industry_category,
-        o.business_model,
-        o.company_size,
-        o.description,
-        o.target_audience,
-        o.brand_voice,
-        o.website_goals,
-        o.search_behavior_summary,
-        o.last_analyzed_at,
+        COALESCE(o.business_type, '') as business_type,
+        COALESCE(o.industry_category, '') as industry_category,
+        COALESCE(o.business_model, '') as business_model,
+        COALESCE(o.company_size, '') as company_size,
+        COALESCE(o.description, '') as description,
+        COALESCE(o.target_audience, '') as target_audience,
+        COALESCE(o.brand_voice, '') as brand_voice,
+        COALESCE(o.website_goals, '') as website_goals,
+        COALESCE(o.last_analyzed_at, o.updated_at) as last_analyzed_at,
         o.updated_at as org_updated_at,
         
         oi.customer_scenarios,
@@ -232,7 +232,7 @@ router.get('/recent', async (req, res) => {
       FROM organizations o
       LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
       WHERE o.owner_user_id = $1 
-      ORDER BY o.last_analyzed_at DESC NULLS LAST, o.updated_at DESC
+      ORDER BY COALESCE(o.last_analyzed_at, o.updated_at) DESC
       LIMIT 1
     `, [userContext.userId]);
 
@@ -259,7 +259,6 @@ router.get('/recent', async (req, res) => {
       targetAudience: record.target_audience,
       brandVoice: record.brand_voice,
       websiteGoals: record.website_goals,
-      searchBehavior: record.search_behavior_summary,
       
       // Intelligence data (parsed JSON)
       customerScenarios: safeParse(record.customer_scenarios, 'customer_scenarios', record.org_id) || [],
@@ -294,6 +293,122 @@ router.get('/recent', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve recent analysis',
+      message: error.message
+    });
+  }
+});
+
+// Update existing website analysis data
+router.put('/update', async (req, res) => {
+  try {
+    console.log('💾 Update analysis endpoint called');
+    
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    
+    if (validationError) {
+      return res.status(401).json(validationError);
+    }
+    
+    const analysisData = req.body;
+    console.log('📝 Analysis data to update:', analysisData);
+    
+    // Get organization ID based on user context
+    let orgId;
+    if (userContext.isAuthenticated) {
+      // Get organization ID for authenticated user
+      const orgResult = await db.query(
+        'SELECT id FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [userContext.userId]
+      );
+      
+      if (orgResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'No organization found for user'
+        });
+      }
+      
+      orgId = orgResult.rows[0].id;
+    } else {
+      // For session users, find organization by session ID
+      const orgResult = await db.query(
+        'SELECT id FROM organizations WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1',
+        [userContext.sessionId]
+      );
+      
+      if (orgResult.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'No organization found for session'
+        });
+      }
+      
+      orgId = orgResult.rows[0].id;
+    }
+    
+    // Update organization data
+    const updateOrgResult = await db.query(`
+      UPDATE organizations 
+      SET 
+        name = COALESCE($1, name),
+        business_type = COALESCE($2, business_type),
+        website_url = COALESCE($3, website_url),
+        target_audience = COALESCE($4, target_audience),
+        content_focus = COALESCE($5, content_focus),
+        brand_voice = COALESCE($6, brand_voice),
+        description = COALESCE($7, description),
+        keywords = COALESCE($8::jsonb, keywords),
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $9
+      RETURNING *
+    `, [
+      analysisData.businessName,
+      analysisData.businessType, 
+      analysisData.websiteUrl,
+      analysisData.targetAudience,
+      analysisData.contentFocus,
+      analysisData.brandVoice,
+      analysisData.description,
+      JSON.stringify(analysisData.keywords || []),
+      orgId
+    ]);
+    
+    // Update organization_intelligence data if it exists
+    if (analysisData.businessModel || analysisData.websiteGoals || analysisData.blogStrategy) {
+      await db.query(`
+        UPDATE organization_intelligence 
+        SET
+          business_model = COALESCE($1, business_model),
+          website_goals = COALESCE($2, website_goals), 
+          blog_strategy = COALESCE($3, blog_strategy),
+          customer_problems = COALESCE($4::jsonb, customer_problems),
+          customer_language = COALESCE($5::jsonb, customer_language),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE organization_id = $6 AND is_current = TRUE
+      `, [
+        analysisData.businessModel,
+        analysisData.websiteGoals,
+        analysisData.blogStrategy,
+        JSON.stringify(analysisData.customerProblems || []),
+        JSON.stringify(analysisData.customerLanguage || []),
+        orgId
+      ]);
+    }
+    
+    console.log('✅ Analysis updated successfully for org:', orgId);
+    
+    res.json({
+      success: true,
+      message: 'Website analysis updated successfully',
+      organizationId: orgId
+    });
+    
+  } catch (error) {
+    console.error('❌ Update analysis error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update analysis',
       message: error.message
     });
   }
