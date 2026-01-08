@@ -534,6 +534,170 @@ app.post('/api/analyze-website', async (req, res) => {
       console.warn('Failed to capture lead:', leadError.message);
     }
 
+    // Save analysis to organizations and organization intelligence tables with session support
+    try {
+      const sessionId = req.headers['x-session-id'];
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      let userId = null;
+      
+      // Extract user ID from JWT token if authenticated
+      if (token) {
+        try {
+          const jwt = await import('jsonwebtoken');
+          const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+          userId = payload.userId;
+          console.log('🔍 Authenticated user found for organization intelligence save:', userId);
+        } catch (jwtError) {
+          console.warn('Failed to extract user from JWT:', jwtError.message);
+        }
+      }
+      
+      // Only save if we have either userId or sessionId
+      if (userId || sessionId) {
+        const { v4: uuidv4 } = await import('uuid');
+        const now = new Date();
+        
+        // Create organization name from business name or URL
+        const organizationName = analysis?.businessName || analysis?.companyName || new URL(url).hostname;
+        
+        const organizationData = {
+          name: organizationName,
+          website_url: url,
+          business_type: analysis?.businessType,
+          industry_category: analysis?.industryCategory,
+          business_model: analysis?.businessModel,
+          company_size: analysis?.companySize,
+          description: analysis?.description,
+          target_audience: analysis?.targetAudience,
+          brand_voice: analysis?.brandVoice,
+          website_goals: analysis?.websiteGoals,
+          search_behavior_summary: analysis?.searchBehavior,
+          last_analyzed_at: now
+        };
+        
+        const intelligenceData = {
+          customer_scenarios: analysis?.customerScenarios ? JSON.stringify(analysis.customerScenarios) : null,
+          business_value_assessment: analysis?.businessValueAssessment ? JSON.stringify(analysis.businessValueAssessment) : null,
+          customer_language_patterns: analysis?.customerLanguagePatterns ? JSON.stringify(analysis.customerLanguagePatterns) : null,
+          search_behavior_insights: analysis?.searchBehaviorInsights ? JSON.stringify(analysis.searchBehaviorInsights) : null,
+          seo_opportunities: analysis?.seoOpportunities ? JSON.stringify(analysis.seoOpportunities) : null,
+          content_strategy_recommendations: analysis?.contentStrategyRecommendations ? JSON.stringify(analysis.contentStrategyRecommendations) : null,
+          competitive_intelligence: analysis?.competitiveIntelligence ? JSON.stringify(analysis.competitiveIntelligence) : null,
+          analysis_confidence_score: analysis?.analysisConfidenceScore || 0.75,
+          data_sources: analysis?.dataSources ? JSON.stringify(analysis.dataSources) : JSON.stringify(['website_analysis']),
+          ai_model_used: analysis?.aiModelUsed || 'gpt-4',
+          raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null,
+          is_current: true
+        };
+        
+        // Check if organization already exists for this user/session and URL
+        let existingOrganization = null;
+        if (userId) {
+          const existingResult = await db.query(
+            'SELECT id FROM organizations WHERE owner_user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+            [userId, url]
+          );
+          existingOrganization = existingResult.rows[0];
+        } else if (sessionId) {
+          const existingResult = await db.query(
+            'SELECT id FROM organizations WHERE session_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+            [sessionId, url]
+          );
+          existingOrganization = existingResult.rows[0];
+        }
+        
+        let organizationId;
+        
+        if (existingOrganization) {
+          // Update existing organization
+          organizationId = existingOrganization.id;
+          
+          const updateFields = [];
+          const updateValues = [];
+          let paramIndex = 1;
+          
+          for (const [key, value] of Object.entries(organizationData)) {
+            if (key !== 'name') { // Don't update name usually
+              updateFields.push(`${key} = $${paramIndex}`);
+              updateValues.push(value);
+              paramIndex++;
+            }
+          }
+          updateFields.push(`updated_at = NOW()`);
+          updateValues.push(organizationId);
+          
+          await db.query(
+            `UPDATE organizations SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+            updateValues
+          );
+          
+          console.log('✅ Updated existing organization:', organizationId);
+          
+          // Mark previous intelligence records as not current
+          await db.query(
+            'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',
+            [organizationId]
+          );
+          
+        } else {
+          // Create new organization
+          organizationId = uuidv4();
+          
+          const insertFields = ['id', 'slug', ...Object.keys(organizationData), 'created_at', 'updated_at'];
+          const orgSlug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
+          const insertValues = [organizationId, orgSlug, ...Object.values(organizationData), now, now];
+          
+          // Add owner_user_id or session_id
+          if (userId) {
+            insertFields.push('owner_user_id');
+            insertValues.push(userId);
+          } else {
+            insertFields.push('session_id');
+            insertValues.push(sessionId);
+          }
+          
+          const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+          
+          await db.query(
+            `INSERT INTO organizations (${insertFields.join(', ')}) VALUES (${insertPlaceholders})`,
+            insertValues
+          );
+          
+          console.log('✅ Created new organization for:', userId ? `user ${userId}` : `session ${sessionId}`);
+        }
+        
+        // Create new intelligence record
+        const intelligenceId = uuidv4();
+        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'created_at', 'updated_at'];
+        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), now, now];
+        
+        // Add session_id for session-based intelligence (organization_id will be null for sessions)
+        if (!userId && sessionId) {
+          intelInsertFields.push('session_id');
+          intelInsertValues.push(sessionId);
+          // Remove organization_id for session-based records
+          const orgIdIndex = intelInsertFields.indexOf('organization_id');
+          intelInsertFields.splice(orgIdIndex, 1);
+          intelInsertValues.splice(orgIdIndex, 1);
+        }
+        
+        const intelInsertPlaceholders = intelInsertFields.map((_, i) => `$${i + 1}`).join(', ');
+        
+        await db.query(
+          `INSERT INTO organization_intelligence (${intelInsertFields.join(', ')}) VALUES (${intelInsertPlaceholders})`,
+          intelInsertValues
+        );
+        
+        console.log('✅ Created new organization intelligence record');
+        
+      } else {
+        console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
+      }
+    } catch (saveError) {
+      // Don't fail the main request if saving to database fails
+      console.error('Failed to save organization intelligence to database:', saveError.message);
+    }
+
     const response = {
       success: true,
       url,
