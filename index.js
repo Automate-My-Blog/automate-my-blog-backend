@@ -18,6 +18,7 @@ import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
+import analysisRoutes from './routes/analysis.js';
 
 // Load environment variables
 dotenv.config();
@@ -69,6 +70,7 @@ app.use('/api/v1/session', sessionRoutes);
 app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
 app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
 app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
+app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
