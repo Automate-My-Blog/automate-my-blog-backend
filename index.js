@@ -19,7 +19,7 @@ import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import postsRoutes from './routes/posts.js';
-import analysisRoutes from './routes/analysis-minimal.js';
+import analysisRoutes from './routes/analysis.js';
 
 // Load environment variables
 dotenv.config();
