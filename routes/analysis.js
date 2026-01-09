@@ -312,6 +312,15 @@ router.put('/update', async (req, res) => {
     
     const analysisData = req.body;
     console.log('📝 Analysis data to update:', analysisData);
+    console.log('📝 Individual field values:');
+    console.log('  businessName:', analysisData.businessName, '(type:', typeof analysisData.businessName, ')');
+    console.log('  businessType:', analysisData.businessType, '(type:', typeof analysisData.businessType, ')');
+    console.log('  websiteUrl:', analysisData.websiteUrl, '(type:', typeof analysisData.websiteUrl, ')');
+    console.log('  targetAudience:', analysisData.targetAudience, '(type:', typeof analysisData.targetAudience, ')');
+    console.log('  brandVoice:', analysisData.brandVoice, '(type:', typeof analysisData.brandVoice, ')');
+    console.log('  description:', analysisData.description, '(type:', typeof analysisData.description, ')');
+    console.log('  businessModel:', analysisData.businessModel, '(type:', typeof analysisData.businessModel, ')');
+    console.log('  contentFocus:', analysisData.contentFocus, '(type:', typeof analysisData.contentFocus, ')');
     
     // Get organization ID based on user context
     let orgId;
@@ -348,6 +357,19 @@ router.put('/update', async (req, res) => {
     }
     
     // Update organization data (allow empty strings to overwrite existing values)
+    const orgParams = [
+      analysisData.businessName || null,
+      analysisData.businessType || null, 
+      analysisData.websiteUrl || null,
+      analysisData.targetAudience || null,
+      analysisData.brandVoice || null,
+      analysisData.description || null,
+      analysisData.businessModel || null,
+      orgId
+    ];
+    console.log('🔍 Organization update parameters:', orgParams);
+    console.log('🔍 Parameter types:', orgParams.map((p, i) => `$${i+1}: ${p} (${typeof p})`));
+    
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
@@ -361,16 +383,7 @@ router.put('/update', async (req, res) => {
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $8
       RETURNING *
-    `, [
-      analysisData.businessName || null,
-      analysisData.businessType || null, 
-      analysisData.websiteUrl || null,
-      analysisData.targetAudience || null,
-      analysisData.brandVoice || null,
-      analysisData.description || null,
-      analysisData.businessModel || null,
-      orgId
-    ]);
+    `, orgParams);
     
     // Handle contentFocus saving based on user type (save even if empty string)
     if (analysisData.contentFocus !== undefined) {
