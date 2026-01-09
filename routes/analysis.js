@@ -358,13 +358,13 @@ router.put('/update', async (req, res) => {
     
     // Update organization data (allow empty strings to overwrite existing values)
     const orgParams = [
-      analysisData.businessName || null,
-      analysisData.businessType || null, 
-      analysisData.websiteUrl || null,
-      analysisData.targetAudience || null,
-      analysisData.brandVoice || null,
-      analysisData.description || null,
-      analysisData.businessModel || null,
+      analysisData.businessName === undefined ? null : analysisData.businessName,
+      analysisData.businessType === undefined ? null : analysisData.businessType,
+      analysisData.websiteUrl === undefined ? null : analysisData.websiteUrl,
+      analysisData.targetAudience === undefined ? null : analysisData.targetAudience,
+      analysisData.brandVoice === undefined ? null : analysisData.brandVoice,
+      analysisData.description === undefined ? null : analysisData.description,
+      analysisData.businessModel === undefined ? null : analysisData.businessModel,
       orgId
     ];
     console.log('🔍 Organization update parameters:', orgParams);
@@ -373,15 +373,15 @@ router.put('/update', async (req, res) => {
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
-        name = CASE WHEN $1 IS NOT NULL THEN $1 ELSE name END,
-        business_type = CASE WHEN $2 IS NOT NULL THEN $2 ELSE business_type END,
-        website_url = CASE WHEN $3 IS NOT NULL THEN $3 ELSE website_url END,
-        target_audience = CASE WHEN $4 IS NOT NULL THEN $4 ELSE target_audience END,
-        brand_voice = CASE WHEN $5 IS NOT NULL THEN $5 ELSE brand_voice END,
-        description = CASE WHEN $6 IS NOT NULL THEN $6 ELSE description END,
-        business_model = CASE WHEN $7 IS NOT NULL THEN $7 ELSE business_model END,
+        name = COALESCE($1, name),
+        business_type = COALESCE($2, business_type),
+        website_url = COALESCE($3, website_url),
+        target_audience = COALESCE($4, target_audience),
+        brand_voice = COALESCE($5, brand_voice),
+        description = COALESCE($6, description),
+        business_model = COALESCE($7, business_model),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $8
+      WHERE id = $8::uuid
       RETURNING *
     `, orgParams);
     
@@ -396,7 +396,7 @@ router.put('/update', async (req, res) => {
             updated_at = CURRENT_TIMESTAMP
           WHERE project_id = (SELECT id FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)
           RETURNING id
-        `, [userContext.userId, analysisData.contentFocus || null]);
+        `, [userContext.userId, analysisData.contentFocus === undefined ? null : analysisData.contentFocus]);
         
         // If no existing strategy was updated, create a new one
         if (updateStrategyResult.rows.length === 0) {
@@ -411,7 +411,7 @@ router.put('/update', async (req, res) => {
               'comprehensive',
               'standard'
             )
-          `, [userContext.userId, analysisData.contentFocus || null]);
+          `, [userContext.userId, analysisData.contentFocus === undefined ? null : analysisData.contentFocus]);
         }
       } else {
         // For session users: Save to website_leads table (most recent record)
@@ -426,7 +426,7 @@ router.put('/update', async (req, res) => {
             ORDER BY created_at DESC 
             LIMIT 1
           )
-        `, [analysisData.contentFocus || null, userContext.sessionId]);
+        `, [analysisData.contentFocus === undefined ? null : analysisData.contentFocus, userContext.sessionId]);
       }
     }
     
@@ -437,20 +437,20 @@ router.put('/update', async (req, res) => {
         await db.query(`
           UPDATE projects 
           SET
-            business_model = CASE WHEN $1 IS NOT NULL THEN $1 ELSE business_model END,
-            website_goals = CASE WHEN $2 IS NOT NULL THEN $2 ELSE website_goals END,
-            blog_strategy = CASE WHEN $3 IS NOT NULL THEN $3 ELSE blog_strategy END,
+            business_model = COALESCE($1, business_model),
+            website_goals = COALESCE($2, website_goals),
+            blog_strategy = COALESCE($3, blog_strategy),
             updated_at = CURRENT_TIMESTAMP
           WHERE id = (
             SELECT id FROM projects 
-            WHERE user_id = $4 
+            WHERE user_id = $4::uuid 
             ORDER BY created_at DESC 
             LIMIT 1
           )
         `, [
-          analysisData.businessModel || null,
-          analysisData.websiteGoals || null,
-          analysisData.blogStrategy || null,
+          analysisData.businessModel === undefined ? null : analysisData.businessModel,
+          analysisData.websiteGoals === undefined ? null : analysisData.websiteGoals,
+          analysisData.blogStrategy === undefined ? null : analysisData.blogStrategy,
           userContext.userId
         ]);
       }
