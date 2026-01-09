@@ -401,15 +401,18 @@ router.put('/update', async (req, res) => {
           `, [userContext.userId, analysisData.contentFocus]);
         }
       } else {
-        // For session users: Save to website_leads table
+        // For session users: Save to website_leads table (most recent record)
         await db.query(`
           UPDATE website_leads 
           SET 
             content_focus = $1,
             updated_at = CURRENT_TIMESTAMP
-          WHERE session_id = $2
-          ORDER BY created_at DESC 
-          LIMIT 1
+          WHERE id = (
+            SELECT id FROM website_leads 
+            WHERE session_id = $2 
+            ORDER BY created_at DESC 
+            LIMIT 1
+          )
         `, [analysisData.contentFocus, userContext.sessionId]);
       }
     }
@@ -417,7 +420,7 @@ router.put('/update', async (req, res) => {
     // Update additional fields based on user type and available data
     if (analysisData.businessModel || analysisData.websiteGoals || analysisData.blogStrategy) {
       if (userContext.isAuthenticated) {
-        // For authenticated users: Update or create project with these fields
+        // For authenticated users: Update or create project with these fields (most recent project)
         await db.query(`
           UPDATE projects 
           SET
@@ -425,9 +428,12 @@ router.put('/update', async (req, res) => {
             website_goals = COALESCE($2, website_goals), 
             blog_strategy = COALESCE($3, blog_strategy),
             updated_at = CURRENT_TIMESTAMP
-          WHERE user_id = $4
-          ORDER BY created_at DESC 
-          LIMIT 1
+          WHERE id = (
+            SELECT id FROM projects 
+            WHERE user_id = $4 
+            ORDER BY created_at DESC 
+            LIMIT 1
+          )
         `, [
           analysisData.businessModel,
           analysisData.websiteGoals,
