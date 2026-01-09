@@ -373,13 +373,13 @@ router.put('/update', async (req, res) => {
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
-        name = COALESCE($1, name),
-        business_type = COALESCE($2, business_type),
-        website_url = COALESCE($3, website_url),
-        target_audience = COALESCE($4, target_audience),
-        brand_voice = COALESCE($5, brand_voice),
-        description = COALESCE($6, description),
-        business_model = COALESCE($7, business_model),
+        name = $1,
+        business_type = $2,
+        website_url = $3,
+        target_audience = $4,
+        brand_voice = $5,
+        description = $6,
+        business_model = $7,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $8::uuid
       RETURNING *
@@ -437,9 +437,9 @@ router.put('/update', async (req, res) => {
         await db.query(`
           UPDATE projects 
           SET
-            business_model = COALESCE($1, business_model),
-            website_goals = COALESCE($2, website_goals),
-            blog_strategy = COALESCE($3, blog_strategy),
+            business_model = $1,
+            website_goals = $2,
+            blog_strategy = $3,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = (
             SELECT id FROM projects 
