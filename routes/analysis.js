@@ -347,7 +347,7 @@ router.put('/update', async (req, res) => {
       orgId = orgResult.rows[0].id;
     }
     
-    // Update organization data
+    // Update organization data (excluding content_focus as it doesn't exist in organizations table)
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
@@ -355,24 +355,62 @@ router.put('/update', async (req, res) => {
         business_type = COALESCE($2, business_type),
         website_url = COALESCE($3, website_url),
         target_audience = COALESCE($4, target_audience),
-        content_focus = COALESCE($5, content_focus),
-        brand_voice = COALESCE($6, brand_voice),
-        description = COALESCE($7, description),
-        keywords = COALESCE($8::jsonb, keywords),
+        brand_voice = COALESCE($5, brand_voice),
+        description = COALESCE($6, description),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $9
+      WHERE id = $7
       RETURNING *
     `, [
       analysisData.businessName,
       analysisData.businessType, 
       analysisData.websiteUrl,
       analysisData.targetAudience,
-      analysisData.contentFocus,
       analysisData.brandVoice,
       analysisData.description,
-      JSON.stringify(analysisData.keywords || []),
       orgId
     ]);
+    
+    // Handle contentFocus saving based on user type
+    if (analysisData.contentFocus) {
+      if (userContext.isAuthenticated) {
+        // For authenticated users: Update existing content_strategies or create new one
+        const updateStrategyResult = await db.query(`
+          UPDATE content_strategies 
+          SET 
+            content_focus = $2,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE project_id = (SELECT id FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)
+          RETURNING id
+        `, [userContext.userId, analysisData.contentFocus]);
+        
+        // If no existing strategy was updated, create a new one
+        if (updateStrategyResult.rows.length === 0) {
+          await db.query(`
+            INSERT INTO content_strategies (project_id, content_focus, name, goal, voice, template, length)
+            VALUES (
+              (SELECT id FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1),
+              $2,
+              'Website Analysis Strategy',
+              'awareness',
+              'expert',
+              'comprehensive',
+              'standard'
+            )
+          `, [userContext.userId, analysisData.contentFocus]);
+        }
+      } else {
+        // For session users: Save to website_leads table
+        await db.query(`
+          UPDATE website_leads 
+          SET 
+            content_focus = $1,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE session_id = $2
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `, [analysisData.contentFocus, userContext.sessionId]);
+      }
+    }
     
     // Update organization_intelligence data if it exists
     if (analysisData.businessModel || analysisData.websiteGoals || analysisData.blogStrategy) {
