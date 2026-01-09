@@ -347,7 +347,7 @@ router.put('/update', async (req, res) => {
       orgId = orgResult.rows[0].id;
     }
     
-    // Update organization data (excluding content_focus as it doesn't exist in organizations table)
+    // Update organization data
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
@@ -357,8 +357,9 @@ router.put('/update', async (req, res) => {
         target_audience = COALESCE($4, target_audience),
         brand_voice = COALESCE($5, brand_voice),
         description = COALESCE($6, description),
+        business_model = COALESCE($7, business_model),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $7
+      WHERE id = $8
       RETURNING *
     `, [
       analysisData.businessName,
@@ -367,6 +368,7 @@ router.put('/update', async (req, res) => {
       analysisData.targetAudience,
       analysisData.brandVoice,
       analysisData.description,
+      analysisData.businessModel,
       orgId
     ]);
     
@@ -412,26 +414,29 @@ router.put('/update', async (req, res) => {
       }
     }
     
-    // Update organization_intelligence data if it exists
+    // Update additional fields based on user type and available data
     if (analysisData.businessModel || analysisData.websiteGoals || analysisData.blogStrategy) {
-      await db.query(`
-        UPDATE organization_intelligence 
-        SET
-          business_model = COALESCE($1, business_model),
-          website_goals = COALESCE($2, website_goals), 
-          blog_strategy = COALESCE($3, blog_strategy),
-          customer_problems = COALESCE($4::jsonb, customer_problems),
-          customer_language = COALESCE($5::jsonb, customer_language),
-          updated_at = CURRENT_TIMESTAMP
-        WHERE organization_id = $6 AND is_current = TRUE
-      `, [
-        analysisData.businessModel,
-        analysisData.websiteGoals,
-        analysisData.blogStrategy,
-        JSON.stringify(analysisData.customerProblems || []),
-        JSON.stringify(analysisData.customerLanguage || []),
-        orgId
-      ]);
+      if (userContext.isAuthenticated) {
+        // For authenticated users: Update or create project with these fields
+        await db.query(`
+          UPDATE projects 
+          SET
+            business_model = COALESCE($1, business_model),
+            website_goals = COALESCE($2, website_goals), 
+            blog_strategy = COALESCE($3, blog_strategy),
+            updated_at = CURRENT_TIMESTAMP
+          WHERE user_id = $4
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `, [
+          analysisData.businessModel,
+          analysisData.websiteGoals,
+          analysisData.blogStrategy,
+          userContext.userId
+        ]);
+      }
+      // Note: For session users, these fields would typically be stored in website_leads
+      // but that table doesn't have these specific columns, so we skip for now
     }
     
     console.log('✅ Analysis updated successfully for org:', orgId);
