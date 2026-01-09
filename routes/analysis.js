@@ -347,17 +347,17 @@ router.put('/update', async (req, res) => {
       orgId = orgResult.rows[0].id;
     }
     
-    // Update organization data
+    // Update organization data (allow empty strings to overwrite existing values)
     const updateOrgResult = await db.query(`
       UPDATE organizations 
       SET 
-        name = COALESCE($1, name),
-        business_type = COALESCE($2, business_type),
-        website_url = COALESCE($3, website_url),
-        target_audience = COALESCE($4, target_audience),
-        brand_voice = COALESCE($5, brand_voice),
-        description = COALESCE($6, description),
-        business_model = COALESCE($7, business_model),
+        name = CASE WHEN $1 IS NOT NULL THEN $1 ELSE name END,
+        business_type = CASE WHEN $2 IS NOT NULL THEN $2 ELSE business_type END,
+        website_url = CASE WHEN $3 IS NOT NULL THEN $3 ELSE website_url END,
+        target_audience = CASE WHEN $4 IS NOT NULL THEN $4 ELSE target_audience END,
+        brand_voice = CASE WHEN $5 IS NOT NULL THEN $5 ELSE brand_voice END,
+        description = CASE WHEN $6 IS NOT NULL THEN $6 ELSE description END,
+        business_model = CASE WHEN $7 IS NOT NULL THEN $7 ELSE business_model END,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = $8
       RETURNING *
@@ -372,8 +372,8 @@ router.put('/update', async (req, res) => {
       orgId
     ]);
     
-    // Handle contentFocus saving based on user type
-    if (analysisData.contentFocus) {
+    // Handle contentFocus saving based on user type (save even if empty string)
+    if (analysisData.contentFocus !== undefined) {
       if (userContext.isAuthenticated) {
         // For authenticated users: Update existing content_strategies or create new one
         const updateStrategyResult = await db.query(`
@@ -417,16 +417,16 @@ router.put('/update', async (req, res) => {
       }
     }
     
-    // Update additional fields based on user type and available data
-    if (analysisData.businessModel || analysisData.websiteGoals || analysisData.blogStrategy) {
+    // Update additional fields based on user type and available data (save even if empty)
+    if (analysisData.businessModel !== undefined || analysisData.websiteGoals !== undefined || analysisData.blogStrategy !== undefined) {
       if (userContext.isAuthenticated) {
         // For authenticated users: Update or create project with these fields (most recent project)
         await db.query(`
           UPDATE projects 
           SET
-            business_model = COALESCE($1, business_model),
-            website_goals = COALESCE($2, website_goals), 
-            blog_strategy = COALESCE($3, blog_strategy),
+            business_model = CASE WHEN $1 IS NOT NULL THEN $1 ELSE business_model END,
+            website_goals = CASE WHEN $2 IS NOT NULL THEN $2 ELSE website_goals END,
+            blog_strategy = CASE WHEN $3 IS NOT NULL THEN $3 ELSE blog_strategy END,
             updated_at = CURRENT_TIMESTAMP
           WHERE id = (
             SELECT id FROM projects 
