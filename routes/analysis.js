@@ -362,13 +362,13 @@ router.put('/update', async (req, res) => {
       WHERE id = $8
       RETURNING *
     `, [
-      analysisData.businessName,
-      analysisData.businessType, 
-      analysisData.websiteUrl,
-      analysisData.targetAudience,
-      analysisData.brandVoice,
-      analysisData.description,
-      analysisData.businessModel,
+      analysisData.businessName || null,
+      analysisData.businessType || null, 
+      analysisData.websiteUrl || null,
+      analysisData.targetAudience || null,
+      analysisData.brandVoice || null,
+      analysisData.description || null,
+      analysisData.businessModel || null,
       orgId
     ]);
     
@@ -383,7 +383,7 @@ router.put('/update', async (req, res) => {
             updated_at = CURRENT_TIMESTAMP
           WHERE project_id = (SELECT id FROM projects WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)
           RETURNING id
-        `, [userContext.userId, analysisData.contentFocus]);
+        `, [userContext.userId, analysisData.contentFocus || null]);
         
         // If no existing strategy was updated, create a new one
         if (updateStrategyResult.rows.length === 0) {
@@ -398,7 +398,7 @@ router.put('/update', async (req, res) => {
               'comprehensive',
               'standard'
             )
-          `, [userContext.userId, analysisData.contentFocus]);
+          `, [userContext.userId, analysisData.contentFocus || null]);
         }
       } else {
         // For session users: Save to website_leads table (most recent record)
@@ -413,7 +413,7 @@ router.put('/update', async (req, res) => {
             ORDER BY created_at DESC 
             LIMIT 1
           )
-        `, [analysisData.contentFocus, userContext.sessionId]);
+        `, [analysisData.contentFocus || null, userContext.sessionId]);
       }
     }
     
@@ -435,9 +435,9 @@ router.put('/update', async (req, res) => {
             LIMIT 1
           )
         `, [
-          analysisData.businessModel,
-          analysisData.websiteGoals,
-          analysisData.blogStrategy,
+          analysisData.businessModel || null,
+          analysisData.websiteGoals || null,
+          analysisData.blogStrategy || null,
           userContext.userId
         ]);
       }
