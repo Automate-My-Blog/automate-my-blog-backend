@@ -563,9 +563,6 @@ Return analysis in this exact JSON structure:
     const startTime = Date.now();
     
     try {
-      // Clean up any remaining corrupted data for this user
-      await this.cleanupCorruptedData(userId);
-      
       // Rate limiting check
       if (!this.checkRateLimit(userId)) {
         throw new Error('Rate limit exceeded. Maximum 10 analyses per hour.');
@@ -589,8 +586,8 @@ Return analysis in this exact JSON structure:
       });
       
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',  // Use faster, cheaper model
-        max_tokens: 4000,      // Sufficient tokens for detailed analysis
+        model: 'gpt-4o',       // Use faster gpt-4o instead of gpt-4o-mini
+        max_tokens: 3500,      // Slightly reduced for faster response
         temperature: 0.3,      // Balanced creativity and consistency
         messages: [
           {
