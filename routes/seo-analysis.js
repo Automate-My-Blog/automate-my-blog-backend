@@ -413,6 +413,8 @@ Return analysis in this exact JSON structure:
       }
       
       console.log('✅ Analysis response parsed and validated successfully');
+      console.log('🔍 Analysis sections found:', Object.keys(analysis));
+      console.log('🔍 titleAnalysis keys:', Object.keys(analysis.titleAnalysis || {}));
       return analysis;
     } catch (error) {
       console.error('❌ Parse error details:', {
@@ -452,6 +454,13 @@ Return analysis in this exact JSON structure:
     // Create content preview (first 200 characters)
     const contentPreview = content.substring(0, 200).trim();
     const wordCount = content.split(/\s+/).length;
+    
+    console.log('🔍 Saving analysis sections:', {
+      titleAnalysis: !!analysis.titleAnalysis,
+      contentFlow: !!analysis.contentFlow,
+      engagementUX: !!analysis.engagementUX,
+      overallScore: analysis.overallAssessment?.score
+    });
     
     const insertData = {
       id: analysisId,
