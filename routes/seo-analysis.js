@@ -503,12 +503,46 @@ Return analysis in this exact JSON structure:
   }
 
   /**
+   * Clean up corrupted data for a user
+   */
+  async cleanupCorruptedData(userId) {
+    try {
+      const result = await db.query(`
+        DELETE FROM comprehensive_seo_analyses 
+        WHERE user_id = $1 AND (
+          title_analysis = '[object Object]' OR
+          content_flow = '[object Object]' OR
+          engagement_ux = '[object Object]' OR
+          authority_eat = '[object Object]' OR
+          technical_seo = '[object Object]' OR
+          conversion_optimization = '[object Object]' OR
+          content_depth = '[object Object]' OR
+          mobile_accessibility = '[object Object]' OR
+          social_sharing = '[object Object]' OR
+          content_freshness = '[object Object]' OR
+          competitive_differentiation = '[object Object]'
+        )
+      `, [userId]);
+      
+      if (result.rowCount > 0) {
+        console.log(`🧹 Cleaned up ${result.rowCount} corrupted records for user ${userId}`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to cleanup corrupted data:', error.message);
+      // Don't throw - this is just maintenance
+    }
+  }
+
+  /**
    * Analyze content with comprehensive SEO insights
    */
   async analyzeContent(userId, content, context = {}, postId = null) {
     const startTime = Date.now();
     
     try {
+      // Clean up any remaining corrupted data for this user
+      await this.cleanupCorruptedData(userId);
+      
       // Rate limiting check
       if (!this.checkRateLimit(userId)) {
         throw new Error('Rate limit exceeded. Maximum 10 analyses per hour.');
@@ -587,22 +621,36 @@ Return analysis in this exact JSON structure:
    * Format stored analysis for API response
    */
   formatStoredAnalysis(stored) {
+    const safeJsonParse = (jsonString, fieldName, fallback = {}) => {
+      try {
+        if (!jsonString || jsonString === '[object Object]') {
+          console.warn(`⚠️ Corrupted data found in ${fieldName}, using fallback`);
+          return fallback;
+        }
+        return JSON.parse(jsonString);
+      } catch (error) {
+        console.error(`❌ Failed to parse ${fieldName}:`, error.message);
+        console.error(`Raw data: ${jsonString?.substring(0, 100)}`);
+        return fallback;
+      }
+    };
+
     return {
       id: stored.id,
       overallScore: stored.overall_score,
-      titleAnalysis: JSON.parse(stored.title_analysis),
-      contentFlow: JSON.parse(stored.content_flow),
-      engagementUX: JSON.parse(stored.engagement_ux),
-      authorityEAT: JSON.parse(stored.authority_eat),
-      technicalSEO: JSON.parse(stored.technical_seo),
-      conversionOptimization: JSON.parse(stored.conversion_optimization),
-      contentDepth: JSON.parse(stored.content_depth),
-      mobileAccessibility: JSON.parse(stored.mobile_accessibility),
-      socialSharing: JSON.parse(stored.social_sharing),
-      contentFreshness: JSON.parse(stored.content_freshness),
-      competitiveDifferentiation: JSON.parse(stored.competitive_differentiation),
-      topStrengths: JSON.parse(stored.top_strengths || '[]'),
-      topImprovements: JSON.parse(stored.top_improvements || '[]'),
+      titleAnalysis: safeJsonParse(stored.title_analysis, 'titleAnalysis', { titleEffectiveness: { score: 0, explanation: 'Data corrupted' } }),
+      contentFlow: safeJsonParse(stored.content_flow, 'contentFlow', { introductionEffectiveness: { score: 0, explanation: 'Data corrupted' } }),
+      engagementUX: safeJsonParse(stored.engagement_ux, 'engagementUX', { readingLevel: { score: 0, explanation: 'Data corrupted' } }),
+      authorityEAT: safeJsonParse(stored.authority_eat, 'authorityEAT', { expertiseDemonstration: { score: 0, explanation: 'Data corrupted' } }),
+      technicalSEO: safeJsonParse(stored.technical_seo, 'technicalSEO', { internalLinkingOpportunities: { score: 0, explanation: 'Data corrupted' } }),
+      conversionOptimization: safeJsonParse(stored.conversion_optimization, 'conversionOptimization', { valuePropositionClarity: { score: 0, explanation: 'Data corrupted' } }),
+      contentDepth: safeJsonParse(stored.content_depth, 'contentDepth', { topicCoverage: { score: 0, explanation: 'Data corrupted' } }),
+      mobileAccessibility: safeJsonParse(stored.mobile_accessibility, 'mobileAccessibility', { mobileReadability: { score: 0, explanation: 'Data corrupted' } }),
+      socialSharing: safeJsonParse(stored.social_sharing, 'socialSharing', { shareabilityFactors: { score: 0, explanation: 'Data corrupted' } }),
+      contentFreshness: safeJsonParse(stored.content_freshness, 'contentFreshness', { evergreenPotential: { score: 0, explanation: 'Data corrupted' } }),
+      competitiveDifferentiation: safeJsonParse(stored.competitive_differentiation, 'competitiveDifferentiation', { uniqueValueAdds: { score: 0, explanation: 'Data corrupted' } }),
+      topStrengths: safeJsonParse(stored.top_strengths || '[]', 'topStrengths', []),
+      topImprovements: safeJsonParse(stored.top_improvements || '[]', 'topImprovements', []),
       aiSummary: stored.ai_summary,
       contentPreview: stored.content_preview,
       contentWordCount: stored.content_word_count,
