@@ -16,43 +16,81 @@ export class OpenAIService {
   }
 
   /**
-   * Clean OpenAI response by removing markdown code blocks and parsing JSON
+   * Clean OpenAI response by removing markdown code blocks and parsing JSON with robust error handling
    */
   parseOpenAIResponse(response) {
     try {
-      // Log the raw response for debugging
-      console.log('Raw OpenAI response:', response);
+      console.log('🔍 Starting OpenAI response parsing...');
+      console.log('Raw response length:', response?.length || 0);
+      
+      if (!response || typeof response !== 'string') {
+        throw new Error('Invalid response: not a string or empty');
+      }
+      
+      // Log first and last parts for debugging without exposing full content
+      console.log('Response preview (first 200 chars):', response.substring(0, 200));
+      console.log('Response preview (last 200 chars):', response.substring(Math.max(0, response.length - 200)));
       
       // Remove markdown code blocks if present
       let cleanedResponse = response.trim();
       
-      // Remove ```json at the beginning and ``` at the end
-      if (cleanedResponse.startsWith('```json')) {
-        cleanedResponse = cleanedResponse.substring(7);
-      } else if (cleanedResponse.startsWith('```')) {
-        cleanedResponse = cleanedResponse.substring(3);
-      }
+      // More robust markdown removal
+      const patterns = [
+        /^```json\s*/i,
+        /^```\s*/,
+        /\s*```$/
+      ];
       
-      if (cleanedResponse.endsWith('```')) {
-        cleanedResponse = cleanedResponse.slice(0, -3);
-      }
+      patterns.forEach(pattern => {
+        cleanedResponse = cleanedResponse.replace(pattern, '');
+      });
       
-      // Trim whitespace
       cleanedResponse = cleanedResponse.trim();
       
-      console.log('Cleaned response:', cleanedResponse);
+      // Check if response looks like it might be truncated
+      const lastChar = cleanedResponse.charAt(cleanedResponse.length - 1);
+      if (lastChar !== '}' && lastChar !== ']') {
+        console.warn('⚠️ Response may be truncated - does not end with } or ]');
+        console.log('Last 50 characters:', cleanedResponse.substring(cleanedResponse.length - 50));
+      }
       
-      // Parse JSON
+      console.log('Attempting to parse cleaned response...');
       return JSON.parse(cleanedResponse);
-    } catch (parseError) {
-      console.error('JSON parsing failed:', parseError);
-      console.error('Attempted to parse:', response);
       
-      // Try parsing the original response as a fallback
+    } catch (parseError) {
+      console.error('❌ Primary JSON parsing failed:', parseError.message);
+      
+      // Enhanced error logging with position context
+      const errorMatch = parseError.message.match(/position (\d+)/);
+      if (errorMatch) {
+        const errorPosition = parseInt(errorMatch[1]);
+        console.log(`Character at error position ${errorPosition}:`, response.charAt(errorPosition));
+        console.log(`Context around position ${errorPosition}:`, 
+          response.substring(Math.max(0, errorPosition - 50), errorPosition + 50));
+      }
+      
+      // Fallback 1: Try parsing original response
       try {
+        console.log('🔄 Attempting fallback: parsing original response...');
         return JSON.parse(response);
       } catch (fallbackError) {
-        throw new Error(`Failed to parse OpenAI response as JSON: ${parseError.message}`);
+        console.error('❌ Fallback parsing also failed:', fallbackError.message);
+        
+        // Fallback 2: Return structured error response for graceful degradation
+        console.log('🆘 All parsing attempts failed, creating fallback response...');
+        
+        const fallbackResponse = {
+          error: 'JSON_PARSE_FAILED',
+          businessName: 'Analysis Failed',
+          businessType: 'Unable to determine',
+          targetAudience: 'Unable to determine',
+          contentFocus: 'Unable to determine',
+          description: 'Website analysis encountered a parsing error. Please try again.',
+          parseError: parseError.message
+        };
+        
+        console.log('📦 Returning fallback response structure');
+        return fallbackResponse;
       }
     }
   }
