@@ -445,8 +445,32 @@ Return analysis in this exact JSON structure:
     const insertValues = Object.values(insertData);
     const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
     
+    // Use UPSERT to handle potential duplicate content hash for same user
     const result = await db.query(
-      `INSERT INTO comprehensive_seo_analyses (${insertFields.join(', ')}) VALUES (${insertPlaceholders}) RETURNING *`,
+      `INSERT INTO comprehensive_seo_analyses (${insertFields.join(', ')}) 
+       VALUES (${insertPlaceholders}) 
+       ON CONFLICT (content_hash, user_id) 
+       DO UPDATE SET
+         title_analysis = EXCLUDED.title_analysis,
+         content_flow = EXCLUDED.content_flow,
+         engagement_ux = EXCLUDED.engagement_ux,
+         authority_eat = EXCLUDED.authority_eat,
+         technical_seo = EXCLUDED.technical_seo,
+         conversion_optimization = EXCLUDED.conversion_optimization,
+         content_depth = EXCLUDED.content_depth,
+         mobile_accessibility = EXCLUDED.mobile_accessibility,
+         social_sharing = EXCLUDED.social_sharing,
+         content_freshness = EXCLUDED.content_freshness,
+         competitive_differentiation = EXCLUDED.competitive_differentiation,
+         overall_score = EXCLUDED.overall_score,
+         top_strengths = EXCLUDED.top_strengths,
+         top_improvements = EXCLUDED.top_improvements,
+         ai_summary = EXCLUDED.ai_summary,
+         analysis_version = EXCLUDED.analysis_version,
+         openai_model = EXCLUDED.openai_model,
+         analysis_duration_ms = EXCLUDED.analysis_duration_ms,
+         updated_at = NOW()
+       RETURNING *`,
       insertValues
     );
     
@@ -470,18 +494,6 @@ Return analysis in this exact JSON structure:
       
       // Generate content hash for deduplication
       const contentHash = this.generateContentHash(content);
-      
-      // Check for existing analysis
-      const existingAnalysis = await this.checkExistingAnalysis(userId, contentHash);
-      if (existingAnalysis) {
-        console.log('📊 Returning existing comprehensive SEO analysis for user:', userId);
-        return {
-          success: true,
-          analysisId: existingAnalysis.id,
-          fromCache: true,
-          analysis: this.formatStoredAnalysis(existingAnalysis)
-        };
-      }
       
       // Build comprehensive prompt
       const prompt = this.buildComprehensivePrompt(content, context);
