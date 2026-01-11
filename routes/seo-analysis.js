@@ -359,7 +359,19 @@ Return analysis in this exact JSON structure:
    */
   parseAnalysisResponse(response) {
     try {
-      const analysis = JSON.parse(response);
+      // Clean the response first - remove markdown code blocks if present
+      let cleanedResponse = response.trim();
+      
+      console.log('🔍 Raw OpenAI response (first 200 chars):', cleanedResponse.substring(0, 200));
+      
+      // Remove markdown code blocks
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+      
+      const analysis = JSON.parse(cleanedResponse);
       
       // Validate required sections exist
       const requiredSections = [
@@ -382,7 +394,10 @@ Return analysis in this exact JSON structure:
       
       return analysis;
     } catch (error) {
-      throw new Error(`Failed to parse analysis response: ${error.message}`);
+      console.error('❌ OpenAI response parsing failed:', error.message);
+      console.error('📄 Response content (first 500 chars):', response?.substring(0, 500));
+      console.error('📄 Response content (last 200 chars):', response?.substring(response.length - 200));
+      throw new Error(`Failed to parse OpenAI analysis response: ${error.message}`);
     }
   }
 
