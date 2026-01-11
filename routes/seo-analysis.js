@@ -345,7 +345,39 @@ Return analysis in this exact JSON structure:
    */
   parseAnalysisResponse(response) {
     try {
-      const analysis = JSON.parse(response);
+      console.log('🔍 Raw OpenAI response length:', response?.length || 0);
+      console.log('🔍 Response starts with:', response?.substring(0, 100));
+      console.log('🔍 Response ends with:', response?.substring(response.length - 100));
+      
+      // Check for problematic content
+      if (!response || typeof response !== 'string') {
+        throw new Error('Empty or invalid response from OpenAI');
+      }
+      
+      if (response.includes('[object Object]')) {
+        console.error('❌ Found [object Object] in OpenAI response!');
+        throw new Error('OpenAI response contains serialization errors');
+      }
+      
+      // Clean the response
+      let cleanedResponse = response.trim();
+      
+      // Remove markdown code blocks
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.substring(7);
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.substring(3);
+      }
+      
+      if (cleanedResponse.endsWith('```')) {
+        cleanedResponse = cleanedResponse.slice(0, -3);
+      }
+      
+      cleanedResponse = cleanedResponse.trim();
+      
+      console.log('🧹 Cleaned response length:', cleanedResponse.length);
+      
+      const analysis = JSON.parse(cleanedResponse);
       
       // Validate required sections exist
       const requiredSections = [
@@ -366,8 +398,15 @@ Return analysis in this exact JSON structure:
         throw new Error('Invalid overall score');
       }
       
+      console.log('✅ Analysis response parsed and validated successfully');
       return analysis;
     } catch (error) {
+      console.error('❌ Parse error details:', {
+        errorMessage: error.message,
+        responseLength: response?.length || 0,
+        responseType: typeof response,
+        responsePreview: response?.substring(0, 200)
+      });
       throw new Error(`Failed to parse analysis response: ${error.message}`);
     }
   }
@@ -509,6 +548,12 @@ Return analysis in this exact JSON structure:
       });
       
       const rawResponse = completion.choices[0].message.content;
+      console.log('🔍 OpenAI completion received, response type:', typeof rawResponse);
+      
+      // Check for empty response
+      if (!rawResponse) {
+        throw new Error('OpenAI returned empty response');
+      }
       
       // Parse and validate response
       const analysis = this.parseAnalysisResponse(rawResponse);
