@@ -630,7 +630,8 @@ Return analysis in this exact JSON structure:
         return JSON.parse(jsonString);
       } catch (error) {
         console.error(`❌ Failed to parse ${fieldName}:`, error.message);
-        console.error(`Raw data: ${jsonString?.substring(0, 100)}`);
+        console.error(`Raw data type: ${typeof jsonString}`);
+        console.error(`Raw data preview:`, typeof jsonString === 'string' ? jsonString.substring(0, 100) : jsonString);
         return fallback;
       }
     };
