@@ -76,9 +76,9 @@ class ComprehensiveSEOAnalysisService {
     const primaryKeywords = context.primaryKeywords || [];
     const businessGoals = context.businessGoals || 'Generate more customers through content';
 
-    return `You are an expert content strategist analyzing blog content for a solopreneur who understands technology but is new to marketing. They need to understand WHY each element matters for getting customers, not just technical metrics.
+    return `Analyze this blog content for a solopreneur. Provide educational SEO insights focusing on customer attraction.
 
-CONTENT TO ANALYZE:
+CONTENT:
 """
 ${content}
 """
@@ -86,24 +86,10 @@ ${content}
 BUSINESS CONTEXT:
 - Industry: ${businessType}
 - Target Audience: ${targetAudience}
-- Primary Keywords: ${primaryKeywords.join(', ') || 'Not specified'}
-- Business Goals: ${businessGoals}
+- Keywords: ${primaryKeywords.join(', ') || 'None'}
+- Goal: ${businessGoals}
 
-ANALYSIS REQUIREMENTS:
-1. Provide scores (1-100) for each element
-2. Quote specific phrases from their content as examples
-3. Explain WHY each metric matters for getting customers
-4. Use encouraging, educational language (no marketing jargon)
-5. Focus on how content serves the target audience
-6. Compare to what competitors typically do
-7. Suggest specific improvements with examples
-
-TONE GUIDELINES:
-- Explain like you're talking to a smart friend who's new to marketing
-- Use analogies (storefront signs, helpful store clerk, etc.)
-- Focus on customer psychology, not SEO technicalities
-- Be encouraging while offering concrete improvements
-- Teach concepts through their actual content
+Provide scores (1-100) and practical explanations for each category. Focus on WHY each element helps attract customers, not technical SEO jargon.
 
 Return analysis in this exact JSON structure:
 {
@@ -507,9 +493,9 @@ Return analysis in this exact JSON structure:
       });
       
       const completion = await openai.chat.completions.create({
-        model: 'gpt-4',
-        max_tokens: 4000,
-        temperature: 0.3,
+        model: 'gpt-4o-mini',  // Use faster, cheaper model
+        max_tokens: 3000,      // Reduce token limit for faster response
+        temperature: 0.2,      // Lower temperature for more focused response
         messages: [
           {
             role: 'system',
