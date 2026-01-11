@@ -64,6 +64,25 @@ class ComprehensiveSEOAnalysisService {
       throw new Error('Content is too long. Maximum 50,000 characters allowed');
     }
     
+    // Check for obvious quality issues
+    const qualityIssues = [];
+    
+    // Check for random character sequences (like "asfjg")
+    if (/[a-z]{5,}/.test(content.toLowerCase()) && 
+        /\b[bcdfghjklmnpqrstvwxyz]{4,}\b/i.test(content)) {
+      qualityIssues.push('contains apparent random character sequences or typos');
+    }
+    
+    // Check for incomplete sentences
+    if (content.trim().endsWith('##') || /## [a-z\s]{0,10}$/i.test(content.trim())) {
+      qualityIssues.push('appears to be incomplete with unfinished sections');
+    }
+    
+    // Warn about potential quality issues but don't block analysis
+    if (qualityIssues.length > 0) {
+      console.warn(`⚠️ Content quality concerns: ${qualityIssues.join(', ')}`);
+    }
+    
     return true;
   }
 
@@ -90,20 +109,26 @@ BUSINESS CONTEXT:
 - Business Goals: ${businessGoals}
 
 ANALYSIS REQUIREMENTS:
-1. Provide scores (1-100) for each element
-2. Quote specific phrases from their content as examples
-3. Explain WHY each metric matters for getting customers
-4. Use encouraging, educational language (no marketing jargon)
-5. Focus on how content serves the target audience
-6. Compare to what competitors typically do
+1. Be HONEST and CRITICAL about content quality - don't inflate scores
+2. Severely penalize incomplete content, typos, and poor writing
+3. Score based on what customers would actually think, not potential
+4. Quote specific phrases as examples (including problems you find)
+5. Explain WHY each metric matters for getting customers
+6. If content is clearly unfinished or low-quality, scores should reflect that
 7. Suggest specific improvements with examples
 
+SCORING GUIDELINES:
+- 90-100: Exceptional, professional-grade content that truly serves customers
+- 80-89: Good content with minor issues
+- 70-79: Average content with noticeable problems
+- 60-69: Below average, needs significant improvement
+- Below 60: Poor quality that would hurt business credibility
+
 TONE GUIDELINES:
-- Explain like you're talking to a smart friend who's new to marketing
-- Use analogies (storefront signs, helpful store clerk, etc.)
-- Focus on customer psychology, not SEO technicalities
-- Be encouraging while offering concrete improvements
-- Teach concepts through their actual content
+- Be encouraging but honest - don't sugarcoat quality issues
+- Point out typos, incomplete sections, and content gaps directly
+- Focus on how poor quality hurts customer trust and conversions
+- Use analogies but be realistic about business impact
 
 Return analysis in this exact JSON structure:
 {
