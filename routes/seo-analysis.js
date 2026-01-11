@@ -1,0 +1,742 @@
+import { Router } from 'express';
+import crypto from 'crypto';
+import openaiService from '../services/openai.js';
+import db from '../services/database.js';
+
+const router = Router();
+
+/**
+ * Comprehensive SEO Analysis Service
+ * Provides AI-powered educational SEO analysis for solopreneurs
+ */
+class ComprehensiveSEOAnalysisService {
+  constructor() {
+    this.rateLimit = new Map(); // Simple in-memory rate limiting
+  }
+
+  /**
+   * Generate content hash for deduplication
+   */
+  generateContentHash(content) {
+    return crypto.createHash('sha256').update(content.trim()).digest('hex');
+  }
+
+  /**
+   * Check rate limiting (10 analyses per user per hour)
+   */
+  checkRateLimit(userId) {
+    const now = Date.now();
+    const userKey = `user_${userId}`;
+    
+    if (!this.rateLimit.has(userKey)) {
+      this.rateLimit.set(userKey, []);
+    }
+    
+    const userRequests = this.rateLimit.get(userKey);
+    
+    // Remove requests older than 1 hour
+    const oneHourAgo = now - (60 * 60 * 1000);
+    const recentRequests = userRequests.filter(timestamp => timestamp > oneHourAgo);
+    this.rateLimit.set(userKey, recentRequests);
+    
+    if (recentRequests.length >= 10) {
+      return false;
+    }
+    
+    // Add current request
+    recentRequests.push(now);
+    return true;
+  }
+
+  /**
+   * Validate content length and format
+   */
+  validateContent(content) {
+    if (!content || typeof content !== 'string') {
+      throw new Error('Content must be a non-empty string');
+    }
+    
+    if (content.trim().length < 200) {
+      throw new Error('Content must be at least 200 characters long for meaningful analysis');
+    }
+    
+    if (content.length > 50000) { // ~10,000 words
+      throw new Error('Content is too long. Maximum 50,000 characters allowed');
+    }
+    
+    return true;
+  }
+
+  /**
+   * Build comprehensive SEO analysis prompt
+   */
+  buildComprehensivePrompt(content, context) {
+    const businessType = context.businessType || 'Business';
+    const targetAudience = context.targetAudience || 'General audience';
+    const primaryKeywords = context.primaryKeywords || [];
+    const businessGoals = context.businessGoals || 'Generate more customers through content';
+
+    return `You are an expert content strategist analyzing blog content for a solopreneur who understands technology but is new to marketing. They need to understand WHY each element matters for getting customers, not just technical metrics.
+
+CONTENT TO ANALYZE:
+"""
+${content}
+"""
+
+BUSINESS CONTEXT:
+- Industry: ${businessType}
+- Target Audience: ${targetAudience}
+- Primary Keywords: ${primaryKeywords.join(', ') || 'Not specified'}
+- Business Goals: ${businessGoals}
+
+ANALYSIS REQUIREMENTS:
+1. Provide scores (1-100) for each element
+2. Quote specific phrases from their content as examples
+3. Explain WHY each metric matters for getting customers
+4. Use encouraging, educational language (no marketing jargon)
+5. Focus on how content serves the target audience
+6. Compare to what competitors typically do
+7. Suggest specific improvements with examples
+
+TONE GUIDELINES:
+- Explain like you're talking to a smart friend who's new to marketing
+- Use analogies (storefront signs, helpful store clerk, etc.)
+- Focus on customer psychology, not SEO technicalities
+- Be encouraging while offering concrete improvements
+- Teach concepts through their actual content
+
+Return analysis in this exact JSON structure:
+{
+  "titleAnalysis": {
+    "titleEffectiveness": {
+      "score": 85,
+      "explanation": "Educational explanation with specific quotes from their content..."
+    },
+    "titleLength": {
+      "score": 92,
+      "characterCount": 35,
+      "explanation": "Simple explanation of why length matters for search results..."
+    },
+    "clickThroughPotential": {
+      "score": 78,
+      "explanation": "Analysis of emotional hooks and compelling language..."
+    },
+    "headlineHierarchy": {
+      "score": 88,
+      "h1Count": 1,
+      "h2Count": 3,
+      "h3Count": 7,
+      "explanation": "How heading structure guides readers and search engines..."
+    },
+    "subheadingQuality": {
+      "score": 85,
+      "explanation": "Analysis of scannable format and user questions answered..."
+    }
+  },
+  "contentFlow": {
+    "introductionEffectiveness": {
+      "score": 92,
+      "explanation": "Analysis of opening hook with quoted example...",
+      "hookQuote": "Actual quote from their opening"
+    },
+    "logicalProgression": {
+      "score": 88,
+      "explanation": "How content flows from problem to solution..."
+    },
+    "paragraphLength": {
+      "score": 85,
+      "averageWordsPerParagraph": 45,
+      "explanation": "Mobile readability and bite-sized content analysis..."
+    },
+    "transitionQuality": {
+      "score": 82,
+      "explanation": "How sections connect smoothly..."
+    },
+    "conclusionStrength": {
+      "score": 79,
+      "explanation": "Analysis of ending impact and call-to-action..."
+    }
+  },
+  "engagementUX": {
+    "readingLevel": {
+      "score": 88,
+      "grade": "8th grade",
+      "explanation": "Accessibility for target audience..."
+    },
+    "sentenceVariety": {
+      "score": 85,
+      "explanation": "Mix of short and long sentences for engagement..."
+    },
+    "activeVoiceUsage": {
+      "score": 90,
+      "percentage": 85,
+      "explanation": "Direct, actionable language analysis..."
+    },
+    "questionUsage": {
+      "score": 82,
+      "explanation": "Mental engagement through strategic questions..."
+    },
+    "storytellingElements": {
+      "score": 88,
+      "explanation": "Concrete examples and relatable scenarios..."
+    }
+  },
+  "authorityEAT": {
+    "expertiseDemonstration": {
+      "score": 83,
+      "explanation": "Specific knowledge and professional insights shown..."
+    },
+    "authoritySignals": {
+      "score": 75,
+      "explanation": "Credentials and professional background indicators..."
+    },
+    "trustworthinessIndicators": {
+      "score": 88,
+      "explanation": "Empathy and authentic approach to audience concerns..."
+    },
+    "personalExperience": {
+      "score": 90,
+      "explanation": "First-hand knowledge and authentic anecdotes..."
+    }
+  },
+  "technicalSEO": {
+    "internalLinkingOpportunities": {
+      "score": 65,
+      "explanation": "Potential for helpful content connections...",
+      "suggestions": [
+        "Link 'specific phrase' to related content topic",
+        "Connect 'another phrase' to helpful resource"
+      ]
+    },
+    "externalLinkQuality": {
+      "score": 70,
+      "explanation": "Credibility through authoritative sources..."
+    },
+    "featuredSnippetOptimization": {
+      "score": 85,
+      "explanation": "Clear answers optimized for search features..."
+    },
+    "schemaMarkupPotential": {
+      "score": 80,
+      "explanation": "Structured data opportunities for better visibility..."
+    }
+  },
+  "conversionOptimization": {
+    "valuePropositionClarity": {
+      "score": 88,
+      "explanation": "Clear benefits and outcomes for readers..."
+    },
+    "trustBuildingElements": {
+      "score": 85,
+      "explanation": "Empathy and realistic expectations..."
+    },
+    "urgencyCreation": {
+      "score": 65,
+      "explanation": "Gentle motivation without being pushy..."
+    },
+    "leadMagnetPotential": {
+      "score": 90,
+      "explanation": "Content that could become valuable resources..."
+    },
+    "emailCaptureOptimization": {
+      "score": 75,
+      "explanation": "Natural opportunities for continued engagement..."
+    }
+  },
+  "contentDepth": {
+    "topicCoverage": {
+      "score": 85,
+      "explanation": "Comprehensive addressing of audience needs..."
+    },
+    "competingContentAnalysis": {
+      "score": 82,
+      "explanation": "Differentiation from typical generic advice..."
+    },
+    "informationGaps": {
+      "score": 78,
+      "explanation": "Additional topics that could enhance value..."
+    },
+    "uniqueAngle": {
+      "score": 88,
+      "explanation": "Distinctive approach that sets content apart..."
+    },
+    "resourceCompleteness": {
+      "score": 80,
+      "explanation": "Actionable tools and next steps provided..."
+    }
+  },
+  "mobileAccessibility": {
+    "mobileReadability": {
+      "score": 90,
+      "explanation": "Mobile-friendly formatting and structure..."
+    },
+    "voiceSearchOptimization": {
+      "score": 85,
+      "explanation": "Natural language matching voice queries..."
+    },
+    "accessibilityConsiderations": {
+      "score": 88,
+      "explanation": "Inclusive design for all readers..."
+    },
+    "loadingSpeedImpact": {
+      "score": 92,
+      "explanation": "Lightweight content for fast loading..."
+    }
+  },
+  "socialSharing": {
+    "shareabilityFactors": {
+      "score": 85,
+      "explanation": "Quotable insights and valuable takeaways..."
+    },
+    "socialProofIntegration": {
+      "score": 70,
+      "explanation": "Testimonials and success stories potential..."
+    },
+    "visualContentNeeds": {
+      "score": 75,
+      "explanation": "Infographic and visual enhancement opportunities..."
+    },
+    "viralPotential": {
+      "score": 80,
+      "explanation": "Emotional connection and community sharing appeal..."
+    }
+  },
+  "contentFreshness": {
+    "evergreenPotential": {
+      "score": 95,
+      "explanation": "Timeless value that remains relevant..."
+    },
+    "updateRequirements": {
+      "score": 85,
+      "explanation": "Minimal maintenance needed for ongoing relevance..."
+    },
+    "seasonalRelevance": {
+      "score": 80,
+      "explanation": "Opportunities for seasonal content refreshes..."
+    },
+    "contentSeriesPotential": {
+      "score": 90,
+      "explanation": "Foundation for expanded content library..."
+    }
+  },
+  "competitiveDifferentiation": {
+    "uniqueValueAdds": {
+      "score": 88,
+      "explanation": "Distinctive elements that set content apart..."
+    },
+    "contentGapAnalysis": {
+      "score": 82,
+      "explanation": "Market opportunities and underserved topics..."
+    },
+    "competitiveAdvantages": {
+      "score": 85,
+      "explanation": "Strengths that differentiate from competitors..."
+    },
+    "marketPositioning": {
+      "score": 87,
+      "explanation": "Brand voice and expertise positioning..."
+    }
+  },
+  "overallAssessment": {
+    "score": 87,
+    "summary": "Your content perfectly balances expertise with empathy, making your target audience feel both understood and guided. The specific examples and actionable advice set you apart from generic content.",
+    "topStrengths": [
+      "Emotional connection with real examples",
+      "Specific, actionable advice",
+      "Perfect reading level for target audience"
+    ],
+    "topImprovements": [
+      "Add authority signals (credentials/experience)",
+      "Include more internal links to related content",
+      "Create gentle urgency without being pushy"
+    ]
+  }
+}`;
+  }
+
+  /**
+   * Parse and validate OpenAI response
+   */
+  parseAnalysisResponse(response) {
+    try {
+      const analysis = JSON.parse(response);
+      
+      // Validate required sections exist
+      const requiredSections = [
+        'titleAnalysis', 'contentFlow', 'engagementUX', 'authorityEAT',
+        'technicalSEO', 'conversionOptimization', 'contentDepth', 
+        'mobileAccessibility', 'socialSharing', 'contentFreshness',
+        'competitiveDifferentiation', 'overallAssessment'
+      ];
+      
+      for (const section of requiredSections) {
+        if (!analysis[section]) {
+          throw new Error(`Missing required section: ${section}`);
+        }
+      }
+      
+      // Validate overall score
+      if (!analysis.overallAssessment.score || analysis.overallAssessment.score < 1 || analysis.overallAssessment.score > 100) {
+        throw new Error('Invalid overall score');
+      }
+      
+      return analysis;
+    } catch (error) {
+      throw new Error(`Failed to parse analysis response: ${error.message}`);
+    }
+  }
+
+  /**
+   * Check for existing analysis
+   */
+  async checkExistingAnalysis(userId, contentHash) {
+    try {
+      const result = await db.query(
+        'SELECT * FROM comprehensive_seo_analyses WHERE user_id = $1 AND content_hash = $2 ORDER BY created_at DESC LIMIT 1',
+        [userId, contentHash]
+      );
+      
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error checking existing analysis:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Save analysis to database
+   */
+  async saveAnalysis(userId, contentHash, content, analysis, metadata) {
+    const { v4: uuidv4 } = await import('uuid');
+    const analysisId = uuidv4();
+    
+    // Create content preview (first 200 characters)
+    const contentPreview = content.substring(0, 200).trim();
+    const wordCount = content.split(/\s+/).length;
+    
+    const insertData = {
+      id: analysisId,
+      user_id: userId,
+      post_id: metadata.postId || null,
+      content_hash: contentHash,
+      content_preview: contentPreview,
+      content_word_count: wordCount,
+      title_analysis: JSON.stringify(analysis.titleAnalysis),
+      content_flow: JSON.stringify(analysis.contentFlow),
+      engagement_ux: JSON.stringify(analysis.engagementUX),
+      authority_eat: JSON.stringify(analysis.authorityEAT),
+      technical_seo: JSON.stringify(analysis.technicalSEO),
+      conversion_optimization: JSON.stringify(analysis.conversionOptimization),
+      content_depth: JSON.stringify(analysis.contentDepth),
+      mobile_accessibility: JSON.stringify(analysis.mobileAccessibility),
+      social_sharing: JSON.stringify(analysis.socialSharing),
+      content_freshness: JSON.stringify(analysis.contentFreshness),
+      competitive_differentiation: JSON.stringify(analysis.competitiveDifferentiation),
+      overall_score: analysis.overallAssessment.score,
+      top_strengths: JSON.stringify(analysis.overallAssessment.topStrengths || []),
+      top_improvements: JSON.stringify(analysis.overallAssessment.topImprovements || []),
+      ai_summary: analysis.overallAssessment.summary,
+      analysis_version: 'v1.0',
+      openai_model: metadata.model || 'gpt-4',
+      analysis_duration_ms: metadata.duration
+    };
+    
+    const insertFields = Object.keys(insertData);
+    const insertValues = Object.values(insertData);
+    const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+    
+    const result = await db.query(
+      `INSERT INTO comprehensive_seo_analyses (${insertFields.join(', ')}) VALUES (${insertPlaceholders}) RETURNING *`,
+      insertValues
+    );
+    
+    return result.rows[0];
+  }
+
+  /**
+   * Analyze content with comprehensive SEO insights
+   */
+  async analyzeContent(userId, content, context = {}, postId = null) {
+    const startTime = Date.now();
+    
+    try {
+      // Rate limiting check
+      if (!this.checkRateLimit(userId)) {
+        throw new Error('Rate limit exceeded. Maximum 10 analyses per hour.');
+      }
+      
+      // Validate content
+      this.validateContent(content);
+      
+      // Generate content hash for deduplication
+      const contentHash = this.generateContentHash(content);
+      
+      // Check for existing analysis
+      const existingAnalysis = await this.checkExistingAnalysis(userId, contentHash);
+      if (existingAnalysis) {
+        console.log('📊 Returning existing comprehensive SEO analysis for user:', userId);
+        return {
+          success: true,
+          analysisId: existingAnalysis.id,
+          fromCache: true,
+          analysis: this.formatStoredAnalysis(existingAnalysis)
+        };
+      }
+      
+      // Build comprehensive prompt
+      const prompt = this.buildComprehensivePrompt(content, context);
+      
+      // Call OpenAI for analysis
+      console.log('🧠 Calling OpenAI for comprehensive SEO analysis...');
+      
+      const OpenAI = (await import('openai')).default;
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+      
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4',
+        max_tokens: 4000,
+        temperature: 0.3,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert content strategist providing educational SEO analysis for solopreneurs. Always respond with valid JSON in the exact structure specified.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      });
+      
+      const rawResponse = completion.choices[0].message.content;
+      
+      // Parse and validate response
+      const analysis = this.parseAnalysisResponse(rawResponse);
+      
+      // Save to database
+      const duration = Date.now() - startTime;
+      const savedAnalysis = await this.saveAnalysis(
+        userId,
+        contentHash,
+        content,
+        analysis,
+        { postId, duration, model: 'gpt-4' }
+      );
+      
+      console.log(`✅ Comprehensive SEO analysis completed in ${duration}ms for user: ${userId}`);
+      
+      return {
+        success: true,
+        analysisId: savedAnalysis.id,
+        fromCache: false,
+        analysis: this.formatStoredAnalysis(savedAnalysis)
+      };
+      
+    } catch (error) {
+      console.error('Comprehensive SEO analysis error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Format stored analysis for API response
+   */
+  formatStoredAnalysis(stored) {
+    return {
+      id: stored.id,
+      overallScore: stored.overall_score,
+      titleAnalysis: JSON.parse(stored.title_analysis),
+      contentFlow: JSON.parse(stored.content_flow),
+      engagementUX: JSON.parse(stored.engagement_ux),
+      authorityEAT: JSON.parse(stored.authority_eat),
+      technicalSEO: JSON.parse(stored.technical_seo),
+      conversionOptimization: JSON.parse(stored.conversion_optimization),
+      contentDepth: JSON.parse(stored.content_depth),
+      mobileAccessibility: JSON.parse(stored.mobile_accessibility),
+      socialSharing: JSON.parse(stored.social_sharing),
+      contentFreshness: JSON.parse(stored.content_freshness),
+      competitiveDifferentiation: JSON.parse(stored.competitive_differentiation),
+      topStrengths: JSON.parse(stored.top_strengths || '[]'),
+      topImprovements: JSON.parse(stored.top_improvements || '[]'),
+      aiSummary: stored.ai_summary,
+      contentPreview: stored.content_preview,
+      contentWordCount: stored.content_word_count,
+      analysisDate: stored.created_at,
+      analysisVersion: stored.analysis_version
+    };
+  }
+
+  /**
+   * Get user's analysis history
+   */
+  async getUserAnalyses(userId, limit = 10) {
+    try {
+      const result = await db.query(
+        'SELECT id, content_preview, overall_score, created_at, content_word_count FROM comprehensive_seo_analyses WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2',
+        [userId, limit]
+      );
+      
+      return result.rows.map(row => ({
+        id: row.id,
+        contentPreview: row.content_preview,
+        overallScore: row.overall_score,
+        wordCount: row.content_word_count,
+        createdAt: row.created_at
+      }));
+    } catch (error) {
+      console.error('Error getting user analyses:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get specific analysis by ID
+   */
+  async getAnalysis(analysisId, userId) {
+    try {
+      const result = await db.query(
+        'SELECT * FROM comprehensive_seo_analyses WHERE id = $1 AND user_id = $2',
+        [analysisId, userId]
+      );
+      
+      if (result.rows.length === 0) {
+        throw new Error('Analysis not found or access denied');
+      }
+      
+      return this.formatStoredAnalysis(result.rows[0]);
+    } catch (error) {
+      console.error('Error getting analysis:', error);
+      throw error;
+    }
+  }
+}
+
+// Initialize service
+const seoAnalysisService = new ComprehensiveSEOAnalysisService();
+
+/**
+ * POST /api/v1/seo-analysis
+ * Create comprehensive SEO analysis
+ */
+router.post('/', async (req, res) => {
+  try {
+    const { content, context = {}, postId } = req.body;
+    const userId = req.user.userId;
+    
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field',
+        message: 'Content is required for analysis'
+      });
+    }
+    
+    console.log(`📊 Starting comprehensive SEO analysis for user: ${userId}`);
+    
+    const result = await seoAnalysisService.analyzeContent(
+      userId,
+      content,
+      context,
+      postId
+    );
+    
+    res.json({
+      success: true,
+      analysisId: result.analysisId,
+      fromCache: result.fromCache,
+      analysis: result.analysis,
+      metadata: {
+        analysisDate: new Date().toISOString(),
+        contentWordCount: result.analysis.contentWordCount
+      }
+    });
+    
+  } catch (error) {
+    console.error('SEO analysis endpoint error:', error);
+    
+    if (error.message.includes('Rate limit')) {
+      res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded',
+        message: error.message
+      });
+    } else if (error.message.includes('too long') || error.message.includes('too short')) {
+      res.status(400).json({
+        success: false,
+        error: 'Invalid content length',
+        message: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Analysis failed',
+        message: error.message
+      });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/seo-analysis/history
+ * Get user's analysis history
+ */
+router.get('/history', async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const limit = parseInt(req.query.limit) || 10;
+    
+    const analyses = await seoAnalysisService.getUserAnalyses(userId, limit);
+    
+    res.json({
+      success: true,
+      data: analyses
+    });
+    
+  } catch (error) {
+    console.error('Get analysis history error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve analysis history',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/seo-analysis/:id
+ * Get specific analysis by ID
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    
+    const analysis = await seoAnalysisService.getAnalysis(id, userId);
+    
+    res.json({
+      success: true,
+      analysis
+    });
+    
+  } catch (error) {
+    console.error('Get analysis error:', error);
+    
+    if (error.message.includes('not found')) {
+      res.status(404).json({
+        success: false,
+        error: 'Analysis not found',
+        message: error.message
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to retrieve analysis',
+        message: error.message
+      });
+    }
+  }
+});
+
+export default router;

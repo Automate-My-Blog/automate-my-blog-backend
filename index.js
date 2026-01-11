@@ -20,6 +20,7 @@ import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import postsRoutes from './routes/posts.js';
 import analysisRoutes from './routes/analysis.js';
+import seoAnalysisRoutes from './routes/seo-analysis.js';
 
 // Load environment variables
 dotenv.config();
@@ -73,6 +74,7 @@ app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService)
 app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
+app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
