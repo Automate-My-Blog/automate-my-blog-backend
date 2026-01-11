@@ -644,17 +644,31 @@ Return analysis in this exact JSON structure:
    * Format stored analysis for API response
    */
   formatStoredAnalysis(stored) {
-    const safeJsonParse = (jsonString, fieldName, fallback = {}) => {
+    const safeJsonParse = (data, fieldName, fallback = {}) => {
       try {
-        if (!jsonString || jsonString === '[object Object]') {
+        // If it's already an object, return it directly
+        if (typeof data === 'object' && data !== null) {
+          return data;
+        }
+        
+        // If it's a string that looks corrupted, use fallback
+        if (!data || data === '[object Object]') {
           console.warn(`⚠️ Corrupted data found in ${fieldName}, using fallback`);
           return fallback;
         }
-        return JSON.parse(jsonString);
+        
+        // If it's a string, try to parse it as JSON
+        if (typeof data === 'string') {
+          return JSON.parse(data);
+        }
+        
+        // For any other data type, use fallback
+        console.warn(`⚠️ Unexpected data type for ${fieldName}: ${typeof data}, using fallback`);
+        return fallback;
       } catch (error) {
         console.error(`❌ Failed to parse ${fieldName}:`, error.message);
-        console.error(`Raw data type: ${typeof jsonString}`);
-        console.error(`Raw data preview:`, typeof jsonString === 'string' ? jsonString.substring(0, 100) : jsonString);
+        console.error(`Raw data type: ${typeof data}`);
+        console.error(`Raw data preview:`, typeof data === 'string' ? data.substring(0, 100) : data);
         return fallback;
       }
     };
