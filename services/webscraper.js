@@ -37,19 +37,20 @@ export class WebScraperService {
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
       try {
         console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
-        const chromium = await import('@sparticuz/chromium');
+        
+        // Use CommonJS require instead of ES module import for better compatibility
+        const chromium = require('@sparticuz/chromium');
         
         // Use the documented 2024 pattern for @sparticuz/chromium
         config.executablePath = await chromium.executablePath();
         config.args = [...config.args, ...chromium.args];
         
         console.log('✅ Using @sparticuz/chromium with executablePath:', config.executablePath);
-        
-        console.log('🔧 Using @sparticuz/chromium for serverless environment');
+        console.log('🔧 Chromium args added:', chromium.args.length);
         
         return config;
       } catch (importError) {
-        console.error('❌ Failed to import @sparticuz/chromium:', importError);
+        console.error('❌ Failed to load @sparticuz/chromium:', importError);
         console.warn('⚠️ Falling back to system Chrome detection...');
         
         // Try to find system Chrome as fallback
@@ -98,9 +99,15 @@ export class WebScraperService {
       try {
         return await this.scrapeWithPuppeteer(url);
       } catch (puppeteerError) {
-        console.warn('Puppeteer failed, falling back to Axios + Cheerio:', puppeteerError.message);
+        console.error('❌ Puppeteer scraping failed for', url);
+        console.error('❌ Error details:', {
+          message: puppeteerError.message,
+          stack: puppeteerError.stack?.split('\n').slice(0, 3).join('\n'),
+          url: url
+        });
         
-        // Fallback to simple HTTP request with Cheerio
+        // Fallback to enhanced Cheerio extraction
+        console.log('🔄 Falling back to enhanced Cheerio extraction...');
         return await this.scrapeWithCheerio(url);
       }
     } catch (error) {
@@ -288,6 +295,8 @@ export class WebScraperService {
    */
   async scrapeWithCheerio(url) {
     try {
+      console.log('🔧 Using enhanced Cheerio fallback for:', url);
+      
       const response = await axios.get(url, {
         headers: {
           'User-Agent': this.userAgent,
@@ -301,54 +310,148 @@ export class WebScraperService {
       });
 
       const $ = cheerio.load(response.data);
+      const urlObj = new URL(url);
+      const domain = urlObj.hostname;
 
-      // Remove unwanted elements
-      $('script, style, nav, footer, header, .cookie-banner, .popup, .modal, .advertisement').remove();
+      // Remove unwanted elements but preserve content structure
+      $('script, style, .cookie-banner, .popup, .modal, .advertisement, .social-share, .comments').remove();
 
       // Extract content
       const title = $('title').text().trim();
       const metaDescription = $('meta[name="description"]').attr('content') || '';
 
-      // Try to find main content
+      // Enhanced main content extraction with blog-specific selectors
       let mainContent = '';
       const mainSelectors = [
-        'main', '[role="main"]', '.main-content', '.content', 
-        'article', '.post-content', '.entry-content'
+        'main', '[role="main"]', '.main-content', '.content', '.page-content',
+        'article', '.post-content', '.entry-content', '.blog-post', '.post-body',
+        '.single-post', '[data-post]', '.content-area', '.post', '.article-content'
       ];
 
       for (const selector of mainSelectors) {
         const element = $(selector);
         if (element.length > 0) {
-          mainContent = element.text().trim();
-          break;
+          const text = element.text().trim();
+          if (text.length > 100) { // Only use if substantial content
+            mainContent = text;
+            console.log(`📄 Found main content using ${selector}, length: ${text.length}`);
+            break;
+          }
         }
       }
 
-      // If no main content found, get body text
-      if (!mainContent) {
+      // Enhanced fallback: extract from paragraphs
+      if (!mainContent || mainContent.length < 100) {
+        console.log('⚠️ No main content found, extracting from paragraphs...');
+        const paragraphs = [];
+        $('p').each((i, el) => {
+          const text = $(el).text().trim();
+          if (text.length > 20) {
+            paragraphs.push(text);
+          }
+        });
+        
+        if (paragraphs.length > 0) {
+          mainContent = paragraphs.join(' ');
+          console.log(`📄 Extracted ${paragraphs.length} paragraphs, total length: ${mainContent.length}`);
+        }
+      }
+
+      // Last resort: get filtered body content
+      if (!mainContent || mainContent.length < 100) {
+        console.log('⚠️ Using body content as last resort...');
+        // Remove navigation and footer content more aggressively
+        $('nav, header, footer, aside, .sidebar, .menu, .navigation').remove();
         mainContent = $('body').text().trim();
       }
 
-      // Get headings
+      // Get headings with hierarchy
       const headings = [];
-      $('h1, h2, h3').each((i, el) => {
-        if (i < 10) {
+      $('h1, h2, h3, h4, h5, h6').each((i, el) => {
+        if (i < 15) {
           const text = $(el).text().trim();
-          if (text) headings.push(text);
+          const level = parseInt(el.tagName.charAt(1));
+          if (text) {
+            headings.push({
+              text,
+              level,
+              id: $(el).attr('id') || ''
+            });
+          }
         }
       });
+
+      // Extract internal links
+      const internalLinks = [];
+      $('a[href]').each((i, el) => {
+        const href = $(el).attr('href');
+        const linkText = $(el).text().trim();
+        
+        if (href && linkText) {
+          try {
+            const linkUrl = new URL(href, url);
+            
+            // Check if it's an internal link
+            if (linkUrl.hostname === domain || linkUrl.hostname.replace('www.', '') === domain.replace('www.', '')) {
+              internalLinks.push({
+                url: linkUrl.href,
+                text: linkText,
+                context: 'content'
+              });
+            }
+          } catch (e) {
+            // Ignore malformed URLs
+          }
+        }
+      });
+
+      // Extract potential CTAs
+      const ctas = [];
+      const ctaSelectors = [
+        'button', 
+        'a[class*="btn"]', 'a[class*="button"]', 'a[class*="cta"]',
+        '[data-cta]', '.cta', '.call-to-action',
+        'input[type="submit"]', '[role="button"]'
+      ];
+      
+      ctaSelectors.forEach(selector => {
+        $(selector).each((i, el) => {
+          const text = $(el).text().trim();
+          const href = $(el).attr('href') || '';
+          
+          if (text && text.length > 0 && text.length < 100) {
+            ctas.push({
+              text,
+              href,
+              type: this.classifyCTA(text, href),
+              placement: 'content',
+              tagName: el.tagName.toLowerCase()
+            });
+          }
+        });
+      });
+
+      // Calculate word count
+      const wordCount = mainContent ? mainContent.split(/\s+/).filter(word => word.length > 0).length : 0;
 
       const content = {
         title,
         metaDescription: metaDescription.trim(),
         content: mainContent,
         headings,
-        url
+        url,
+        wordCount,
+        internalLinks,
+        externalLinks: [], // We'll only focus on internal links for Cheerio fallback
+        ctas,
+        extractionMethod: 'cheerio_enhanced'
       };
 
+      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${internalLinks.length} internal links, ${ctas.length} CTAs`);
       return this.cleanContent(content);
     } catch (error) {
-      throw new Error(`HTTP scraping failed: ${error.message}`);
+      console.error('Enhanced Cheerio extraction failed:', error);
+      throw new Error(`Enhanced HTTP scraping failed: ${error.message}`);
     }
   }
 
@@ -1908,6 +2011,7 @@ export class WebScraperService {
   cleanContent(content) {
     // Clean up text content
     const cleanText = (text) => {
+      if (!text) return '';
       return text
         .replace(/\s+/g, ' ')  // Replace multiple whitespace with single space
         .replace(/\n\s*\n/g, '\n')  // Remove excessive line breaks
@@ -1916,18 +2020,39 @@ export class WebScraperService {
 
     const cleanedContent = cleanText(content.content);
     
-    // Calculate word count from cleaned content
-    const wordCount = cleanedContent.length > 0 
+    // Calculate word count from cleaned content or use existing if present
+    const wordCount = content.wordCount || (cleanedContent.length > 0 
       ? cleanedContent.split(/\s+/).filter(word => word.length > 0).length 
-      : 0;
+      : 0);
+
+    // Handle headings - support both string array and object array formats
+    let cleanedHeadings = [];
+    if (content.headings) {
+      cleanedHeadings = content.headings.map(h => {
+        if (typeof h === 'string') {
+          return cleanText(h);
+        } else if (h && h.text) {
+          return {
+            text: cleanText(h.text),
+            level: h.level || 1,
+            id: h.id || ''
+          };
+        }
+        return h;
+      }).filter(h => h && (typeof h === 'string' ? h.length > 0 : h.text && h.text.length > 0));
+    }
 
     return {
       title: cleanText(content.title),
       metaDescription: cleanText(content.metaDescription),
       content: cleanedContent,
       wordCount: wordCount,
-      headings: content.headings.map(h => cleanText(h)).filter(h => h.length > 0),
+      headings: cleanedHeadings,
       url: content.url,
+      internalLinks: content.internalLinks || [],
+      externalLinks: content.externalLinks || [],
+      ctas: content.ctas || [],
+      extractionMethod: content.extractionMethod || 'unknown',
       scrapedAt: new Date().toISOString()
     };
   }
@@ -1981,6 +2106,59 @@ export class WebScraperService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Classify CTA type based on text and context
+   */
+  classifyCTA(text, href = '') {
+    const lowerText = text.toLowerCase();
+    const lowerHref = href.toLowerCase();
+    
+    // Contact/Support CTAs
+    if (lowerText.includes('contact') || lowerText.includes('support') || 
+        lowerText.includes('help') || lowerHref.includes('contact')) {
+      return 'contact';
+    }
+    
+    // Purchase/Buy CTAs
+    if (lowerText.includes('buy') || lowerText.includes('purchase') || 
+        lowerText.includes('shop') || lowerText.includes('add to cart') ||
+        lowerHref.includes('cart') || lowerHref.includes('checkout')) {
+      return 'purchase';
+    }
+    
+    // Demo/Trial CTAs
+    if (lowerText.includes('demo') || lowerText.includes('trial') || 
+        lowerText.includes('try') || lowerText.includes('preview')) {
+      return 'demo';
+    }
+    
+    // Email/Newsletter CTAs
+    if (lowerText.includes('subscribe') || lowerText.includes('newsletter') || 
+        lowerText.includes('email') || lowerText.includes('sign up')) {
+      return 'email_capture';
+    }
+    
+    // Download CTAs
+    if (lowerText.includes('download') || lowerText.includes('get') || 
+        lowerHref.includes('download')) {
+      return 'download';
+    }
+    
+    // Learn More CTAs
+    if (lowerText.includes('learn') || lowerText.includes('read more') || 
+        lowerText.includes('discover') || lowerText.includes('explore')) {
+      return 'learn_more';
+    }
+    
+    // Generic action CTAs
+    if (lowerText.includes('click') || lowerText.includes('view') || 
+        lowerText.includes('see') || lowerText.includes('get started')) {
+      return 'action';
+    }
+    
+    return 'unknown';
   }
 }
 
