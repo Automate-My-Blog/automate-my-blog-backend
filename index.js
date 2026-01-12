@@ -65,7 +65,19 @@ app.use(cors({
   credentials: true
 }));
 
-app.use(express.json({ limit: '10mb' }));
+// JSON parsing with proper error handling
+app.use((req, res, next) => {
+  express.json({ limit: '10mb' })(req, res, (err) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+      return res.status(400).json({
+        error: 'Invalid JSON format',
+        message: 'The request body contains malformed JSON'
+      });
+    }
+    next(err);
+  });
+});
+
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API Routes

@@ -1,6 +1,7 @@
 import puppeteer from 'puppeteer';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import xml2js from 'xml2js';
 
 export class WebScraperService {
   constructor() {
@@ -198,11 +199,225 @@ export class WebScraperService {
   }
 
   /**
+   * Discover blog posts from XML sitemaps
+   */
+  async discoverFromSitemap(baseUrl) {
+    try {
+      console.log(`🗺️ Discovering content from sitemaps: ${baseUrl}`);
+      
+      const urlObj = new URL(baseUrl);
+      const domain = `${urlObj.protocol}//${urlObj.host}`;
+      
+      // Common sitemap locations
+      const sitemapUrls = [
+        `${domain}/sitemap.xml`,
+        `${domain}/sitemap_index.xml`,
+        `${domain}/blog/sitemap.xml`,
+        `${domain}/news/sitemap.xml`,
+        `${domain}/wp-sitemap.xml`,
+        `${domain}/sitemap-index.xml`
+      ];
+      
+      const discoveredPosts = [];
+      const sitemapsFound = [];
+      
+      for (const sitemapUrl of sitemapUrls) {
+        try {
+          console.log(`🔍 Checking sitemap: ${sitemapUrl}`);
+          
+          const response = await axios.get(sitemapUrl, {
+            headers: { 'User-Agent': this.userAgent },
+            timeout: this.timeout
+          });
+          
+          if (response.data && response.data.includes('<urlset') || response.data.includes('<sitemapindex')) {
+            console.log(`✅ Found sitemap: ${sitemapUrl}`);
+            sitemapsFound.push(sitemapUrl);
+            
+            const parser = new xml2js.Parser();
+            const result = await parser.parseStringPromise(response.data);
+            
+            // Handle regular sitemap
+            if (result.urlset && result.urlset.url) {
+              const urls = result.urlset.url;
+              
+              for (const urlEntry of urls) {
+                const url = urlEntry.loc[0];
+                const lastmod = urlEntry.lastmod ? urlEntry.lastmod[0] : null;
+                const priority = urlEntry.priority ? parseFloat(urlEntry.priority[0]) : 0.5;
+                const changefreq = urlEntry.changefreq ? urlEntry.changefreq[0] : null;
+                
+                // Filter for blog posts
+                if (this.isBlogPostUrl(url)) {
+                  console.log(`📄 Found blog post: ${url}`);
+                  discoveredPosts.push({
+                    url,
+                    title: this.extractTitleFromUrl(url),
+                    lastModified: lastmod,
+                    priority,
+                    changeFreq: changefreq,
+                    discoveredFrom: 'sitemap',
+                    discoverySource: sitemapUrl,
+                    isLikelyPost: true
+                  });
+                }
+              }
+            }
+            
+            // Handle sitemap index
+            if (result.sitemapindex && result.sitemapindex.sitemap) {
+              console.log('📚 Found sitemap index, processing sub-sitemaps...');
+              const subSitemaps = result.sitemapindex.sitemap;
+              
+              for (const subSitemap of subSitemaps.slice(0, 10)) { // Limit to 10 sub-sitemaps
+                const subSitemapUrl = subSitemap.loc[0];
+                try {
+                  console.log(`  🔍 Processing sub-sitemap: ${subSitemapUrl}`);
+                  const subResponse = await axios.get(subSitemapUrl, {
+                    headers: { 'User-Agent': this.userAgent },
+                    timeout: this.timeout
+                  });
+                  
+                  const subResult = await parser.parseStringPromise(subResponse.data);
+                  if (subResult.urlset && subResult.urlset.url) {
+                    for (const urlEntry of subResult.urlset.url) {
+                      const url = urlEntry.loc[0];
+                      if (this.isBlogPostUrl(url)) {
+                        discoveredPosts.push({
+                          url,
+                          title: this.extractTitleFromUrl(url),
+                          lastModified: urlEntry.lastmod ? urlEntry.lastmod[0] : null,
+                          priority: urlEntry.priority ? parseFloat(urlEntry.priority[0]) : 0.5,
+                          changeFreq: urlEntry.changefreq ? urlEntry.changefreq[0] : null,
+                          discoveredFrom: 'sitemap',
+                          discoverySource: subSitemapUrl,
+                          isLikelyPost: true
+                        });
+                      }
+                    }
+                  }
+                } catch (subError) {
+                  console.log(`  ❌ Failed to process sub-sitemap: ${subError.message}`);
+                }
+                
+                // Add delay between sitemap requests
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            }
+            
+            // Break after first successful sitemap to avoid duplicates
+            break;
+            
+          }
+        } catch (error) {
+          console.log(`❌ Sitemap ${sitemapUrl} not accessible: ${error.message}`);
+        }
+      }
+      
+      // Deduplicate by URL
+      const uniquePosts = Array.from(new Map(
+        discoveredPosts.map(post => [post.url, post])
+      ).values());
+      
+      console.log(`🗺️ Sitemap discovery complete: Found ${sitemapsFound.length} sitemaps, ${uniquePosts.length} blog posts`);
+      
+      return {
+        sitemapsFound,
+        blogPosts: uniquePosts,
+        totalPostsFound: uniquePosts.length
+      };
+      
+    } catch (error) {
+      console.error('Sitemap discovery error:', error);
+      return {
+        sitemapsFound: [],
+        blogPosts: [],
+        totalPostsFound: 0,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Check if a URL looks like a blog post
+   */
+  isBlogPostUrl(url) {
+    const urlLower = url.toLowerCase();
+    
+    // Blog post patterns
+    const blogPatterns = [
+      /\/blog\/[^\/]+$/,           // /blog/post-name
+      /\/news\/[^\/]+$/,           // /news/article-name
+      /\/articles\/[^\/]+$/,       // /articles/article-name
+      /\/posts\/[^\/]+$/,          // /posts/post-name
+      /\/insights\/[^\/]+$/,       // /insights/insight-name
+      /\/resources\/[^\/]+$/,      // /resources/resource-name
+      /\/stories\/[^\/]+$/,        // /stories/story-name
+      /\/content\/[^\/]+$/,        // /content/content-name
+      /\/\d{4}\/\d{2}\/[^\/]+$/,   // /2024/01/post-name (date-based)
+      /\/\d{4}\/[^\/]+$/           // /2024/post-name
+    ];
+    
+    // Exclude patterns (pages that are NOT blog posts)
+    const excludePatterns = [
+      /\/(blog|news|articles|posts|insights|resources|stories)\/?\s*$/i, // Index pages
+      /\/(tag|category|archive|page|wp-admin|admin|login|register)/i,    // Admin/utility pages
+      /\/(contact|about|privacy|terms|faq|help|support)/i,               // Static pages
+      /\.(css|js|jpg|jpeg|png|gif|svg|pdf|zip|xml|json|txt)$/i,         // File extensions
+      /\/feed\/|\/rss\.xml|\/sitemap/i                                   // Feeds and sitemaps
+    ];
+    
+    // Check exclude patterns first
+    for (const pattern of excludePatterns) {
+      if (pattern.test(urlLower)) {
+        return false;
+      }
+    }
+    
+    // Check blog patterns
+    for (const pattern of blogPatterns) {
+      if (pattern.test(urlLower)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Extract a readable title from URL
+   */
+  extractTitleFromUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      const pathname = urlObj.pathname;
+      const segments = pathname.split('/').filter(s => s.length > 0);
+      const lastSegment = segments[segments.length - 1];
+      
+      // Convert URL slug to title
+      return lastSegment
+        .replace(/-/g, ' ')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, l => l.toUpperCase())
+        .trim();
+    } catch (error) {
+      return 'Unknown Title';
+    }
+  }
+
+  /**
    * Discover blog pages and content across the website
    */
   async discoverBlogPages(baseUrl) {
     try {
       console.log(`🔍 Discovering blog content on: ${baseUrl}`);
+      
+      // Step 1: Try sitemap discovery first (best for SPAs and comprehensive coverage)
+      console.log('🗺️ Phase 1: Sitemap Discovery');
+      const sitemapResult = await this.discoverFromSitemap(baseUrl);
+      
+      // Step 2: Traditional page scraping (for sites without sitemaps or additional discovery)
+      console.log('📄 Phase 2: Traditional Page Discovery');
       
       // First, scrape the homepage to look for blog links
       const homepageContent = await this.scrapeWebsite(baseUrl);
@@ -222,26 +437,97 @@ export class WebScraperService {
       const urlObj = new URL(baseUrl);
       const baseHostUrl = `${urlObj.protocol}//${urlObj.host}`;
       
+      // Also try www version if original doesn't have it, and non-www if it does
+      const alternativeUrls = [];
+      if (urlObj.host.startsWith('www.')) {
+        alternativeUrls.push(`${urlObj.protocol}//${urlObj.host.replace('www.', '')}`);
+      } else {
+        alternativeUrls.push(`${urlObj.protocol}//www.${urlObj.host}`);
+      }
+      
       const blogUrls = [];
       const discoveredPosts = [];
       
-      // Check common blog directory patterns
+      // Check common blog directory patterns on both primary and alternative URLs
       for (const pattern of blogPatterns) {
-        const blogUrl = `${baseHostUrl}${pattern}`;
-        try {
-          console.log(`🔍 Checking blog pattern: ${blogUrl}`);
-          const blogPageContent = await this.scrapeWebsite(blogUrl);
-          
-          if (blogPageContent && blogPageContent.content.length > 100) {
-            console.log(`✅ Found blog section: ${blogUrl}`);
-            blogUrls.push(blogUrl);
+        const urlsToCheck = [baseHostUrl, ...alternativeUrls];
+        
+        for (const hostUrl of urlsToCheck) {
+          const blogUrl = `${hostUrl}${pattern}`;
+          try {
+            console.log(`🔍 Checking blog pattern: ${blogUrl}`);
+            const blogPageContent = await this.scrapeWebsite(blogUrl);
             
-            // Try to discover individual blog posts from this page
-            const posts = await this.findBlogPostsOnPage(blogUrl);
-            discoveredPosts.push(...posts);
+            if (blogPageContent && blogPageContent.content.length > 100) {
+              console.log(`✅ Found blog section: ${blogUrl}`);
+              
+              // Detect if this is a blog index or individual post
+              const pageType = await this.detectPageType(blogUrl);
+              console.log(`📄 Page type detected: ${pageType.type} (confidence: ${Math.round(pageType.confidence * 100)}%)`);
+              
+              if (pageType.type === 'blog_index') {
+                console.log(`📚 Analyzing blog index page for individual posts...`);
+                blogUrls.push({url: blogUrl, type: 'blog_index'});
+                
+                // Extract individual blog post links from the index
+                const posts = await this.findBlogPostsOnPage(blogUrl);
+                console.log(`🔗 Found ${posts.length} potential blog posts on index page`);
+                
+                // Sort by priority (likely posts first) and limit
+                const prioritizedPosts = posts
+                  .sort((a, b) => a.priority - b.priority)
+                  .slice(0, 15); // Limit to top 15 posts for performance
+                
+                // Now scrape the actual content of the individual posts
+                console.log(`📖 Scraping individual blog post content...`);
+                for (let i = 0; i < Math.min(prioritizedPosts.length, 8); i++) {
+                  const post = prioritizedPosts[i];
+                  try {
+                    console.log(`  📄 Scraping post ${i+1}/${Math.min(prioritizedPosts.length, 8)}: ${post.title}`);
+                    const fullPostContent = await this.scrapeBlogPost(post.url);
+                    if (fullPostContent && fullPostContent.content.length > 500) {
+                      // Merge metadata from index with full content
+                      discoveredPosts.push({
+                        ...post,
+                        ...fullPostContent,
+                        title: fullPostContent.title || post.title,
+                        excerpt: post.excerpt || fullPostContent.metaDescription,
+                        discoveredFrom: 'blog_index_scraped'
+                      });
+                    } else {
+                      // Keep the post info even if full scraping failed
+                      discoveredPosts.push(post);
+                    }
+                    
+                    // Add delay between scraping requests
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                  } catch (postError) {
+                    console.log(`    ⚠️ Failed to scrape post: ${postError.message}`);
+                    // Still add the basic post info
+                    discoveredPosts.push(post);
+                  }
+                }
+                
+              } else {
+                // It's an individual blog post
+                console.log(`📄 Found individual blog post, scraping content...`);
+                blogUrls.push({url: blogUrl, type: 'blog_post'});
+                
+                const fullPostContent = await this.scrapeBlogPost(blogUrl);
+                if (fullPostContent) {
+                  discoveredPosts.push({
+                    ...fullPostContent,
+                    discoveredFrom: 'direct_post'
+                  });
+                }
+              }
+              
+              // Break out of alternative URL loop if we found content
+              break;
+            }
+          } catch (error) {
+            console.log(`❌ Blog pattern ${blogUrl} not found`);
           }
-        } catch (error) {
-          console.log(`❌ Blog pattern ${pattern} not found`);
         }
       }
       
@@ -249,17 +535,62 @@ export class WebScraperService {
       const homepagePosts = await this.findBlogPostsOnPage(baseUrl);
       discoveredPosts.push(...homepagePosts);
       
-      // Deduplicate posts by URL
+      // Merge sitemap results with traditional discovery
+      const allDiscoveredPosts = [
+        ...sitemapResult.blogPosts,
+        ...discoveredPosts
+      ];
+      
+      // Deduplicate posts by URL and prioritize scraped content
       const uniquePosts = Array.from(new Map(
-        discoveredPosts.map(post => [post.url, post])
+        allDiscoveredPosts.map(post => [post.url, post])
       ).values());
       
-      console.log(`📊 Blog discovery complete: Found ${blogUrls.length} blog sections, ${uniquePosts.length} posts`);
+      // Sort posts by quality and discovery method
+      const sortedPosts = uniquePosts.sort((a, b) => {
+        // Prioritize sitemap discoveries (most reliable)
+        if (a.discoveredFrom === 'sitemap' && b.discoveredFrom !== 'sitemap') return -1;
+        if (b.discoveredFrom === 'sitemap' && a.discoveredFrom !== 'sitemap') return 1;
+        
+        // Then prioritize scraped content
+        if (a.discoveredFrom === 'blog_index_scraped' && b.discoveredFrom !== 'blog_index_scraped') return -1;
+        if (b.discoveredFrom === 'blog_index_scraped' && a.discoveredFrom !== 'blog_index_scraped') return 1;
+        
+        // Then by priority/word count
+        const aPriority = a.priority || 0.5;
+        const bPriority = b.priority || 0.5;
+        if (aPriority !== bPriority) return bPriority - aPriority;
+        
+        return (b.wordCount || 0) - (a.wordCount || 0);
+      });
+      
+      const indexPages = blogUrls.filter(b => typeof b === 'object' && b.type === 'blog_index').length;
+      const individualPosts = blogUrls.filter(b => typeof b === 'object' && b.type === 'blog_post').length;
+      const sitemapPosts = sortedPosts.filter(p => p.discoveredFrom === 'sitemap').length;
+      const scrapedPosts = sortedPosts.filter(p => p.discoveredFrom === 'blog_index_scraped').length;
+      
+      console.log(`📊 Comprehensive blog discovery complete:`);
+      console.log(`   🗺️ Sitemap posts: ${sitemapPosts}`);
+      console.log(`   📚 Blog index pages: ${indexPages}`);
+      console.log(`   📄 Individual posts scraped: ${scrapedPosts}`);
+      console.log(`   🔗 Total unique posts: ${sortedPosts.length}`);
+      console.log(`   📖 Sitemaps found: ${sitemapResult.sitemapsFound.length}`);
       
       return {
         blogSections: blogUrls,
-        blogPosts: uniquePosts.slice(0, 10), // Limit to first 10 posts
-        totalPostsFound: uniquePosts.length
+        blogPosts: sortedPosts.slice(0, 15), // Return top 15 quality posts
+        totalPostsFound: sortedPosts.length,
+        indexPagesFound: indexPages,
+        individualPostsFound: individualPosts,
+        sitemapPostsFound: sitemapPosts,
+        sitemapsFound: sitemapResult.sitemapsFound,
+        analysis: {
+          hasIndex: indexPages > 0,
+          hasIndividualPosts: individualPosts > 0,
+          hasSitemap: sitemapResult.sitemapsFound.length > 0,
+          qualityScore: (sitemapPosts + scrapedPosts) / Math.max(sortedPosts.length, 1),
+          discoveryMethods: [...new Set(sortedPosts.map(p => p.discoveredFrom))]
+        }
       };
     } catch (error) {
       console.error('Blog discovery error:', error);
@@ -272,6 +603,102 @@ export class WebScraperService {
     }
   }
   
+  /**
+   * Detect if a page is a blog index/listing page or individual blog post
+   */
+  async detectPageType(pageUrl) {
+    let browser;
+    try {
+      browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+      });
+
+      const page = await browser.newPage();
+      await page.setUserAgent(this.userAgent);
+      await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const pageAnalysis = await page.evaluate(() => {
+        // Indicators of blog index/listing page
+        const indexIndicators = [
+          // Multiple post links (strong indicator)
+          document.querySelectorAll('article a, .post a, .entry a, h2 a, h3 a').length > 3,
+          
+          // Pagination elements
+          document.querySelector('.pagination, .pager, .page-numbers, [class*="pagination"]') !== null,
+          
+          // "Read more" or "Continue reading" links
+          document.querySelectorAll('a').length > 0 && 
+          Array.from(document.querySelectorAll('a')).some(a => 
+            /read\s+more|continue\s+reading|view\s+post/i.test(a.textContent)
+          ),
+          
+          // Archive/listing structure
+          document.querySelector('.archive, .blog-list, .post-list, [class*="archive"], [class*="list"]') !== null,
+          
+          // Multiple date elements (suggests multiple posts)
+          document.querySelectorAll('time, .date, .published, .post-date').length > 2
+        ];
+
+        // Indicators of individual blog post
+        const postIndicators = [
+          // Long main content (typical of full blog posts)
+          (document.querySelector('article, .post-content, .entry-content, main')?.textContent?.length || 0) > 1000,
+          
+          // Single article structure
+          document.querySelectorAll('article').length === 1,
+          
+          // Blog post metadata (single post)
+          document.querySelector('.post-meta, .entry-meta, .byline') !== null,
+          
+          // Comments section
+          document.querySelector('#comments, .comments, [class*="comment"]') !== null,
+          
+          // Social sharing buttons
+          document.querySelector('.share, .social-share, [class*="share"]') !== null,
+          
+          // Author bio
+          document.querySelector('.author-bio, .about-author, [class*="author"]') !== null
+        ];
+
+        const indexScore = indexIndicators.filter(Boolean).length;
+        const postScore = postIndicators.filter(Boolean).length;
+        
+        // URL pattern analysis
+        const urlPatterns = {
+          isIndex: /\/(blog|news|articles|posts)\/?\s*$/i.test(window.location.pathname),
+          isPost: /\/(blog|news|articles|posts)\/[^\/]+/i.test(window.location.pathname) || 
+                 /\/\d{4}\/\d{2}\//.test(window.location.pathname) || // Date-based URLs
+                 /\/[a-z-]+-\d+\/?$/i.test(window.location.pathname) // Slug with ID
+        };
+
+        return {
+          indexScore,
+          postScore,
+          urlPatterns,
+          isLikelyIndex: indexScore > postScore || urlPatterns.isIndex,
+          isLikelyPost: postScore > indexScore || urlPatterns.isPost,
+          confidence: Math.max(indexScore, postScore) / Math.max(indexIndicators.length, postIndicators.length),
+          postLinksFound: document.querySelectorAll('article a, .post a, .entry a, h2 a, h3 a').length
+        };
+      });
+
+      console.log(`📊 Page type analysis for ${pageUrl}:`, pageAnalysis);
+      
+      return {
+        type: pageAnalysis.isLikelyIndex ? 'blog_index' : 'blog_post',
+        confidence: pageAnalysis.confidence,
+        details: pageAnalysis
+      };
+
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  }
+
   /**
    * Find blog posts on a specific page
    */
@@ -299,28 +726,32 @@ export class WebScraperService {
         // Extract blog post links and metadata
         const blogPostData = await page.evaluate((baseUrl) => {
           const posts = [];
-          
-          // Common selectors for blog post links
-          const postSelectors = [
-            'article a[href*="/blog/"]',
-            'article a[href*="/post/"]', 
-            'article a[href*="/news/"]',
-            '.post-title a',
-            '.entry-title a',
-            '.blog-post a',
-            'h2 a',
-            'h3 a',
-            '.post a',
-            '.article a'
-          ];
-          
           const foundLinks = new Set();
           
+          // Enhanced selectors for blog post links prioritizing quality
+          const postSelectors = [
+            // High priority - title links
+            'article h1 a, article h2 a, article h3 a',
+            '.post-title a, .entry-title a, .blog-post-title a',
+            'h1 a[href*="/blog/"], h2 a[href*="/blog/"], h3 a[href*="/blog/"]',
+            
+            // Medium priority - article and post containers
+            'article > a, .post > a, .entry > a',
+            'article a[href*="/blog/"], article a[href*="/post/"], article a[href*="/news/"]',
+            '.blog-post a, .post-content a, .entry-content a',
+            
+            // Lower priority - general links within blog context
+            '.post a, .article a, .blog-item a',
+            'a[href*="/blog/"], a[href*="/post/"], a[href*="/news/"]',
+            'a[href*="/articles/"], a[href*="/insights/"]'
+          ];
+          
+          // Process selectors in priority order
           for (const selector of postSelectors) {
             const elements = document.querySelectorAll(selector);
             
             elements.forEach((link, index) => {
-              if (index >= 20) return; // Limit per selector
+              if (foundLinks.size >= 50) return; // Global limit for performance
               
               let href = link.href;
               if (!href) return;
@@ -331,40 +762,75 @@ export class WebScraperService {
                 href = `${urlObj.protocol}//${urlObj.host}${href}`;
               }
               
-              // Skip duplicates and non-blog URLs
-              if (foundLinks.has(href) || 
-                  !href.includes(new URL(baseUrl).host) ||
-                  href === baseUrl) {
-                return;
-              }
+              // Skip duplicates and invalid URLs
+              if (foundLinks.has(href)) return;
+              
+              // Enhanced URL filtering
+              const urlObj = new URL(href);
+              const baseHost = new URL(baseUrl).host;
+              
+              // Must be same domain
+              if (!href.includes(baseHost)) return;
+              
+              // Skip if same as base URL or just blog index
+              if (href === baseUrl || href === baseUrl + '/' || href.match(/\/(blog|news|articles)\/?\s*$/)) return;
+              
+              // Skip navigation, tag, category, and admin URLs
+              if (href.match(/\/(tag|category|archive|admin|wp-admin|login|search|contact|about|privacy)/i)) return;
+              
+              // Skip non-content URLs (CSS, JS, images, etc.)
+              if (href.match(/\.(css|js|jpg|jpeg|png|gif|svg|pdf|zip)$/i)) return;
+              
+              // Prefer URLs that look like individual posts
+              const isLikelyPost = href.match(/\/[a-z0-9-]+\/?$/) || // slug pattern
+                                  href.match(/\/\d{4}\/\d{2}\//) || // date pattern
+                                  href.match(/\/blog\/[^\/]+/) || // blog/post-name
+                                  href.match(/\/post\/[^\/]+/) || // post/post-name
+                                  href.match(/\/news\/[^\/]+/); // news/article-name
               
               foundLinks.add(href);
               
-              // Try to extract metadata
-              const article = link.closest('article') || link.closest('.post') || link.closest('.entry');
-              const titleText = link.textContent?.trim() || '';
+              // Extract enhanced metadata
+              const article = link.closest('article') || 
+                             link.closest('.post') || 
+                             link.closest('.entry') ||
+                             link.closest('.blog-item') ||
+                             link.closest('.news-item');
+              
+              const titleText = link.textContent?.trim() || 
+                               link.querySelector('h1, h2, h3, h4')?.textContent?.trim() ||
+                               link.title || '';
               
               let publishDate = null;
               let author = null;
               let excerpt = null;
+              let featuredImage = null;
               
               if (article) {
-                // Look for date
-                const dateEl = article.querySelector('time, .date, .published, .post-date');
+                // Enhanced date extraction
+                const dateEl = article.querySelector('time, .date, .published, .post-date, .entry-date, [datetime]');
                 if (dateEl) {
-                  publishDate = dateEl.getAttribute('datetime') || dateEl.textContent?.trim();
+                  publishDate = dateEl.getAttribute('datetime') || 
+                               dateEl.getAttribute('data-date') ||
+                               dateEl.textContent?.trim();
                 }
                 
-                // Look for author
-                const authorEl = article.querySelector('.author, .by-author, .post-author');
+                // Enhanced author extraction
+                const authorEl = article.querySelector('.author, .by-author, .post-author, .entry-author, [rel="author"]');
                 if (authorEl) {
-                  author = authorEl.textContent?.trim();
+                  author = authorEl.textContent?.replace(/by\s+/i, '').trim();
                 }
                 
-                // Look for excerpt
-                const excerptEl = article.querySelector('.excerpt, .summary, p');
+                // Enhanced excerpt extraction
+                const excerptEl = article.querySelector('.excerpt, .summary, .post-excerpt, .entry-summary, p:not(.meta):not(.date)');
                 if (excerptEl) {
-                  excerpt = excerptEl.textContent?.trim().slice(0, 200);
+                  excerpt = excerptEl.textContent?.trim().slice(0, 250);
+                }
+                
+                // Featured image extraction
+                const imgEl = article.querySelector('img');
+                if (imgEl && imgEl.src) {
+                  featuredImage = imgEl.src;
                 }
               }
               
@@ -374,10 +840,17 @@ export class WebScraperService {
                   title: titleText,
                   publishDate,
                   author,
-                  excerpt
+                  excerpt,
+                  featuredImage,
+                  isLikelyPost: !!isLikelyPost,
+                  discoveredFrom: 'blog_index',
+                  priority: isLikelyPost ? 1 : 2 // Higher priority for likely posts
                 });
               }
             });
+            
+            // If we found good quality posts, we can stop early
+            if (posts.filter(p => p.isLikelyPost).length >= 10) break;
           }
           
           return posts;
