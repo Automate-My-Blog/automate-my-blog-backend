@@ -604,18 +604,25 @@ router.get('/blog-content/:orgId', async (req, res) => {
       });
     }
 
-    // Build query based on page type filter
+    // Build query based on page type filter with enhanced classification
     let whereClause = 'WHERE organization_id = $1';
     const queryParams = [orgId];
     let paramIndex = 2;
 
-    if (pageType !== 'all') {
+    // Filter logic updated to use enhanced schema
+    if (pageType === 'blog_post') {
+      // Only show actual blog posts, not index pages
+      whereClause += ` AND page_type = 'blog_post' AND COALESCE(page_classification, 'blog_post') != 'blog_index'`;
+    } else if (pageType === 'blog_index') {
+      // Only show blog index pages
+      whereClause += ` AND (page_classification = 'blog_index' OR (page_type = 'blog_post' AND url ~ '/(blog|news|articles|posts)/?$'))`;
+    } else if (pageType !== 'all') {
       whereClause += ` AND page_type = $${paramIndex}`;
       queryParams.push(pageType);
       paramIndex++;
     }
 
-    // Get blog content
+    // Get blog content with enhanced fields
     const contentQuery = `
       SELECT 
         id, url, page_type, title, 
@@ -623,10 +630,22 @@ router.get('/blog-content/:orgId', async (req, res) => {
         meta_description, published_date, author, word_count,
         jsonb_array_length(COALESCE(internal_links, '[]'::jsonb)) as internal_links_count,
         jsonb_array_length(COALESCE(external_links, '[]'::jsonb)) as external_links_count,
-        analysis_quality_score, scraped_at
+        analysis_quality_score, scraped_at,
+        -- Enhanced fields
+        COALESCE(page_classification, 'unknown') as page_classification,
+        COALESCE(discovered_from, 'unknown') as discovered_from,
+        featured_image_url, excerpt, discovery_priority, discovery_confidence
       FROM website_pages 
       ${whereClause}
-      ORDER BY scraped_at DESC, published_date DESC
+      ORDER BY 
+        -- Prioritize actual blog posts over index pages
+        CASE WHEN COALESCE(page_classification, 'blog_post') = 'blog_post' THEN 1 
+             WHEN page_classification = 'blog_index' THEN 2 
+             ELSE 3 END,
+        -- Then by discovery priority and date
+        COALESCE(discovery_priority, 2),
+        published_date DESC NULLS LAST,
+        scraped_at DESC
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     

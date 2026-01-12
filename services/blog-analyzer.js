@@ -519,34 +519,81 @@ Provide analysis in JSON format:
    */
   async storeAnalysisResults(organizationId, analysisData) {
     try {
-      // Store in website_pages table (to be created in migration)
-      for (const post of analysisData.detailedPosts) {
-        await db.query(`
+      let storedCount = 0;
+      
+      // First, store ALL discovered posts (including sitemap-discovered ones)
+      const allDiscoveredPosts = analysisData.blogDiscovery.blogPosts || [];
+      
+      for (const post of allDiscoveredPosts) {
+        // Check if this post has detailed content (was fully scraped)
+        const detailedPost = analysisData.detailedPosts.find(dp => dp.url === post.url);
+        
+        // Use enhanced schema fields for better classification
+        const insertQuery = `
           INSERT INTO website_pages (
             organization_id, url, page_type, title, content, meta_description,
-            published_date, author, internal_links, external_links, scraped_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+            published_date, author, internal_links, external_links, 
+            page_classification, discovered_from, featured_image_url, 
+            excerpt, discovery_priority, discovery_confidence, 
+            word_count, scraped_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
           ON CONFLICT (organization_id, url) DO UPDATE SET
-            title = EXCLUDED.title,
-            content = EXCLUDED.content,
+            title = COALESCE(EXCLUDED.title, website_pages.title),
+            content = COALESCE(EXCLUDED.content, website_pages.content),
+            meta_description = COALESCE(EXCLUDED.meta_description, website_pages.meta_description),
+            published_date = COALESCE(EXCLUDED.published_date, website_pages.published_date),
+            author = COALESCE(EXCLUDED.author, website_pages.author),
+            internal_links = COALESCE(EXCLUDED.internal_links, website_pages.internal_links),
+            external_links = COALESCE(EXCLUDED.external_links, website_pages.external_links),
+            page_classification = COALESCE(EXCLUDED.page_classification, website_pages.page_classification),
+            discovered_from = COALESCE(EXCLUDED.discovered_from, website_pages.discovered_from),
+            featured_image_url = COALESCE(EXCLUDED.featured_image_url, website_pages.featured_image_url),
+            excerpt = COALESCE(EXCLUDED.excerpt, website_pages.excerpt),
+            discovery_priority = COALESCE(EXCLUDED.discovery_priority, website_pages.discovery_priority),
+            discovery_confidence = COALESCE(EXCLUDED.discovery_confidence, website_pages.discovery_confidence),
+            word_count = COALESCE(EXCLUDED.word_count, website_pages.word_count),
             scraped_at = EXCLUDED.scraped_at
-        `, [
+        `;
+
+        const values = [
           organizationId,
           post.url,
           'blog_post',
-          post.title,
-          post.content.slice(0, 10000), // Limit content size
-          post.metaDescription,
-          post.publishDate ? new Date(post.publishDate) : null,
-          post.author,
-          JSON.stringify(post.internalLinks || []),
-          JSON.stringify(post.externalLinks || [])
-        ]);
+          // Use detailed post data if available, otherwise discovered post data
+          detailedPost?.title || post.title,
+          detailedPost?.content?.slice(0, 10000) || post.content || '',
+          detailedPost?.metaDescription || post.metaDescription || '',
+          // Handle different date formats
+          (() => {
+            const dateValue = detailedPost?.publishDate || post.publishedDate || post.lastModified;
+            if (!dateValue) return null;
+            try {
+              return new Date(dateValue);
+            } catch (e) {
+              return null;
+            }
+          })(),
+          detailedPost?.author || post.author || null,
+          JSON.stringify(detailedPost?.internalLinks || post.internalLinks || []),
+          JSON.stringify(detailedPost?.externalLinks || post.externalLinks || []),
+          // Enhanced schema fields
+          'blog_post', // page_classification
+          post.discoveredFrom || 'unknown', // discovered_from
+          post.featuredImageUrl || null, // featured_image_url
+          post.excerpt || detailedPost?.metaDescription || '', // excerpt
+          Math.round((post.priority || 0.5) * 3) || 2, // discovery_priority: Convert 0.0-1.0 to 1-3 scale (1=high, 2=medium, 3=low)
+          post.confidence || 0.8, // discovery_confidence
+          detailedPost?.wordCount || post.wordCount || null, // word_count
+        ];
+        
+        await db.query(insertQuery, values);
+        storedCount++;
       }
 
-      console.log(`✅ Stored ${analysisData.detailedPosts.length} blog posts in database`);
+      console.log(`✅ Stored ${storedCount} blog posts in database (${analysisData.detailedPosts.length} with full content, ${allDiscoveredPosts.length - analysisData.detailedPosts.length} with metadata only)`);
     } catch (error) {
-      console.warn('Failed to store analysis results:', error.message);
+      console.error('Failed to store analysis results:', error.message);
+      console.error('Error details:', error);
     }
   }
 
