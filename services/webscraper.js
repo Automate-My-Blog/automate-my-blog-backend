@@ -1029,9 +1029,12 @@ export class WebScraperService {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       const postData = await page.evaluate((originalUrl) => {
+        console.log('🔍 Starting blog post content extraction for:', originalUrl);
+        
         // Extract post metadata first (before removing elements for CTA analysis)
         const title = document.querySelector('h1')?.textContent?.trim() || 
                      document.title || '';
+        console.log('📄 Title found:', title);
 
         // Enhanced content extraction for React SPAs and dynamic sites
         const contentSelectors = [
@@ -1055,14 +1058,21 @@ export class WebScraperService {
         let content = '';
         let bestContent = '';
         let bestLength = 0;
+        let selectorUsed = 'none';
+        
+        console.log('🎯 Trying content selectors...');
         
         // Try multiple selectors and pick the one with the most content
         for (const selector of contentSelectors) {
           const elements = document.querySelectorAll(selector);
+          console.log(`🔍 Selector "${selector}" found ${elements.length} elements`);
+          
           for (const element of elements) {
             if (element) {
               const elementText = element.innerText || element.textContent || '';
               const cleanText = elementText.trim();
+              
+              console.log(`📊 Selector "${selector}" content length: ${cleanText.length}`);
               
               // Skip if it's just navigation or very short content
               if (cleanText.length > 100 && cleanText.length > bestLength) {
@@ -1070,10 +1080,14 @@ export class WebScraperService {
                 const paragraphs = element.querySelectorAll('p').length;
                 const links = element.querySelectorAll('a').length;
                 
+                console.log(`📊 Selector "${selector}" - paragraphs: ${paragraphs}, links: ${links}`);
+                
                 // Prefer elements with more paragraphs than links (content vs navigation)
                 if (paragraphs > 0 && (paragraphs >= links || cleanText.length > 500)) {
                   bestContent = cleanText;
                   bestLength = cleanText.length;
+                  selectorUsed = selector;
+                  console.log(`✅ New best content found with selector "${selector}": ${cleanText.length} chars`);
                 }
               }
             }
@@ -1082,9 +1096,11 @@ export class WebScraperService {
         
         content = bestContent || content;
         
+        console.log(`🎯 Best content selector used: "${selectorUsed}" with ${bestLength} characters`);
+        
         // If still no content, try aggressive fallback extraction
         if (content.length < 50) {
-          console.log('Trying aggressive fallback extraction...');
+          console.log('⚠️ Content too short, trying aggressive fallback extraction...');
           
           // Method 1: Look for any meaningful text in paragraphs
           const paragraphs = Array.from(document.querySelectorAll('p'))
@@ -1093,8 +1109,12 @@ export class WebScraperService {
             .join(' ')
             .trim();
             
+          console.log(`📄 Fallback method 1 - paragraphs extraction: ${paragraphs.length} characters`);
+            
           if (paragraphs.length > content.length) {
             content = paragraphs;
+            selectorUsed = 'paragraphs_fallback';
+            console.log('✅ Using paragraphs fallback');
           }
           
           // Method 2: If still no content, extract from all text nodes
@@ -1610,6 +1630,19 @@ export class WebScraperService {
           document.querySelectorAll(selector).forEach(el => el.remove());
         });
 
+        const finalWordCount = content.split(/\s+/).filter(word => word.length > 0).length;
+        
+        console.log('📊 Final extraction results:', {
+          title: title?.substring(0, 50) + '...',
+          contentLength: content.length,
+          wordCount: finalWordCount,
+          internalLinks: extractedLinks.internalLinks.length,
+          externalLinks: extractedLinks.externalLinks.length,
+          ctas: ctaElements.length,
+          hasVisualDesign: !!visualDesign,
+          selectorUsed
+        });
+
         return {
           title,
           content: content.length > 50000 ? content.slice(0, 50000) + '...' : content, // Intelligent content limit for very large posts
@@ -1619,7 +1652,7 @@ export class WebScraperService {
           headings,
           internalLinks: extractedLinks.internalLinks,
           externalLinks: extractedLinks.externalLinks,
-          wordCount: content.split(/\s+/).length,
+          wordCount: finalWordCount,
           url: originalUrl, // Use original input URL to maintain consistency
           ctas: ctaElements, // Include extracted CTAs
           visualDesign: visualDesign // Include visual design data
