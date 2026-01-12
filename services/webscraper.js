@@ -65,7 +65,7 @@ export class WebScraperService {
       });
 
       // Wait a bit for any dynamic content
-      await page.waitForTimeout(2000);
+      await page.waitForSelector('body', { timeout: 5000 }).catch(() => {}); // Fallback wait
 
       // Extract content only (removed brand color detection)
       const content = await page.evaluate(() => {
@@ -294,7 +294,7 @@ export class WebScraperService {
         const page = await browser.newPage();
         await page.setUserAgent(this.userAgent);
         await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-        await page.waitForTimeout(1000);
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         // Extract blog post links and metadata
         const blogPostData = await page.evaluate((baseUrl) => {
@@ -442,7 +442,7 @@ export class WebScraperService {
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
       await page.goto(postUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await page.waitForTimeout(1500);
+      await new Promise(resolve => setTimeout(resolve, 1500));
 
       const postData = await page.evaluate(() => {
         // Remove unwanted elements
@@ -566,7 +566,7 @@ export class WebScraperService {
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
       await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await page.waitForTimeout(1000);
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       const ctas = await page.evaluate(() => {
         const ctaElements = [];
