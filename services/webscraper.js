@@ -1,3 +1,4 @@
+import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import xml2js from 'xml2js';
@@ -8,9 +9,83 @@ export class WebScraperService {
     this.userAgent = process.env.USER_AGENT || 'AutoBlog Bot 1.0';
   }
 
+  /**
+   * Get optimized Puppeteer configuration for serverless environments
+   */
+  async getPuppeteerConfig() {
+    const config = {
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-dev-tools',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-default-apps',
+        '--no-first-run',
+        '--disable-web-security',
+        '--allow-running-insecure-content'
+      ]
+    };
+
+    // For Vercel/serverless environments, use @sparticuz/chromium
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
+        
+        // Use CommonJS require instead of ES module import for better compatibility
+        const chromium = require('@sparticuz/chromium');
+        
+        // Use the documented 2024 pattern for @sparticuz/chromium
+        config.executablePath = await chromium.executablePath();
+        config.args = [...config.args, ...chromium.args];
+        
+        console.log('✅ Using @sparticuz/chromium with executablePath:', config.executablePath);
+        console.log('🔧 Chromium args added:', chromium.args.length);
+        
+        return config;
+      } catch (importError) {
+        console.error('❌ Failed to load @sparticuz/chromium:', importError);
+        console.warn('⚠️ Falling back to system Chrome detection...');
+        
+        // Try to find system Chrome as fallback
+        const possiblePaths = [
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ];
+        
+        for (const path of possiblePaths) {
+          try {
+            const fs = await import('fs');
+            if (fs.existsSync && fs.existsSync(path)) {
+              config.executablePath = path;
+              console.log('✅ Found system Chrome at:', path);
+              return config;
+            }
+          } catch (e) {
+            // Continue checking other paths
+          }
+        }
+        
+        // If no executable found, throw a more specific error
+        throw new Error(`Chrome executable not found. For serverless environments, ensure @sparticuz/chromium is installed. Import error: ${importError.message}`);
+      }
+    }
+
+    console.log('🔧 Using default Puppeteer configuration for local environment');
+    return config;
+  }
 
   /**
-   * Scrape website content using enhanced static extraction
+   * Scrape website content with fallback methods
    */
   async scrapeWebsite(url) {
     try {
@@ -20,14 +95,200 @@ export class WebScraperService {
         throw new Error('Invalid URL protocol. Only HTTP and HTTPS are supported.');
       }
 
-      console.log('🌐 Starting enhanced static content extraction for:', url);
-      return await this.scrapeWithCheerio(url);
+      // Try Puppeteer first for dynamic content
+      try {
+        return await this.scrapeWithPuppeteer(url);
+      } catch (puppeteerError) {
+        console.error('❌ Puppeteer scraping failed for', url);
+        console.error('❌ Error details:', {
+          message: puppeteerError.message,
+          stack: puppeteerError.stack?.split('\n').slice(0, 3).join('\n'),
+          url: url
+        });
+        
+        // Fallback to enhanced Cheerio extraction
+        console.log('🔄 Falling back to enhanced Cheerio extraction...');
+        return await this.scrapeWithCheerio(url);
+      }
     } catch (error) {
       console.error('Website scraping error:', error);
       throw new Error(`Failed to scrape website: ${error.message}`);
     }
   }
 
+  /**
+   * Scrape with Puppeteer for dynamic content
+   */
+  async scrapeWithPuppeteer(url) {
+    let browser;
+    try {
+      console.log('🚀 Starting Puppeteer scraping for:', url);
+      const puppeteerConfig = await this.getPuppeteerConfig();
+      console.log('🔧 Puppeteer config obtained:', JSON.stringify(puppeteerConfig, null, 2));
+      
+      console.log('🌐 Launching browser...');
+      browser = await puppeteer.launch(puppeteerConfig);
+      console.log('✅ Browser launched successfully');
+
+      const page = await browser.newPage();
+      
+      // Set user agent
+      await page.setUserAgent(this.userAgent);
+      
+      // Set viewport
+      await page.setViewport({ width: 1920, height: 1080 });
+
+      // Navigate to page with timeout
+      await page.goto(url, {
+        waitUntil: 'networkidle0',
+        timeout: this.timeout
+      });
+
+      // Wait longer for React SPAs and dynamic content to fully load
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // For heavily JS-dependent sites, wait for meaningful content to appear
+      await page.waitForFunction(() => {
+        const paragraphs = document.querySelectorAll('p');
+        if (paragraphs.length > 2) {
+          const totalText = Array.from(paragraphs)
+            .map(p => p.innerText || p.textContent || '')
+            .join(' ')
+            .trim();
+          if (totalText.length > 100) {
+            return true;
+          }
+        }
+        const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+        return bodyText.length > 1000;
+      }, { timeout: 15000, polling: 1000 }).catch(() => {
+        console.log('Dynamic content wait timed out, proceeding with extraction...');
+      });
+
+      // Extract content with enhanced SPA handling
+      const content = await page.evaluate((url) => {
+        console.log('Starting content extraction for URL:', url);
+        console.log('Initial page state:');
+        console.log('- Paragraphs:', document.querySelectorAll('p').length);
+        console.log('- Articles:', document.querySelectorAll('article').length);
+        console.log('- Main elements:', document.querySelectorAll('main').length);
+
+        // Remove unwanted elements for content extraction (but keep them for color analysis)
+        const elementsToRemove = [
+          'script', '.cookie-banner', '.popup', '.modal', '.advertisement'
+        ];
+        
+        elementsToRemove.forEach(selector => {
+          document.querySelectorAll(selector).forEach(el => el.remove());
+        });
+
+        // Get title
+        const title = document.title || '';
+
+        // Get meta description
+        const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
+
+        // Enhanced content selectors for better SPA compatibility
+        const mainSelectors = [
+          'main', '[role="main"]', '.main-content', '.content', 
+          'article', '.post-content', '.entry-content', '.blog-post', 
+          '.single-post', '[data-post]', '.content-area', '.post-body'
+        ];
+        
+        let mainContent = '';
+        for (const selector of mainSelectors) {
+          const element = document.querySelector(selector);
+          if (element) {
+            const text = element.innerText || element.textContent || '';
+            if (text.trim().length > 100) { // Only use if meaningful content
+              mainContent = text;
+              console.log(`Found content using selector: ${selector}, length: ${text.length}`);
+              break;
+            }
+          }
+        }
+
+        // If no main content found, try aggressive fallback extraction
+        if (!mainContent || mainContent.trim().length < 100) {
+          console.log('Main content not found, trying aggressive extraction...');
+          
+          // Try paragraphs first
+          const paragraphs = Array.from(document.querySelectorAll('p'))
+            .map(p => p.innerText || p.textContent || '')
+            .filter(text => text.trim().length > 20)
+            .join(' ');
+          
+          if (paragraphs.length > 100) {
+            mainContent = paragraphs;
+            console.log(`Found content from paragraphs, length: ${paragraphs.length}`);
+          } else {
+            // Last resort: use TreeWalker to extract all text nodes
+            const walker = document.createTreeWalker(
+              document.body || document,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: function(node) {
+                  // Skip script and style content
+                  const parent = node.parentElement;
+                  if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  // Only accept nodes with meaningful text
+                  if (node.textContent.trim().length > 10) {
+                    return NodeFilter.FILTER_ACCEPT;
+                  }
+                  return NodeFilter.FILTER_REJECT;
+                }
+              }
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+              textNodes.push(node.textContent.trim());
+            }
+            
+            const extractedText = textNodes.join(' ').replace(/\s+/g, ' ').trim();
+            if (extractedText.length > mainContent.length) {
+              mainContent = extractedText;
+              console.log(`Found content using TreeWalker, length: ${extractedText.length}`);
+            }
+          }
+        }
+
+        // If still no content, get body text as last resort
+        if (!mainContent || mainContent.trim().length < 50) {
+          mainContent = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+          console.log(`Using body text as fallback, length: ${mainContent.length}`);
+        }
+
+        // Get headings
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+          .map(h => (h.innerText || h.textContent || '').trim())
+          .filter(text => text.length > 0)
+          .slice(0, 10);
+
+        console.log('Final extraction results:');
+        console.log('- Title:', title);
+        console.log('- Content length:', mainContent.length);
+        console.log('- Headings found:', headings.length);
+
+        return {
+          title: title.trim(),
+          metaDescription: metaDescription.trim(),
+          content: mainContent.trim(),
+          headings,
+          url
+        };
+      }, url);
+
+      return this.cleanContent(content);
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  }
 
   /**
    * Scrape with Axios + Cheerio for static content
@@ -898,18 +1159,16 @@ export class WebScraperService {
    * Scrape individual blog post with enhanced content extraction
    */
   async scrapeBlogPost(postUrl) {
-    // Use enhanced Cheerio scraping for blog posts
-    console.log('📖 Scraping blog post with enhanced static extraction:', postUrl);
-    return await this.scrapeWithCheerio(postUrl);
-  }
+    // Normalize the URL to ensure consistency
+    const normalizedUrl = this.normalizeUrl(postUrl);
+    
+    let browser;
+    try {
+      browser = await puppeteer.launch(await this.getPuppeteerConfig());
 
-  /**
-   * Extract CTAs from a page using enhanced static analysis
-   */
-  async extractCTAs(pageUrl) {
-    console.log('🎯 Extracting CTAs using enhanced static analysis for:', pageUrl);
-    const pageContent = await this.scrapeWithCheerio(pageUrl);
-    return pageContent.ctas || [];
+      const page = await browser.newPage();
+      await page.setUserAgent(this.userAgent);
+      await page.goto(normalizedUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
       
       // Wait longer for React SPAs and dynamic content to fully load
       await new Promise(resolve => setTimeout(resolve, 5000));
@@ -1651,88 +1910,69 @@ export class WebScraperService {
   }
   
   /**
-   * Extract internal linking structure using static analysis
+   * Extract internal linking structure
    */
   async extractInternalLinks(pageUrl) {
     try {
-      console.log('🔗 Extracting internal links using enhanced static analysis for:', pageUrl);
+      const pageContent = await this.scrapeWithPuppeteer(pageUrl);
       
-      // Get page HTML with Axios
-      const response = await axios.get(pageUrl, {
-        headers: {
-          'User-Agent': this.userAgent,
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-        timeout: this.timeout,
-        maxRedirects: 5
-      });
+      // Use Puppeteer to get all internal links with context
+      let browser;
+      try {
+        browser = await puppeteer.launch({
+          headless: 'new',
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        });
 
-      const $ = cheerio.load(response.data);
-      const urlObj = new URL(pageUrl);
-      const domain = urlObj.hostname;
-      const links = [];
+        const page = await browser.newPage();
+        await page.setUserAgent(this.userAgent);
+        await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
 
-      // Extract all internal links with context
-      $('a[href]').each((index, element) => {
-        if (index >= 100) return false; // Limit total links processed
-        
-        const $link = $(element);
-        const href = $link.attr('href');
-        const text = $link.text().trim();
-        
-        if (!href || !text || text.length > 200) return; // Skip empty or very long text
-        
-        try {
-          // Convert relative URLs to absolute
-          const linkUrl = new URL(href, pageUrl);
+        const linkStructure = await page.evaluate(() => {
+          const host = window.location.host;
+          const links = [];
           
-          // Check if it's an internal link (same domain)
-          const isInternal = linkUrl.hostname === domain || 
-                           linkUrl.hostname.replace('www.', '') === domain.replace('www.', '') ||
-                           linkUrl.hostname === `www.${domain}` || 
-                           domain === `www.${linkUrl.hostname}`;
-          
-          if (!isInternal || linkUrl.href === pageUrl) return; // Skip external links and self-links
-          
-          // Categorize link type based on URL pattern
-          let linkType = 'page';
-          const path = linkUrl.pathname.toLowerCase();
-          if (path.includes('/blog/') || path.includes('/post/') || path.includes('/article/')) linkType = 'blog';
-          else if (path.includes('/product/') || path.includes('/service/') || path.includes('/shop/')) linkType = 'product';
-          else if (path.includes('/about')) linkType = 'about';
-          else if (path.includes('/contact')) linkType = 'contact';
-          else if (path.includes('/news/') || path.includes('/insights/')) linkType = 'news';
-          
-          // Determine context based on parent elements
-          const $parent = $link.closest('nav, .nav, .navigation, .menu, header, .header');
-          const $footer = $link.closest('footer, .footer');
-          const $sidebar = $link.closest('.sidebar, aside, .aside');
-          const $main = $link.closest('main, article, .content, .main-content');
-          
-          let context = 'content';
-          if ($parent.length > 0) context = 'navigation';
-          else if ($footer.length > 0) context = 'footer';
-          else if ($sidebar.length > 0) context = 'sidebar';
-          else if ($main.length > 0) context = 'content';
-          
-          links.push({
-            url: linkUrl.href,
-            text: text.slice(0, 100),
-            linkType,
-            context,
-            anchorText: text
+          document.querySelectorAll('a[href]').forEach((link, index) => {
+            if (index >= 50) return; // Limit total links
+            
+            const href = link.href;
+            const text = link.textContent?.trim();
+            
+            if (!text || !href.includes(host) || href === window.location.href) return;
+            
+            // Categorize link type
+            let linkType = 'page';
+            if (href.includes('/blog/') || href.includes('/post/')) linkType = 'blog';
+            else if (href.includes('/product/') || href.includes('/service/')) linkType = 'product';
+            else if (href.includes('/about')) linkType = 'about';
+            else if (href.includes('/contact')) linkType = 'contact';
+            
+            // Get context
+            const context = link.closest('nav, .nav, .menu') ? 'navigation' : 
+                           link.closest('footer') ? 'footer' :
+                           link.closest('sidebar, .sidebar') ? 'sidebar' : 'content';
+            
+            links.push({
+              url: href,
+              text: text.slice(0, 100),
+              linkType,
+              context,
+              anchorText: text
+            });
           });
-        } catch (e) {
-          // Skip malformed URLs
-        }
-      });
 
-      console.log(`🔗 Found ${links.length} internal links via static analysis`);
-      
-      return {
-        internalLinks: links,
-        totalLinksFound: links.length
-      };
+          return {
+            internalLinks: links,
+            totalLinksFound: links.length
+          };
+        });
+
+        return linkStructure;
+      } finally {
+        if (browser) {
+          await browser.close();
+        }
+      }
     } catch (error) {
       console.error('Internal links extraction error:', error);
       return {
