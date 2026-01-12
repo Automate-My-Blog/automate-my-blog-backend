@@ -476,4 +476,526 @@ router.put('/update', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/v1/analysis/discover-content
+ * Trigger comprehensive website content discovery and analysis
+ */
+router.post('/discover-content', async (req, res) => {
+  try {
+    console.log('🔍 Starting comprehensive content discovery...');
+    
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    if (!userContext.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        message: 'This endpoint requires user authentication'
+      });
+    }
+
+    const { websiteUrl, forceRefresh = false } = req.body;
+
+    if (!websiteUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing website URL',
+        message: 'websiteUrl is required for content discovery'
+      });
+    }
+
+    // Get organization ID
+    const orgResult = await db.query(
+      'SELECT id FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [userContext.userId]
+    );
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No organization found for user'
+      });
+    }
+
+    const organizationId = orgResult.rows[0].id;
+
+    // Check if analysis already exists and is recent (unless forced refresh)
+    if (!forceRefresh) {
+      const existingAnalysis = await db.query(`
+        SELECT * FROM content_analysis_results 
+        WHERE organization_id = $1 AND is_current = TRUE AND analysis_type = 'comprehensive'
+        AND created_at > NOW() - INTERVAL '24 hours'
+      `, [organizationId]);
+
+      if (existingAnalysis.rows.length > 0) {
+        return res.json({
+          success: true,
+          message: 'Recent analysis found, use forceRefresh=true to regenerate',
+          fromCache: true,
+          analysis: existingAnalysis.rows[0]
+        });
+      }
+    }
+
+    // Import blog analyzer service
+    const { default: blogAnalyzer } = await import('../services/blog-analyzer.js');
+
+    // Perform comprehensive content analysis
+    console.log(`📊 Analyzing website content: ${websiteUrl}`);
+    const analysisResults = await blogAnalyzer.analyzeBlogContent(organizationId, websiteUrl);
+
+    // Update organization's last analyzed timestamp
+    await db.query(`
+      UPDATE organizations SET last_analyzed_at = NOW() WHERE id = $1
+    `, [organizationId]);
+
+    console.log('✅ Content discovery completed successfully');
+
+    res.json({
+      success: true,
+      message: 'Website content analysis completed',
+      analysis: analysisResults,
+      organizationId: organizationId,
+      analyzedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Content discovery error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Content discovery failed',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/analysis/blog-content/:orgId
+ * Get discovered blog posts and content for an organization
+ */
+router.get('/blog-content/:orgId', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    if (!userContext.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    const { orgId } = req.params;
+    const { limit = 20, offset = 0, pageType = 'all' } = req.query;
+
+    console.log(`📖 Getting blog content for organization: ${orgId}`);
+
+    // Verify organization ownership
+    const orgCheck = await db.query(
+      'SELECT id FROM organizations WHERE id = $1 AND owner_user_id = $2',
+      [orgId, userContext.userId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    // Build query based on page type filter
+    let whereClause = 'WHERE organization_id = $1';
+    const queryParams = [orgId];
+    let paramIndex = 2;
+
+    if (pageType !== 'all') {
+      whereClause += ` AND page_type = $${paramIndex}`;
+      queryParams.push(pageType);
+      paramIndex++;
+    }
+
+    // Get blog content
+    const contentQuery = `
+      SELECT 
+        id, url, page_type, title, 
+        LEFT(content, 300) as content_preview,
+        meta_description, published_date, author, word_count,
+        jsonb_array_length(COALESCE(internal_links, '[]'::jsonb)) as internal_links_count,
+        jsonb_array_length(COALESCE(external_links, '[]'::jsonb)) as external_links_count,
+        analysis_quality_score, scraped_at
+      FROM website_pages 
+      ${whereClause}
+      ORDER BY scraped_at DESC, published_date DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+    
+    queryParams.push(parseInt(limit), parseInt(offset));
+
+    const contentResult = await db.query(contentQuery, queryParams);
+
+    // Get total count
+    const countQuery = `SELECT COUNT(*) as total FROM website_pages ${whereClause}`;
+    const countResult = await db.query(countQuery, queryParams.slice(0, -2));
+
+    // Get content summary
+    const summaryResult = await db.query(
+      'SELECT get_website_content_summary($1) as summary',
+      [orgId]
+    );
+
+    res.json({
+      success: true,
+      content: contentResult.rows,
+      summary: summaryResult.rows[0]?.summary || {},
+      pagination: {
+        total: parseInt(countResult.rows[0].total),
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: parseInt(offset) + parseInt(limit) < parseInt(countResult.rows[0].total)
+      }
+    });
+
+  } catch (error) {
+    console.error('Blog content retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve blog content',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/analysis/cta-analysis/:orgId
+ * Get CTA analysis results for an organization
+ */
+router.get('/cta-analysis/:orgId', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    if (!userContext.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    const { orgId } = req.params;
+
+    console.log(`🎯 Getting CTA analysis for organization: ${orgId}`);
+
+    // Verify organization ownership
+    const orgCheck = await db.query(
+      'SELECT id FROM organizations WHERE id = $1 AND owner_user_id = $2',
+      [orgId, userContext.userId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    // Get CTA analysis data
+    const ctaQuery = `
+      SELECT 
+        id, page_url, cta_text, cta_type, placement, href,
+        conversion_potential, visibility_score,
+        improvement_suggestions, analysis_confidence,
+        discovered_at
+      FROM cta_analysis 
+      WHERE organization_id = $1
+      ORDER BY conversion_potential DESC, discovered_at DESC
+    `;
+
+    const ctaResult = await db.query(ctaQuery, [orgId]);
+
+    // Get CTA effectiveness summary
+    const summaryResult = await db.query(
+      'SELECT get_cta_effectiveness_summary($1) as summary',
+      [orgId]
+    );
+
+    // Group CTAs by page for better organization
+    const ctasByPage = {};
+    ctaResult.rows.forEach(cta => {
+      if (!ctasByPage[cta.page_url]) {
+        ctasByPage[cta.page_url] = [];
+      }
+      ctasByPage[cta.page_url].push(cta);
+    });
+
+    res.json({
+      success: true,
+      ctas: ctaResult.rows,
+      ctasByPage,
+      summary: summaryResult.rows[0]?.summary || {},
+      totalCTAs: ctaResult.rows.length,
+      pagesAnalyzed: Object.keys(ctasByPage).length
+    });
+
+  } catch (error) {
+    console.error('CTA analysis retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve CTA analysis',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/analysis/internal-links/:orgId
+ * Get internal linking analysis for an organization
+ */
+router.get('/internal-links/:orgId', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    if (!userContext.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    const { orgId } = req.params;
+
+    console.log(`🔗 Getting internal linking analysis for organization: ${orgId}`);
+
+    // Verify organization ownership
+    const orgCheck = await db.query(
+      'SELECT id FROM organizations WHERE id = $1 AND owner_user_id = $2',
+      [orgId, userContext.userId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    // Get internal linking data
+    const linkingQuery = `
+      SELECT 
+        id, source_url, target_url, anchor_text, link_context, link_type,
+        is_descriptive, seo_value, link_relevance, user_value,
+        discovered_at
+      FROM internal_linking_analysis 
+      WHERE organization_id = $1
+      ORDER BY seo_value DESC, discovered_at DESC
+    `;
+
+    const linkingResult = await db.query(linkingQuery, [orgId]);
+
+    // Analyze linking patterns
+    const linkingStats = {
+      totalLinks: linkingResult.rows.length,
+      byContext: {},
+      byType: {},
+      averageSEOValue: 0,
+      descriptiveAnchors: 0
+    };
+
+    let totalSEOValue = 0;
+    linkingResult.rows.forEach(link => {
+      // Count by context
+      linkingStats.byContext[link.link_context] = (linkingStats.byContext[link.link_context] || 0) + 1;
+      
+      // Count by type
+      linkingStats.byType[link.link_type] = (linkingStats.byType[link.link_type] || 0) + 1;
+      
+      // Calculate averages
+      totalSEOValue += link.seo_value || 0;
+      if (link.is_descriptive) {
+        linkingStats.descriptiveAnchors++;
+      }
+    });
+
+    if (linkingResult.rows.length > 0) {
+      linkingStats.averageSEOValue = Math.round(totalSEOValue / linkingResult.rows.length);
+    }
+
+    // Get linking recommendations based on analysis
+    const recommendations = [];
+    
+    if (linkingStats.totalLinks < 10) {
+      recommendations.push('Increase internal linking to improve SEO and user navigation');
+    }
+    
+    if (linkingStats.averageSEOValue < 60) {
+      recommendations.push('Improve anchor text quality for better SEO value');
+    }
+    
+    if (linkingStats.descriptiveAnchors / linkingStats.totalLinks < 0.5) {
+      recommendations.push('Use more descriptive anchor text instead of generic phrases');
+    }
+
+    if (!linkingStats.byType.blog || linkingStats.byType.blog < 3) {
+      recommendations.push('Add more cross-links between related blog posts');
+    }
+
+    res.json({
+      success: true,
+      links: linkingResult.rows,
+      statistics: linkingStats,
+      recommendations,
+      analysisDate: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Internal linking analysis retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve internal linking analysis',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/v1/analysis/comprehensive-summary/:orgId
+ * Get comprehensive analysis summary combining all data sources
+ */
+router.get('/comprehensive-summary/:orgId', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    if (!userContext.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+    }
+
+    const { orgId } = req.params;
+
+    console.log(`📊 Getting comprehensive analysis summary for organization: ${orgId}`);
+
+    // Verify organization ownership
+    const orgCheck = await db.query(
+      'SELECT id, name, website_url FROM organizations WHERE id = $1 AND owner_user_id = $2',
+      [orgId, userContext.userId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    const organization = orgCheck.rows[0];
+
+    // Get comprehensive analysis using the view
+    const summaryResult = await db.query(
+      'SELECT * FROM comprehensive_website_analysis_view WHERE organization_id = $1',
+      [orgId]
+    );
+
+    if (summaryResult.rows.length === 0) {
+      return res.json({
+        success: true,
+        organization,
+        summary: {
+          analysisCompleteness: 0,
+          contentSummary: { total_pages: 0, blog_posts: 0 },
+          ctaSummary: { total_ctas: 0 },
+          currentAnalysis: null,
+          manualUploadsCount: 0
+        },
+        recommendations: [
+          'Start by running content discovery analysis',
+          'Upload existing blog content manually if website analysis is limited',
+          'Add clear CTAs to improve conversion tracking'
+        ]
+      });
+    }
+
+    const summary = summaryResult.rows[0];
+
+    // Get latest analysis results
+    const analysisResult = await db.query(`
+      SELECT 
+        analysis_type, analysis_quality_score, confidence_score,
+        pages_analyzed, blog_posts_analyzed,
+        tone_analysis, style_patterns, content_themes,
+        cta_strategy_analysis, linking_strategy_analysis,
+        content_gaps, content_opportunities,
+        created_at
+      FROM content_analysis_results 
+      WHERE organization_id = $1 AND is_current = TRUE
+      ORDER BY created_at DESC
+      LIMIT 1
+    `, [orgId]);
+
+    // Generate actionable recommendations based on data
+    const recommendations = [];
+    
+    const completenessScore = summary.analysis_completeness_score;
+    
+    if (completenessScore < 60) {
+      recommendations.push('Run comprehensive content discovery to improve analysis quality');
+    }
+    
+    if (summary.content_summary?.blog_posts < 3) {
+      recommendations.push('Consider manual content upload to supplement automated discovery');
+    }
+    
+    if (summary.cta_summary?.total_ctas < 5) {
+      recommendations.push('Add more call-to-action elements to improve conversion opportunities');
+    }
+
+    if (analysisResult.rows.length > 0) {
+      const analysis = analysisResult.rows[0];
+      
+      if (analysis.content_gaps && analysis.content_gaps.length > 0) {
+        recommendations.push(`Address content gaps: ${analysis.content_gaps.slice(0, 2).join(', ')}`);
+      }
+      
+      if (analysis.analysis_quality_score < 70) {
+        recommendations.push('Improve content quality and depth for better analysis results');
+      }
+    }
+
+    res.json({
+      success: true,
+      organization,
+      summary: {
+        analysisCompleteness: completenessScore,
+        contentSummary: summary.content_summary || {},
+        ctaSummary: summary.cta_summary || {},
+        currentAnalysis: analysisResult.rows[0] || null,
+        manualUploadsCount: summary.manual_uploads_count || 0,
+        lastAnalyzed: summary.last_analyzed_at,
+        lastUpdated: summary.updated_at
+      },
+      recommendations,
+      nextSteps: completenessScore < 60 ? [
+        'Run content discovery analysis',
+        'Review and supplement with manual uploads',
+        'Analyze conversion optimization opportunities'
+      ] : [
+        'Review content strategy recommendations',
+        'Implement suggested improvements',
+        'Monitor content performance metrics'
+      ]
+    });
+
+  } catch (error) {
+    console.error('Comprehensive summary retrieval error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve comprehensive summary',
+      message: error.message
+    });
+  }
+});
+
 export default router;
