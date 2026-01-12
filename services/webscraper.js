@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import xml2js from 'xml2js';
@@ -7,6 +7,45 @@ export class WebScraperService {
   constructor() {
     this.timeout = parseInt(process.env.ANALYSIS_TIMEOUT) || 10000;
     this.userAgent = process.env.USER_AGENT || 'AutoBlog Bot 1.0';
+  }
+
+  /**
+   * Get optimized Puppeteer configuration for serverless environments
+   */
+  async getPuppeteerConfig() {
+    const config = {
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-dev-tools',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-default-apps',
+        '--no-first-run',
+        '--disable-web-security',
+        '--allow-running-insecure-content'
+      ]
+    };
+
+    // For Vercel/serverless environments, use chrome-aws-lambda if available
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        const chromium = await import('@sparticuz/chromium');
+        config.executablePath = await chromium.executablePath();
+        config.args = [...config.args, ...chromium.args];
+        console.log('🔧 Using chrome-aws-lambda for serverless environment');
+      } catch (importError) {
+        console.warn('⚠️ chrome-aws-lambda not available, trying default Puppeteer');
+      }
+    }
+
+    return config;
   }
 
   /**
@@ -41,15 +80,8 @@ export class WebScraperService {
   async scrapeWithPuppeteer(url) {
     let browser;
     try {
-      browser = await puppeteer.launch({
-        headless: 'new',
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu'
-        ]
-      });
+      const puppeteerConfig = await this.getPuppeteerConfig();
+      browser = await puppeteer.launch(puppeteerConfig);
 
       const page = await browser.newPage();
       
@@ -691,10 +723,7 @@ export class WebScraperService {
   async detectPageType(pageUrl) {
     let browser;
     try {
-      browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-      });
+      browser = await puppeteer.launch(await this.getPuppeteerConfig());
 
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
@@ -992,10 +1021,7 @@ export class WebScraperService {
     
     let browser;
     try {
-      browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-      });
+      browser = await puppeteer.launch(await this.getPuppeteerConfig());
 
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
@@ -1673,10 +1699,7 @@ export class WebScraperService {
   async extractCTAs(pageUrl) {
     let browser;
     try {
-      browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-      });
+      browser = await puppeteer.launch(await this.getPuppeteerConfig());
 
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
