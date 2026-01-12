@@ -483,6 +483,7 @@ router.put('/update', async (req, res) => {
 router.post('/discover-content', async (req, res) => {
   try {
     console.log('🔍 Starting comprehensive content discovery...');
+    console.log('🔧 Enhanced debugging version: 2026-01-12-v2 - with detailed scraping logs');
     
     const userContext = extractUserContext(req);
     validateUserContext(userContext);
