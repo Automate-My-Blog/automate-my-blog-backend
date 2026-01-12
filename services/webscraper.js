@@ -33,18 +33,53 @@ export class WebScraperService {
       ]
     };
 
-    // For Vercel/serverless environments, use chrome-aws-lambda if available
+    // For Vercel/serverless environments, use @sparticuz/chromium
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
       try {
+        console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
         const chromium = await import('@sparticuz/chromium');
-        config.executablePath = await chromium.executablePath();
+        
+        // Get the executable path
+        const executablePath = await chromium.executablePath();
+        console.log('✅ Chromium executable path obtained:', executablePath);
+        
+        config.executablePath = executablePath;
         config.args = [...config.args, ...chromium.args];
-        console.log('🔧 Using chrome-aws-lambda for serverless environment');
+        console.log('🔧 Using @sparticuz/chromium for serverless environment');
+        
+        return config;
       } catch (importError) {
-        console.warn('⚠️ chrome-aws-lambda not available, trying default Puppeteer');
+        console.error('❌ Failed to import @sparticuz/chromium:', importError);
+        console.warn('⚠️ Falling back to system Chrome detection...');
+        
+        // Try to find system Chrome as fallback
+        const possiblePaths = [
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ];
+        
+        for (const path of possiblePaths) {
+          try {
+            const fs = await import('fs');
+            if (fs.existsSync && fs.existsSync(path)) {
+              config.executablePath = path;
+              console.log('✅ Found system Chrome at:', path);
+              return config;
+            }
+          } catch (e) {
+            // Continue checking other paths
+          }
+        }
+        
+        // If no executable found, throw a more specific error
+        throw new Error(`Chrome executable not found. For serverless environments, ensure @sparticuz/chromium is installed. Import error: ${importError.message}`);
       }
     }
 
+    console.log('🔧 Using default Puppeteer configuration for local environment');
     return config;
   }
 
@@ -80,8 +115,13 @@ export class WebScraperService {
   async scrapeWithPuppeteer(url) {
     let browser;
     try {
+      console.log('🚀 Starting Puppeteer scraping for:', url);
       const puppeteerConfig = await this.getPuppeteerConfig();
+      console.log('🔧 Puppeteer config obtained:', JSON.stringify(puppeteerConfig, null, 2));
+      
+      console.log('🌐 Launching browser...');
       browser = await puppeteer.launch(puppeteerConfig);
+      console.log('✅ Browser launched successfully');
 
       const page = await browser.newPage();
       
