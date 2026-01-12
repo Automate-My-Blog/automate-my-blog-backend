@@ -1291,7 +1291,7 @@ export class WebScraperService {
             const rgbToHex = (rgb) => {
               if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null;
               
-              const rgbMatch = rgb.match(/rgb\\(?(\\d+),\\s*(\\d+),\\s*(\\d+)/);
+              const rgbMatch = rgb.match(/rgb\(?(\d+),\s*(\d+),\s*(\d+)/);
               if (rgbMatch) {
                 const r = parseInt(rgbMatch[1]);
                 const g = parseInt(rgbMatch[2]);
@@ -1299,7 +1299,7 @@ export class WebScraperService {
                 return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
               }
               
-              const rgbaMatch = rgb.match(/rgba\\(?(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*[\\d.]+/);
+              const rgbaMatch = rgb.match(/rgba\(?(\d+),\s*(\d+),\s*(\d+),\s*[\d.]+/);
               if (rgbaMatch) {
                 const r = parseInt(rgbaMatch[1]);
                 const g = parseInt(rgbaMatch[2]);
