@@ -635,6 +635,8 @@ router.get('/blog-content/:orgId', async (req, res) => {
         COALESCE(page_classification, 'unknown') as page_classification,
         COALESCE(discovered_from, 'unknown') as discovered_from,
         featured_image_url, excerpt, discovery_priority, discovery_confidence,
+        -- Sitemap metadata fields
+        sitemap_priority, last_modified_date, sitemap_changefreq,
         -- Visual design and structure data
         visual_design, content_structure, 
         jsonb_array_length(COALESCE(ctas_extracted, '[]'::jsonb)) as ctas_count

@@ -7,6 +7,12 @@ ADD COLUMN IF NOT EXISTS visual_design JSONB,
 ADD COLUMN IF NOT EXISTS content_structure JSONB,
 ADD COLUMN IF NOT EXISTS ctas_extracted JSONB;
 
+-- Add sitemap metadata fields to preserve all XML sitemap data
+ALTER TABLE website_pages
+ADD COLUMN IF NOT EXISTS last_modified_date TIMESTAMP,
+ADD COLUMN IF NOT EXISTS sitemap_priority DECIMAL(3,2),
+ADD COLUMN IF NOT EXISTS sitemap_changefreq VARCHAR(20);
+
 -- Add indexes for better query performance on JSONB fields
 CREATE INDEX IF NOT EXISTS idx_website_pages_visual_design 
 ON website_pages USING GIN (visual_design);
@@ -74,7 +80,8 @@ GRANT EXECUTE ON FUNCTION get_enhanced_content_summary(UUID) TO PUBLIC;
 -- Update existing CTA analysis table for better conflict resolution
 ALTER TABLE cta_analysis 
 ADD COLUMN IF NOT EXISTS page_type VARCHAR(50) DEFAULT 'unknown',
-ADD COLUMN IF NOT EXISTS analysis_source VARCHAR(50) DEFAULT 'manual';
+ADD COLUMN IF NOT EXISTS analysis_source VARCHAR(50) DEFAULT 'manual',
+ADD COLUMN IF NOT EXISTS scraped_at TIMESTAMP DEFAULT NOW();
 
 -- Add index for page type
 CREATE INDEX IF NOT EXISTS idx_cta_analysis_page_type 

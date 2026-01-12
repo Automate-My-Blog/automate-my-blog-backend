@@ -65,11 +65,34 @@ export class WebScraperService {
         timeout: this.timeout
       });
 
-      // Wait a bit for any dynamic content
-      await page.waitForSelector('body', { timeout: 5000 }).catch(() => {}); // Fallback wait
+      // Wait longer for React SPAs and dynamic content to fully load
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // For heavily JS-dependent sites, wait for meaningful content to appear
+      await page.waitForFunction(() => {
+        const paragraphs = document.querySelectorAll('p');
+        if (paragraphs.length > 2) {
+          const totalText = Array.from(paragraphs)
+            .map(p => p.innerText || p.textContent || '')
+            .join(' ')
+            .trim();
+          if (totalText.length > 100) {
+            return true;
+          }
+        }
+        const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+        return bodyText.length > 1000;
+      }, { timeout: 15000, polling: 1000 }).catch(() => {
+        console.log('Dynamic content wait timed out, proceeding with extraction...');
+      });
 
-      // Extract content only (removed brand color detection)
-      const content = await page.evaluate(() => {
+      // Extract content with enhanced SPA handling
+      const content = await page.evaluate((url) => {
+        console.log('Starting content extraction for URL:', url);
+        console.log('Initial page state:');
+        console.log('- Paragraphs:', document.querySelectorAll('p').length);
+        console.log('- Articles:', document.querySelectorAll('article').length);
+        console.log('- Main elements:', document.querySelectorAll('main').length);
 
         // Remove unwanted elements for content extraction (but keep them for color analysis)
         const elementsToRemove = [
@@ -86,31 +109,90 @@ export class WebScraperService {
         // Get meta description
         const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
 
-        // Get main content
+        // Enhanced content selectors for better SPA compatibility
         const mainSelectors = [
           'main', '[role="main"]', '.main-content', '.content', 
-          'article', '.post-content', '.entry-content'
+          'article', '.post-content', '.entry-content', '.blog-post', 
+          '.single-post', '[data-post]', '.content-area', '.post-body'
         ];
         
         let mainContent = '';
         for (const selector of mainSelectors) {
           const element = document.querySelector(selector);
           if (element) {
-            mainContent = element.innerText || '';
-            break;
+            const text = element.innerText || element.textContent || '';
+            if (text.trim().length > 100) { // Only use if meaningful content
+              mainContent = text;
+              console.log(`Found content using selector: ${selector}, length: ${text.length}`);
+              break;
+            }
           }
         }
 
-        // If no main content found, get body text
-        if (!mainContent) {
-          mainContent = document.body.innerText || '';
+        // If no main content found, try aggressive fallback extraction
+        if (!mainContent || mainContent.trim().length < 100) {
+          console.log('Main content not found, trying aggressive extraction...');
+          
+          // Try paragraphs first
+          const paragraphs = Array.from(document.querySelectorAll('p'))
+            .map(p => p.innerText || p.textContent || '')
+            .filter(text => text.trim().length > 20)
+            .join(' ');
+          
+          if (paragraphs.length > 100) {
+            mainContent = paragraphs;
+            console.log(`Found content from paragraphs, length: ${paragraphs.length}`);
+          } else {
+            // Last resort: use TreeWalker to extract all text nodes
+            const walker = document.createTreeWalker(
+              document.body || document,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: function(node) {
+                  // Skip script and style content
+                  const parent = node.parentElement;
+                  if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  // Only accept nodes with meaningful text
+                  if (node.textContent.trim().length > 10) {
+                    return NodeFilter.FILTER_ACCEPT;
+                  }
+                  return NodeFilter.FILTER_REJECT;
+                }
+              }
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+              textNodes.push(node.textContent.trim());
+            }
+            
+            const extractedText = textNodes.join(' ').replace(/\s+/g, ' ').trim();
+            if (extractedText.length > mainContent.length) {
+              mainContent = extractedText;
+              console.log(`Found content using TreeWalker, length: ${extractedText.length}`);
+            }
+          }
+        }
+
+        // If still no content, get body text as last resort
+        if (!mainContent || mainContent.trim().length < 50) {
+          mainContent = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+          console.log(`Using body text as fallback, length: ${mainContent.length}`);
         }
 
         // Get headings
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3'))
-          .map(h => h.innerText.trim())
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+          .map(h => (h.innerText || h.textContent || '').trim())
           .filter(text => text.length > 0)
           .slice(0, 10);
+
+        console.log('Final extraction results:');
+        console.log('- Title:', title);
+        console.log('- Content length:', mainContent.length);
+        console.log('- Headings found:', headings.length);
 
         return {
           title: title.trim(),
@@ -119,7 +201,7 @@ export class WebScraperService {
           headings,
           url
         };
-      });
+      }, url);
 
       return this.cleanContent(content);
     } finally {
@@ -905,6 +987,9 @@ export class WebScraperService {
    * Scrape individual blog post with enhanced content extraction
    */
   async scrapeBlogPost(postUrl) {
+    // Normalize the URL to ensure consistency
+    const normalizedUrl = this.normalizeUrl(postUrl);
+    
     let browser;
     try {
       browser = await puppeteer.launch({
@@ -914,15 +999,41 @@ export class WebScraperService {
 
       const page = await browser.newPage();
       await page.setUserAgent(this.userAgent);
-      await page.goto(postUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await page.goto(normalizedUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
+      
+      // Wait longer for React SPAs and dynamic content to fully load
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // For heavily JS-dependent sites, wait for meaningful content to appear
+      await page.waitForFunction(() => {
+        // Check for paragraphs being present (sign of content loading)
+        const paragraphs = document.querySelectorAll('p');
+        if (paragraphs.length > 2) {
+          const totalText = Array.from(paragraphs)
+            .map(p => p.innerText || p.textContent || '')
+            .join(' ')
+            .trim();
+          if (totalText.length > 100) {
+            return true;
+          }
+        }
+        
+        // Fallback: check if body has substantial text content
+        const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+        return bodyText.length > 1000; // Substantial content loaded
+      }, { timeout: 15000, polling: 1000 }).catch(() => {
+        console.log('⚠️ Dynamic content wait timeout - proceeding with best effort extraction');
+      });
+      
+      // Additional wait to ensure rendering is complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      const postData = await page.evaluate(() => {
+      const postData = await page.evaluate((originalUrl) => {
         // Extract post metadata first (before removing elements for CTA analysis)
         const title = document.querySelector('h1')?.textContent?.trim() || 
                      document.title || '';
 
-        // Look for article content in common containers
+        // Enhanced content extraction for React SPAs and dynamic sites
         const contentSelectors = [
           'article .entry-content',
           'article .post-content', 
@@ -930,16 +1041,107 @@ export class WebScraperService {
           '.post-body',
           '.entry-content',
           '.post-content',
+          '.blog-content',
+          '.post',
+          '.content',
+          '[class*="content"]',
+          '[class*="post"]',
+          '[class*="article"]',
           'article',
-          'main'
+          'main',
+          'body'
         ];
         
         let content = '';
+        let bestContent = '';
+        let bestLength = 0;
+        
+        // Try multiple selectors and pick the one with the most content
         for (const selector of contentSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            content = element.innerText || '';
-            if (content.length > 200) break; // Found substantial content
+          const elements = document.querySelectorAll(selector);
+          for (const element of elements) {
+            if (element) {
+              const elementText = element.innerText || element.textContent || '';
+              const cleanText = elementText.trim();
+              
+              // Skip if it's just navigation or very short content
+              if (cleanText.length > 100 && cleanText.length > bestLength) {
+                // Check if this element contains mostly text content vs navigation
+                const paragraphs = element.querySelectorAll('p').length;
+                const links = element.querySelectorAll('a').length;
+                
+                // Prefer elements with more paragraphs than links (content vs navigation)
+                if (paragraphs > 0 && (paragraphs >= links || cleanText.length > 500)) {
+                  bestContent = cleanText;
+                  bestLength = cleanText.length;
+                }
+              }
+            }
+          }
+        }
+        
+        content = bestContent || content;
+        
+        // If still no content, try aggressive fallback extraction
+        if (content.length < 50) {
+          console.log('Trying aggressive fallback extraction...');
+          
+          // Method 1: Look for any meaningful text in paragraphs
+          const paragraphs = Array.from(document.querySelectorAll('p'))
+            .map(p => p.innerText || p.textContent || '')
+            .filter(text => text.trim().length > 20)
+            .join(' ')
+            .trim();
+            
+          if (paragraphs.length > content.length) {
+            content = paragraphs;
+          }
+          
+          // Method 2: If still no content, extract from all text nodes
+          if (content.length < 50) {
+            const walker = document.createTreeWalker(
+              document.body,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: function(node) {
+                  // Skip script, style, and other non-content elements
+                  const parent = node.parentElement;
+                  if (!parent) return NodeFilter.FILTER_REJECT;
+                  
+                  const tagName = parent.tagName.toLowerCase();
+                  if (['script', 'style', 'noscript', 'svg', 'path'].includes(tagName)) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  
+                  const text = node.textContent.trim();
+                  // Accept text nodes with meaningful content
+                  return text.length > 10 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+                }
+              }
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+              const text = node.textContent.trim();
+              if (text.length > 10) {
+                textNodes.push(text);
+              }
+            }
+            
+            const extractedText = textNodes.join(' ').trim();
+            if (extractedText.length > content.length) {
+              content = extractedText;
+            }
+          }
+          
+          // Method 3: Last resort - try body text directly
+          if (content.length < 50) {
+            const bodyText = document.body ? (document.body.innerText || document.body.textContent || '').trim() : '';
+            // Filter out obvious CSS/JS content
+            if (bodyText.length > 100 && !bodyText.includes('font-family') && !bodyText.includes('.css-')) {
+              content = bodyText.substring(0, 10000); // Limit to reasonable size
+            }
           }
         }
 
@@ -1046,20 +1248,24 @@ export class WebScraperService {
               context,
               className: el.className || '',
               tagName: el.tagName.toLowerCase(),
-              page_url: window.location.href
+              page_url: originalUrl
             });
           });
         }
 
-        // Extract visual design information before removing elements
+        // Extract granular visual design information with element-specific mapping
         const visualDesign = (() => {
           const design = {
+            // Enhanced color mapping with element associations
             colors: {
               primary: [],
               background: [],
               text: [],
               accent: []
             },
+            // Granular element-specific design patterns
+            elementPatterns: {},
+            // Traditional typography info (kept for compatibility)
             typography: {
               fonts: [],
               headingSizes: [],
@@ -1081,46 +1287,207 @@ export class WebScraperService {
           };
 
           try {
-            // Extract colors from computed styles
-            const elementsToAnalyze = [
-              ...document.querySelectorAll('article, .post-content, .entry-content, main'),
-              ...document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
-              ...document.querySelectorAll('p'),
-              ...document.querySelectorAll('a'),
-              ...document.querySelectorAll('button, .btn')
-            ];
-
-            const colorSet = new Set();
-            const fontSet = new Set();
-
-            elementsToAnalyze.slice(0, 20).forEach(el => {
-              const styles = window.getComputedStyle(el);
+            // Helper function to convert RGB to hex for consistency
+            const rgbToHex = (rgb) => {
+              if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null;
               
-              // Extract colors
-              const bgColor = styles.backgroundColor;
-              const textColor = styles.color;
-              const borderColor = styles.borderColor;
+              const rgbMatch = rgb.match(/rgb\\(?(\\d+),\\s*(\\d+),\\s*(\\d+)/);
+              if (rgbMatch) {
+                const r = parseInt(rgbMatch[1]);
+                const g = parseInt(rgbMatch[2]);
+                const b = parseInt(rgbMatch[3]);
+                return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+              }
               
-              if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
-                colorSet.add(bgColor);
+              const rgbaMatch = rgb.match(/rgba\\(?(\\d+),\\s*(\\d+),\\s*(\\d+),\\s*[\\d.]+/);
+              if (rgbaMatch) {
+                const r = parseInt(rgbaMatch[1]);
+                const g = parseInt(rgbaMatch[2]);
+                const b = parseInt(rgbaMatch[3]);
+                return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
               }
-              if (textColor && textColor !== 'rgba(0, 0, 0, 0)') {
-                colorSet.add(textColor);
-              }
-              if (borderColor && borderColor !== 'rgba(0, 0, 0, 0)') {
-                colorSet.add(borderColor);
-              }
+              
+              return rgb.startsWith('#') ? rgb : null;
+            };
 
-              // Extract fonts
-              const fontFamily = styles.fontFamily;
-              if (fontFamily) {
-                fontSet.add(fontFamily.split(',')[0].replace(/['"]/g, '').trim());
+            // Define element selectors and their categories for granular analysis
+            const elementCategories = {
+              'headings': {
+                'h1': document.querySelectorAll('h1'),
+                'h2': document.querySelectorAll('h2'), 
+                'h3': document.querySelectorAll('h3'),
+                'h4': document.querySelectorAll('h4'),
+                'h5': document.querySelectorAll('h5'),
+                'h6': document.querySelectorAll('h6')
+              },
+              'text': {
+                'paragraph': document.querySelectorAll('article p, .post-content p, .entry-content p, main p'),
+                'link': document.querySelectorAll('article a, .post-content a, .entry-content a, main a'),
+                'blockquote': document.querySelectorAll('blockquote')
+              },
+              'interactive': {
+                'button': document.querySelectorAll('button, .btn, .button'),
+                'form_input': document.querySelectorAll('input, textarea, select'),
+                'cta': document.querySelectorAll('.cta, [class*="call-to-action"], [class*="cta"]')
+              },
+              'layout': {
+                'container': document.querySelectorAll('article, .post-content, .entry-content, main, .container'),
+                'sidebar': document.querySelectorAll('.sidebar, .widget, .aside'),
+                'navigation': document.querySelectorAll('nav, .menu, .navigation')
               }
+            };
+
+            // Analyze each element category for granular patterns
+            Object.keys(elementCategories).forEach(category => {
+              design.elementPatterns[category] = {};
+              
+              Object.keys(elementCategories[category]).forEach(elementType => {
+                const elements = elementCategories[category][elementType];
+                const patterns = {
+                  colors: {},
+                  typography: {},
+                  spacing: {},
+                  commonStyles: {}
+                };
+                
+                if (elements.length > 0) {
+                  // Analyze up to 5 elements of each type for patterns
+                  Array.from(elements).slice(0, 5).forEach((el, index) => {
+                    const styles = window.getComputedStyle(el);
+                    
+                    // Extract and map colors to specific elements
+                    const bgColor = rgbToHex(styles.backgroundColor);
+                    const textColor = rgbToHex(styles.color);
+                    const borderColor = rgbToHex(styles.borderColor);
+                    
+                    if (bgColor) {
+                      patterns.colors.backgroundColor = patterns.colors.backgroundColor || [];
+                      if (!patterns.colors.backgroundColor.includes(bgColor)) {
+                        patterns.colors.backgroundColor.push(bgColor);
+                      }
+                    }
+                    
+                    if (textColor) {
+                      patterns.colors.textColor = patterns.colors.textColor || [];
+                      if (!patterns.colors.textColor.includes(textColor)) {
+                        patterns.colors.textColor.push(textColor);
+                      }
+                    }
+                    
+                    if (borderColor && borderColor !== '#000000') {
+                      patterns.colors.borderColor = patterns.colors.borderColor || [];
+                      if (!patterns.colors.borderColor.includes(borderColor)) {
+                        patterns.colors.borderColor.push(borderColor);
+                      }
+                    }
+                    
+                    // Extract typography patterns
+                    const fontFamily = styles.fontFamily ? styles.fontFamily.split(',')[0].replace(/['"]/g, '').trim() : null;
+                    const fontSize = styles.fontSize;
+                    const fontWeight = styles.fontWeight;
+                    const lineHeight = styles.lineHeight;
+                    
+                    if (fontFamily) {
+                      patterns.typography.fontFamily = patterns.typography.fontFamily || [];
+                      if (!patterns.typography.fontFamily.includes(fontFamily)) {
+                        patterns.typography.fontFamily.push(fontFamily);
+                      }
+                    }
+                    
+                    if (fontSize) {
+                      patterns.typography.fontSize = patterns.typography.fontSize || [];
+                      if (!patterns.typography.fontSize.includes(fontSize)) {
+                        patterns.typography.fontSize.push(fontSize);
+                      }
+                    }
+                    
+                    if (fontWeight && fontWeight !== '400') {
+                      patterns.typography.fontWeight = patterns.typography.fontWeight || [];
+                      if (!patterns.typography.fontWeight.includes(fontWeight)) {
+                        patterns.typography.fontWeight.push(fontWeight);
+                      }
+                    }
+                    
+                    // Extract spacing and layout patterns
+                    const margin = styles.margin;
+                    const padding = styles.padding;
+                    const borderRadius = styles.borderRadius;
+                    
+                    if (margin && margin !== '0px') {
+                      patterns.spacing.margin = patterns.spacing.margin || [];
+                      if (!patterns.spacing.margin.includes(margin)) {
+                        patterns.spacing.margin.push(margin);
+                      }
+                    }
+                    
+                    if (padding && padding !== '0px') {
+                      patterns.spacing.padding = patterns.spacing.padding || [];
+                      if (!patterns.spacing.padding.includes(padding)) {
+                        patterns.spacing.padding.push(padding);
+                      }
+                    }
+                    
+                    if (borderRadius && borderRadius !== '0px') {
+                      patterns.commonStyles.borderRadius = patterns.commonStyles.borderRadius || [];
+                      if (!patterns.commonStyles.borderRadius.includes(borderRadius)) {
+                        patterns.commonStyles.borderRadius.push(borderRadius);
+                      }
+                    }
+                  });
+                  
+                  // Store the patterns for this element type
+                  design.elementPatterns[category][elementType] = {
+                    count: elements.length,
+                    patterns: patterns,
+                    // Generate readable pattern descriptions
+                    description: generateElementDescription(elementType, patterns)
+                  };
+                }
+              });
             });
 
-            // Convert colors to arrays
-            design.colors.primary = Array.from(colorSet).slice(0, 8);
-            design.typography.fonts = Array.from(fontSet).slice(0, 5);
+            // Generate overall color palette from all elements
+            const allColors = new Set();
+            const allFonts = new Set();
+            
+            Object.values(design.elementPatterns).forEach(category => {
+              Object.values(category).forEach(elementData => {
+                const colors = elementData.patterns.colors;
+                if (colors.backgroundColor) colors.backgroundColor.forEach(c => allColors.add(c));
+                if (colors.textColor) colors.textColor.forEach(c => allColors.add(c));
+                if (colors.borderColor) colors.borderColor.forEach(c => allColors.add(c));
+                
+                const typography = elementData.patterns.typography;
+                if (typography.fontFamily) typography.fontFamily.forEach(f => allFonts.add(f));
+              });
+            });
+
+            // Convert colors to arrays (maintain compatibility with existing code)
+            design.colors.primary = Array.from(allColors).slice(0, 8);
+            design.typography.fonts = Array.from(allFonts).slice(0, 5);
+            
+            // Helper function to generate human-readable descriptions
+            function generateElementDescription(elementType, patterns) {
+              const descriptions = [];
+              
+              if (patterns.colors.textColor && patterns.colors.textColor.length > 0) {
+                descriptions.push(`Text color: ${patterns.colors.textColor.join(', ')}`);
+              }
+              
+              if (patterns.colors.backgroundColor && patterns.colors.backgroundColor.length > 0) {
+                descriptions.push(`Background: ${patterns.colors.backgroundColor.join(', ')}`);
+              }
+              
+              if (patterns.typography.fontSize && patterns.typography.fontSize.length > 0) {
+                descriptions.push(`Font size: ${patterns.typography.fontSize.join(', ')}`);
+              }
+              
+              if (patterns.typography.fontFamily && patterns.typography.fontFamily.length > 0) {
+                descriptions.push(`Font family: ${patterns.typography.fontFamily.join(', ')}`);
+              }
+              
+              return descriptions.join(' | ');
+            }
 
             // Extract typography sizes
             document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
@@ -1166,6 +1533,72 @@ export class WebScraperService {
           return design;
         })();
 
+        // Extract internal and external links before removing elements
+        const extractedLinks = (() => {
+          const internalLinks = [];
+          const externalLinks = [];
+          
+          try {
+            const domain = new URL(originalUrl).hostname;
+            
+            // Find all links within the main content area
+            const contentSelectors = [
+              'article a',
+              '.post-content a',
+              '.entry-content a',
+              '.content a',
+              'main a'
+            ];
+            
+            const allLinks = new Set();
+            contentSelectors.forEach(selector => {
+              document.querySelectorAll(selector).forEach(link => allLinks.add(link));
+            });
+            
+            Array.from(allLinks).forEach(link => {
+              const href = link.href;
+              const text = link.textContent?.trim() || '';
+              const context = link.closest('p, li, div')?.textContent?.slice(0, 100) || '';
+              
+              if (href && text && href !== originalUrl) { // Don't include self-links
+                try {
+                  const linkUrl = new URL(href);
+                  const linkData = {
+                    href,
+                    text,
+                    context: context.trim(),
+                    tag: link.tagName.toLowerCase(),
+                    className: link.className || ''
+                  };
+                  
+                  if (linkUrl.hostname === domain || linkUrl.hostname === `www.${domain}` || linkUrl.hostname === domain.replace('www.', '')) {
+                    // Internal link
+                    internalLinks.push({
+                      ...linkData,
+                      type: 'internal',
+                      linkType: href.includes('/blog/') || href.includes('/post/') || href.includes('/article/') ? 'blog' : 'page'
+                    });
+                  } else {
+                    // External link
+                    externalLinks.push({
+                      ...linkData,
+                      type: 'external',
+                      domain: linkUrl.hostname
+                    });
+                  }
+                } catch (linkError) {
+                  // Skip invalid URLs
+                }
+              }
+            });
+            
+          } catch (linkExtractionError) {
+            console.warn('Failed to extract links:', linkExtractionError);
+          }
+          
+          return { internalLinks, externalLinks };
+        })();
+
         // Now remove unwanted elements for clean content extraction
         const elementsToRemove = [
           'script', 'style', 'nav', 'header', 'footer', 
@@ -1184,14 +1617,14 @@ export class WebScraperService {
           publishDate,
           author,
           headings,
-          internalLinks,
-          externalLinks,
+          internalLinks: extractedLinks.internalLinks,
+          externalLinks: extractedLinks.externalLinks,
           wordCount: content.split(/\s+/).length,
-          url: window.location.href,
+          url: originalUrl, // Use original input URL to maintain consistency
           ctas: ctaElements, // Include extracted CTAs
           visualDesign: visualDesign // Include visual design data
         };
-      });
+      }, normalizedUrl);
 
       return this.cleanBlogPostContent(postData);
     } finally {
@@ -1385,14 +1818,61 @@ export class WebScraperService {
         .trim();
     };
 
+    const cleanedContent = cleanText(content.content);
+    
+    // Calculate word count from cleaned content
+    const wordCount = cleanedContent.length > 0 
+      ? cleanedContent.split(/\s+/).filter(word => word.length > 0).length 
+      : 0;
+
     return {
       title: cleanText(content.title),
       metaDescription: cleanText(content.metaDescription),
-      content: cleanText(content.content).slice(0, 5000), // Limit content length
+      content: cleanedContent,
+      wordCount: wordCount,
       headings: content.headings.map(h => cleanText(h)).filter(h => h.length > 0),
       url: content.url,
       scrapedAt: new Date().toISOString()
     };
+  }
+
+  /**
+   * Normalize URL to ensure consistent format across discovery and scraping
+   */
+  normalizeUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      // Preserve the original URL format (with or without www)
+      // This prevents mismatches between discovery and detailed scraping
+      return urlObj.href;
+    } catch {
+      return url;
+    }
+  }
+
+  /**
+   * Compare two URLs for equivalence, handling common variations
+   */
+  urlsMatch(url1, url2) {
+    try {
+      const normalizedUrl1 = this.normalizeUrl(url1);
+      const normalizedUrl2 = this.normalizeUrl(url2);
+      
+      // Direct match
+      if (normalizedUrl1 === normalizedUrl2) return true;
+      
+      // Handle www/non-www variations
+      const urlObj1 = new URL(normalizedUrl1);
+      const urlObj2 = new URL(normalizedUrl2);
+      
+      // Compare with www variations
+      const host1 = urlObj1.host.startsWith('www.') ? urlObj1.host.substring(4) : urlObj1.host;
+      const host2 = urlObj2.host.startsWith('www.') ? urlObj2.host.substring(4) : urlObj2.host;
+      
+      return host1 === host2 && urlObj1.pathname === urlObj2.pathname;
+    } catch {
+      return url1 === url2;
+    }
   }
 
   /**

@@ -554,7 +554,12 @@ Provide analysis in JSON format:
       
       for (const post of allDiscoveredPosts) {
         // Check if this post has detailed content (was fully scraped)
-        const detailedPost = analysisData.detailedPosts.find(dp => dp.url === post.url);
+        // Use URL matching that handles www/non-www variations
+        const detailedPost = analysisData.detailedPosts.find(dp => 
+          webscraper.urlsMatch(dp.url, post.url)
+        );
+        
+        // Enhanced data is successfully mapped and will be stored for matched posts
         
         // Use enhanced schema fields for better classification
         const insertQuery = `
@@ -563,8 +568,9 @@ Provide analysis in JSON format:
             published_date, author, internal_links, external_links, 
             page_classification, discovered_from, featured_image_url, 
             excerpt, discovery_priority, discovery_confidence, 
-            word_count, visual_design, content_structure, ctas_extracted, scraped_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
+            word_count, visual_design, content_structure, ctas_extracted,
+            last_modified_date, sitemap_priority, sitemap_changefreq, scraped_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, NOW())
           ON CONFLICT (organization_id, url) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, website_pages.title),
             content = COALESCE(EXCLUDED.content, website_pages.content),
@@ -583,6 +589,9 @@ Provide analysis in JSON format:
             visual_design = COALESCE(EXCLUDED.visual_design, website_pages.visual_design),
             content_structure = COALESCE(EXCLUDED.content_structure, website_pages.content_structure),
             ctas_extracted = COALESCE(EXCLUDED.ctas_extracted, website_pages.ctas_extracted),
+            last_modified_date = COALESCE(EXCLUDED.last_modified_date, website_pages.last_modified_date),
+            sitemap_priority = COALESCE(EXCLUDED.sitemap_priority, website_pages.sitemap_priority),
+            sitemap_changefreq = COALESCE(EXCLUDED.sitemap_changefreq, website_pages.sitemap_changefreq),
             scraped_at = EXCLUDED.scraped_at
         `;
 
@@ -592,11 +601,11 @@ Provide analysis in JSON format:
           'blog_post',
           // Use detailed post data if available, otherwise discovered post data
           detailedPost?.title || post.title,
-          detailedPost?.content?.slice(0, 10000) || post.content || '',
+          detailedPost?.content || post.content || '',
           detailedPost?.metaDescription || post.metaDescription || '',
-          // Handle different date formats
+          // Handle different date formats for published_date
           (() => {
-            const dateValue = detailedPost?.publishDate || post.publishedDate || post.lastModified;
+            const dateValue = detailedPost?.publishDate || post.publishedDate;
             if (!dateValue) return null;
             try {
               return new Date(dateValue);
@@ -615,10 +624,22 @@ Provide analysis in JSON format:
           Math.round((post.priority || 0.5) * 3) || 2, // discovery_priority: Convert 0.0-1.0 to 1-3 scale (1=high, 2=medium, 3=low)
           post.confidence || 0.8, // discovery_confidence
           detailedPost?.wordCount || post.wordCount || null, // word_count
-          // New enhanced fields
+          // Enhanced data fields (from detailed scraping)
           detailedPost?.visualDesign ? JSON.stringify(detailedPost.visualDesign) : null, // visual_design
           detailedPost?.visualDesign?.contentStructure ? JSON.stringify(detailedPost.visualDesign.contentStructure) : null, // content_structure
           detailedPost?.ctas ? JSON.stringify(detailedPost.ctas) : null, // ctas_extracted
+          // Sitemap metadata fields (preserve all sitemap data)
+          (() => {
+            const lastModValue = post.lastModified;
+            if (!lastModValue) return null;
+            try {
+              return new Date(lastModValue);
+            } catch (e) {
+              return null;
+            }
+          })(), // last_modified_date
+          post.priority || null, // sitemap_priority (preserve original 0.0-1.0 value)
+          post.changeFreq || null, // sitemap_changefreq
         ];
         
         await db.query(insertQuery, values);
