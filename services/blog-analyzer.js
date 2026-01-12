@@ -33,8 +33,8 @@ class BlogAnalyzerService {
         blogDiscovery.blogPosts.slice(0, 5).map(post => post.url)
       );
 
-      // Step 3: Extract CTAs from main pages
-      const ctaAnalysis = await this.analyzeCTAs(organizationId, websiteUrl);
+      // Step 3: Extract CTAs from main pages AND blog posts
+      const ctaAnalysis = await this.analyzeCTAs(organizationId, websiteUrl, detailedPosts);
 
       // Step 4: Analyze internal linking patterns
       const linkingAnalysis = await this.analyzeInternalLinking(organizationId, websiteUrl);
@@ -70,9 +70,9 @@ class BlogAnalyzerService {
   }
 
   /**
-   * Analyze CTAs across the website
+   * Analyze CTAs across the website including blog posts
    */
-  async analyzeCTAs(organizationId, websiteUrl) {
+  async analyzeCTAs(organizationId, websiteUrl, blogPosts = []) {
     try {
       console.log('🎯 Analyzing CTAs and conversion elements...');
 
@@ -91,15 +91,16 @@ class BlogAnalyzerService {
       const allCTAs = [];
       const pageAnalysis = [];
 
+      // Analyze static pages
       for (const pageUrl of pagesToAnalyze) {
         try {
           const ctas = await webscraper.extractCTAs(pageUrl);
           if (ctas.length > 0) {
-            allCTAs.push(...ctas);
+            allCTAs.push(...ctas.map(cta => ({ ...cta, page_url: pageUrl })));
             pageAnalysis.push({
               url: pageUrl,
               ctaCount: ctas.length,
-              ctas: ctas
+              ctas: ctas.map(cta => ({ ...cta, page_url: pageUrl }))
             });
           }
         } catch (error) {
@@ -107,11 +108,36 @@ class BlogAnalyzerService {
         }
       }
 
+      // Extract CTAs from blog posts (already collected during scraping)
+      console.log('🎯 Processing CTAs from blog posts...');
+      let blogCtaCount = 0;
+      
+      for (const post of blogPosts) {
+        if (post.ctas && post.ctas.length > 0) {
+          console.log(`📝 Found ${post.ctas.length} CTAs in blog post: ${post.title}`);
+          allCTAs.push(...post.ctas);
+          
+          pageAnalysis.push({
+            url: post.url,
+            title: post.title,
+            ctaCount: post.ctas.length,
+            ctas: post.ctas,
+            pageType: 'blog_post'
+          });
+          
+          blogCtaCount += post.ctas.length;
+        }
+      }
+
+      console.log(`🎯 Total CTAs found: ${allCTAs.length} (${blogCtaCount} from blog posts, ${allCTAs.length - blogCtaCount} from static pages)`);
+
       // Analyze CTA patterns with AI
       const ctaStrategy = await this.analyzeCtaPatterns(allCTAs);
 
       return {
         totalCTAs: allCTAs.length,
+        blogCTAs: blogCtaCount,
+        staticPageCTAs: allCTAs.length - blogCtaCount,
         pagesAnalyzed: pageAnalysis.length,
         ctasByPage: pageAnalysis,
         strategy: ctaStrategy,
@@ -121,6 +147,8 @@ class BlogAnalyzerService {
       console.error('CTA analysis error:', error);
       return {
         totalCTAs: 0,
+        blogCTAs: 0,
+        staticPageCTAs: 0,
         pagesAnalyzed: 0,
         ctasByPage: [],
         strategy: {},
@@ -535,8 +563,8 @@ Provide analysis in JSON format:
             published_date, author, internal_links, external_links, 
             page_classification, discovered_from, featured_image_url, 
             excerpt, discovery_priority, discovery_confidence, 
-            word_count, scraped_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+            word_count, visual_design, content_structure, ctas_extracted, scraped_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW())
           ON CONFLICT (organization_id, url) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, website_pages.title),
             content = COALESCE(EXCLUDED.content, website_pages.content),
@@ -552,6 +580,9 @@ Provide analysis in JSON format:
             discovery_priority = COALESCE(EXCLUDED.discovery_priority, website_pages.discovery_priority),
             discovery_confidence = COALESCE(EXCLUDED.discovery_confidence, website_pages.discovery_confidence),
             word_count = COALESCE(EXCLUDED.word_count, website_pages.word_count),
+            visual_design = COALESCE(EXCLUDED.visual_design, website_pages.visual_design),
+            content_structure = COALESCE(EXCLUDED.content_structure, website_pages.content_structure),
+            ctas_extracted = COALESCE(EXCLUDED.ctas_extracted, website_pages.ctas_extracted),
             scraped_at = EXCLUDED.scraped_at
         `;
 
@@ -584,6 +615,10 @@ Provide analysis in JSON format:
           Math.round((post.priority || 0.5) * 3) || 2, // discovery_priority: Convert 0.0-1.0 to 1-3 scale (1=high, 2=medium, 3=low)
           post.confidence || 0.8, // discovery_confidence
           detailedPost?.wordCount || post.wordCount || null, // word_count
+          // New enhanced fields
+          detailedPost?.visualDesign ? JSON.stringify(detailedPost.visualDesign) : null, // visual_design
+          detailedPost?.visualDesign?.contentStructure ? JSON.stringify(detailedPost.visualDesign.contentStructure) : null, // content_structure
+          detailedPost?.ctas ? JSON.stringify(detailedPost.ctas) : null, // ctas_extracted
         ];
         
         await db.query(insertQuery, values);
@@ -591,6 +626,57 @@ Provide analysis in JSON format:
       }
 
       console.log(`✅ Stored ${storedCount} blog posts in database (${analysisData.detailedPosts.length} with full content, ${allDiscoveredPosts.length - analysisData.detailedPosts.length} with metadata only)`);
+
+      // Store CTAs from analysis
+      let ctaStoredCount = 0;
+      if (analysisData.ctaAnalysis && analysisData.ctaAnalysis.ctasByPage) {
+        console.log('🎯 Storing CTA analysis data...');
+        
+        for (const pageAnalysis of analysisData.ctaAnalysis.ctasByPage) {
+          for (const cta of pageAnalysis.ctas) {
+            try {
+              await db.query(`
+                INSERT INTO cta_analysis (
+                  organization_id, page_url, cta_text, cta_type, placement,
+                  href, context, class_name, tag_name, conversion_potential,
+                  visibility_score, page_type, analysis_source, scraped_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+                ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
+                  cta_type = EXCLUDED.cta_type,
+                  href = EXCLUDED.href,
+                  context = EXCLUDED.context,
+                  class_name = EXCLUDED.class_name,
+                  tag_name = EXCLUDED.tag_name,
+                  conversion_potential = EXCLUDED.conversion_potential,
+                  visibility_score = EXCLUDED.visibility_score,
+                  page_type = EXCLUDED.page_type,
+                  analysis_source = EXCLUDED.analysis_source,
+                  scraped_at = EXCLUDED.scraped_at
+              `, [
+                organizationId,
+                cta.page_url || pageAnalysis.url,
+                cta.text || 'Unknown CTA',
+                cta.type || 'unknown',
+                cta.placement || 'unknown',
+                cta.href || '',
+                cta.context || '',
+                cta.className || '',
+                cta.tagName || '',
+                cta.conversion_potential || 70,
+                cta.visibility_score || 70,
+                pageAnalysis.pageType || (pageAnalysis.url?.includes('/blog/') ? 'blog_post' : 'static_page'),
+                'blog_scraping'
+              ]);
+              
+              ctaStoredCount++;
+            } catch (ctaError) {
+              console.warn(`Failed to store CTA: ${ctaError.message}`);
+            }
+          }
+        }
+      }
+
+      console.log(`✅ Stored ${ctaStoredCount} CTAs in database`);
     } catch (error) {
       console.error('Failed to store analysis results:', error.message);
       console.error('Error details:', error);

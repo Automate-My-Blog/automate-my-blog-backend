@@ -918,18 +918,7 @@ export class WebScraperService {
       await new Promise(resolve => setTimeout(resolve, 1500));
 
       const postData = await page.evaluate(() => {
-        // Remove unwanted elements
-        const elementsToRemove = [
-          'script', 'style', 'nav', 'header', 'footer', 
-          '.cookie-banner', '.popup', '.modal', '.advertisement',
-          '.social-share', '.comments', '.sidebar'
-        ];
-        
-        elementsToRemove.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => el.remove());
-        });
-
-        // Extract post metadata
+        // Extract post metadata first (before removing elements for CTA analysis)
         const title = document.querySelector('h1')?.textContent?.trim() || 
                      document.title || '';
 
@@ -1003,9 +992,194 @@ export class WebScraperService {
         const internalLinks = links.filter(l => l.isInternal);
         const externalLinks = links.filter(l => !l.isInternal);
 
+        // Extract CTAs from the blog post (before removing elements)
+        const ctaElements = [];
+        
+        // Enhanced CTA selectors for blog posts
+        const ctaSelectors = [
+          { selector: 'button, .btn, .button', type: 'button' },
+          { selector: 'a[href*="contact"]', type: 'contact_link' },
+          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+          { selector: 'a[href*="demo"]', type: 'demo_link' },
+          { selector: 'a[href*="trial"]', type: 'trial_link' },
+          { selector: 'a[href*="product"], a[href*="shop"], a[href*="buy"]', type: 'product_link' },
+          { selector: 'a[href*="download"]', type: 'download_link' },
+          { selector: '.share-buttons a, .social-share a', type: 'social_share' },
+          { selector: 'form', type: 'form' },
+          { selector: 'input[type="email"]', type: 'email_capture' },
+          { selector: '[class*="cta"], [id*="cta"]', type: 'cta_element' },
+          { selector: 'a[href*="blog"]:not([href*="' + window.location.pathname + '"])', type: 'blog_navigation' }
+        ];
+
+        for (const { selector, type } of ctaSelectors) {
+          const elements = document.querySelectorAll(selector);
+          
+          elements.forEach((el, index) => {
+            if (index >= 8) return; // Limit per type for blog posts
+            
+            const text = el.textContent?.trim() || el.placeholder || el.value || '';
+            const href = el.href || el.action || '';
+            
+            if (!text && !href) return;
+            
+            // Skip if CTA text is too generic or too long
+            if (!text || text.length < 2 || text.length > 100) return;
+            
+            // Determine placement
+            let placement = 'unknown';
+            if (el.closest('header, .header')) placement = 'header';
+            else if (el.closest('footer, .footer')) placement = 'footer';
+            else if (el.closest('nav, .nav')) placement = 'navigation';
+            else if (el.closest('aside, .sidebar')) placement = 'sidebar';
+            else if (el.closest('article, .post-content, .entry-content')) placement = 'article_content';
+            else placement = 'main_content';
+
+            // Get surrounding context for analysis
+            const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
+            
+            ctaElements.push({
+              type,
+              text: text.slice(0, 100),
+              href: href.slice(0, 200),
+              placement,
+              context,
+              className: el.className || '',
+              tagName: el.tagName.toLowerCase(),
+              page_url: window.location.href
+            });
+          });
+        }
+
+        // Extract visual design information before removing elements
+        const visualDesign = (() => {
+          const design = {
+            colors: {
+              primary: [],
+              background: [],
+              text: [],
+              accent: []
+            },
+            typography: {
+              fonts: [],
+              headingSizes: [],
+              bodySize: null,
+              lineHeight: null
+            },
+            layout: {
+              maxWidth: null,
+              spacing: [],
+              borderRadius: []
+            },
+            contentStructure: {
+              paragraphCount: 0,
+              listCount: 0,
+              blockquoteCount: 0,
+              codeBlockCount: 0,
+              imageCount: 0
+            }
+          };
+
+          try {
+            // Extract colors from computed styles
+            const elementsToAnalyze = [
+              ...document.querySelectorAll('article, .post-content, .entry-content, main'),
+              ...document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
+              ...document.querySelectorAll('p'),
+              ...document.querySelectorAll('a'),
+              ...document.querySelectorAll('button, .btn')
+            ];
+
+            const colorSet = new Set();
+            const fontSet = new Set();
+
+            elementsToAnalyze.slice(0, 20).forEach(el => {
+              const styles = window.getComputedStyle(el);
+              
+              // Extract colors
+              const bgColor = styles.backgroundColor;
+              const textColor = styles.color;
+              const borderColor = styles.borderColor;
+              
+              if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+                colorSet.add(bgColor);
+              }
+              if (textColor && textColor !== 'rgba(0, 0, 0, 0)') {
+                colorSet.add(textColor);
+              }
+              if (borderColor && borderColor !== 'rgba(0, 0, 0, 0)') {
+                colorSet.add(borderColor);
+              }
+
+              // Extract fonts
+              const fontFamily = styles.fontFamily;
+              if (fontFamily) {
+                fontSet.add(fontFamily.split(',')[0].replace(/['"]/g, '').trim());
+              }
+            });
+
+            // Convert colors to arrays
+            design.colors.primary = Array.from(colorSet).slice(0, 8);
+            design.typography.fonts = Array.from(fontSet).slice(0, 5);
+
+            // Extract typography sizes
+            document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
+              const styles = window.getComputedStyle(heading);
+              const fontSize = styles.fontSize;
+              if (fontSize) {
+                design.typography.headingSizes.push({
+                  level: heading.tagName.toLowerCase(),
+                  size: fontSize,
+                  weight: styles.fontWeight
+                });
+              }
+            });
+
+            // Extract body text typography
+            const bodyEl = document.querySelector('article p, .post-content p, .entry-content p, main p');
+            if (bodyEl) {
+              const styles = window.getComputedStyle(bodyEl);
+              design.typography.bodySize = styles.fontSize;
+              design.typography.lineHeight = styles.lineHeight;
+            }
+
+            // Extract layout information
+            const mainContent = document.querySelector('article, .post-content, .entry-content, main');
+            if (mainContent) {
+              const styles = window.getComputedStyle(mainContent);
+              design.layout.maxWidth = styles.maxWidth;
+              design.layout.spacing.push(styles.padding, styles.margin);
+              design.layout.borderRadius.push(styles.borderRadius);
+            }
+
+            // Analyze content structure
+            design.contentStructure.paragraphCount = document.querySelectorAll('article p, .post-content p, .entry-content p').length;
+            design.contentStructure.listCount = document.querySelectorAll('article ul, article ol, .post-content ul, .post-content ol').length;
+            design.contentStructure.blockquoteCount = document.querySelectorAll('article blockquote, .post-content blockquote').length;
+            design.contentStructure.codeBlockCount = document.querySelectorAll('article pre, article code, .post-content pre, .post-content code').length;
+            design.contentStructure.imageCount = document.querySelectorAll('article img, .post-content img').length;
+
+          } catch (error) {
+            console.warn('Failed to extract visual design:', error);
+          }
+
+          return design;
+        })();
+
+        // Now remove unwanted elements for clean content extraction
+        const elementsToRemove = [
+          'script', 'style', 'nav', 'header', 'footer', 
+          '.cookie-banner', '.popup', '.modal', '.advertisement',
+          '.social-share', '.comments', '.sidebar'
+        ];
+        
+        elementsToRemove.forEach(selector => {
+          document.querySelectorAll(selector).forEach(el => el.remove());
+        });
+
         return {
           title,
-          content: content.slice(0, 8000), // Limit content size
+          content: content.length > 50000 ? content.slice(0, 50000) + '...' : content, // Intelligent content limit for very large posts
           metaDescription,
           publishDate,
           author,
@@ -1013,7 +1187,9 @@ export class WebScraperService {
           internalLinks,
           externalLinks,
           wordCount: content.split(/\s+/).length,
-          url: window.location.href
+          url: window.location.href,
+          ctas: ctaElements, // Include extracted CTAs
+          visualDesign: visualDesign // Include visual design data
         };
       });
 

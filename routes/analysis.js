@@ -634,7 +634,10 @@ router.get('/blog-content/:orgId', async (req, res) => {
         -- Enhanced fields
         COALESCE(page_classification, 'unknown') as page_classification,
         COALESCE(discovered_from, 'unknown') as discovered_from,
-        featured_image_url, excerpt, discovery_priority, discovery_confidence
+        featured_image_url, excerpt, discovery_priority, discovery_confidence,
+        -- Visual design and structure data
+        visual_design, content_structure, 
+        jsonb_array_length(COALESCE(ctas_extracted, '[]'::jsonb)) as ctas_count
       FROM website_pages 
       ${whereClause}
       ORDER BY 
@@ -1012,6 +1015,116 @@ router.get('/comprehensive-summary/:orgId', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve comprehensive summary',
+      message: error.message
+    });
+  }
+});
+
+// Visual Design Analysis endpoint
+router.get('/visual-design/:orgId', async (req, res) => {
+  const { orgId } = req.params;
+  
+  if (!orgId) {
+    return res.status(400).json({
+      success: false,
+      error: 'Organization ID is required'
+    });
+  }
+
+  try {
+    // Get visual design data from blog posts
+    const designQuery = `
+      SELECT 
+        url, title, visual_design, content_structure,
+        COALESCE(page_classification, 'unknown') as page_type,
+        scraped_at
+      FROM website_pages 
+      WHERE organization_id = $1 
+        AND visual_design IS NOT NULL
+      ORDER BY scraped_at DESC
+      LIMIT 20
+    `;
+    
+    const designResult = await db.query(designQuery, [orgId]);
+    
+    // Aggregate design patterns
+    const aggregatedDesign = {
+      colorPalettes: [],
+      typography: [],
+      layoutPatterns: [],
+      contentStructurePatterns: {},
+      commonElements: {}
+    };
+    
+    designResult.rows.forEach(row => {
+      const design = row.visual_design;
+      const structure = row.content_structure;
+      
+      if (design) {
+        // Collect colors
+        if (design.colors && design.colors.primary) {
+          aggregatedDesign.colorPalettes.push(...design.colors.primary);
+        }
+        
+        // Collect fonts
+        if (design.typography && design.typography.fonts) {
+          aggregatedDesign.typography.push(...design.typography.fonts);
+        }
+        
+        // Collect layout info
+        if (design.layout) {
+          aggregatedDesign.layoutPatterns.push(design.layout);
+        }
+      }
+      
+      if (structure) {
+        // Aggregate content structure patterns
+        Object.keys(structure).forEach(key => {
+          if (!aggregatedDesign.contentStructurePatterns[key]) {
+            aggregatedDesign.contentStructurePatterns[key] = [];
+          }
+          aggregatedDesign.contentStructurePatterns[key].push(structure[key]);
+        });
+      }
+    });
+    
+    // Deduplicate and analyze patterns
+    aggregatedDesign.colorPalettes = [...new Set(aggregatedDesign.colorPalettes)].slice(0, 10);
+    aggregatedDesign.typography = [...new Set(aggregatedDesign.typography)].slice(0, 8);
+    
+    // Calculate averages for content structure
+    Object.keys(aggregatedDesign.contentStructurePatterns).forEach(key => {
+      const values = aggregatedDesign.contentStructurePatterns[key];
+      const numericValues = values.filter(v => typeof v === 'number');
+      if (numericValues.length > 0) {
+        aggregatedDesign.contentStructurePatterns[key] = {
+          average: numericValues.reduce((a, b) => a + b, 0) / numericValues.length,
+          min: Math.min(...numericValues),
+          max: Math.max(...numericValues),
+          count: numericValues.length
+        };
+      }
+    });
+
+    res.json({
+      success: true,
+      totalPages: designResult.rows.length,
+      designPatterns: aggregatedDesign,
+      recentAnalysis: designResult.rows.slice(0, 5).map(row => ({
+        url: row.url,
+        title: row.title,
+        pageType: row.page_type,
+        analyzedAt: row.scraped_at,
+        hasDesignData: !!row.visual_design,
+        hasStructureData: !!row.content_structure
+      }))
+    });
+
+  } catch (error) {
+    console.error('Visual design analysis error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve visual design analysis',
       message: error.message
     });
   }
