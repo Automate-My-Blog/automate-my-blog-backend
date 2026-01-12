@@ -29,9 +29,21 @@ class BlogAnalyzerService {
       }
 
       // Step 2: Scrape detailed content from discovered posts
+      console.log('🔍 About to scrape detailed content for posts:', blogDiscovery.blogPosts.slice(0, 5).map(post => post.url));
       const detailedPosts = await webscraper.scrapeBlogPosts(
         blogDiscovery.blogPosts.slice(0, 5).map(post => post.url)
       );
+      
+      console.log('📊 Detailed posts scraping results:');
+      detailedPosts.forEach((post, index) => {
+        console.log(`📄 Post ${index + 1}: ${post?.url}`);
+        console.log(`  - Title: ${post?.title?.substring(0, 50)}...`);
+        console.log(`  - Content length: ${post?.content?.length || 0}`);
+        console.log(`  - Word count: ${post?.wordCount || 0}`);
+        console.log(`  - Internal links: ${post?.internalLinks?.length || 0}`);
+        console.log(`  - External links: ${post?.externalLinks?.length || 0}`);
+        console.log(`  - CTAs: ${post?.ctas?.length || 0}`);
+      });
 
       // Step 3: Extract CTAs from main pages AND blog posts
       const ctaAnalysis = await this.analyzeCTAs(organizationId, websiteUrl, detailedPosts);
@@ -558,6 +570,14 @@ Provide analysis in JSON format:
         const detailedPost = analysisData.detailedPosts.find(dp => 
           webscraper.urlsMatch(dp.url, post.url)
         );
+        
+        console.log(`🔗 URL matching for: ${post.url}`);
+        console.log(`  - Found detailed post: ${!!detailedPost}`);
+        if (detailedPost) {
+          console.log(`  - Detailed URL: ${detailedPost.url}`);
+          console.log(`  - Word count: ${detailedPost.wordCount}`);
+          console.log(`  - Content length: ${detailedPost.content?.length}`);
+        }
         
         // Enhanced data is successfully mapped and will be stored for matched posts
         
