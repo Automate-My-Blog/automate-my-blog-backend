@@ -39,24 +39,11 @@ export class WebScraperService {
         console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
         const chromium = await import('@sparticuz/chromium');
         
-        // @sparticuz/chromium provides executablePath as a function
-        // Handle both ES module import patterns
-        let chromiumModule = chromium.default || chromium;
+        // Use the documented 2024 pattern for @sparticuz/chromium
+        config.executablePath = await chromium.executablePath();
+        config.args = [...config.args, ...chromium.args];
         
-        if (typeof chromiumModule.executablePath !== 'function') {
-          throw new Error('executablePath is not a function in @sparticuz/chromium. Check module structure.');
-        }
-        
-        const executablePath = await chromiumModule.executablePath();
-        
-        console.log('✅ Chromium executable path obtained:', executablePath);
-        
-        config.executablePath = executablePath;
-        
-        // Add chromium args if available
-        if (chromiumModule.args && Array.isArray(chromiumModule.args)) {
-          config.args = [...config.args, ...chromiumModule.args];
-        }
+        console.log('✅ Using @sparticuz/chromium with executablePath:', config.executablePath);
         
         console.log('🔧 Using @sparticuz/chromium for serverless environment');
         
