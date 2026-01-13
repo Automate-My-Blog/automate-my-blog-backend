@@ -343,6 +343,9 @@ CRITICAL REQUIREMENTS:
     try {
       console.log(`🎯 Starting complete enhanced blog generation for: ${topic.title}`);
 
+      // Load organization context for quality recommendations
+      const organizationContext = await this.getOrganizationContext(organizationId);
+
       // Generate the blog post content
       const blogData = await this.generateEnhancedBlogPost(
         topic, 
