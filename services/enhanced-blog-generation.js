@@ -36,7 +36,12 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         throw new Error('Organization not found');
       }
 
-      const availability = availabilityResult.rows[0].data_availability || {};
+      const availability = availabilityResult.rows[0].data_availability || {
+        has_blog_content: false,
+        has_cta_data: false,
+        has_internal_links: false,
+        completeness_score: 0
+      };
       const settings = availabilityResult.rows[0].blog_generation_settings || {};
 
       // Get manual inputs
