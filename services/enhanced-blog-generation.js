@@ -366,7 +366,7 @@ CRITICAL REQUIREMENTS:
           expectedSEOScore: blogData.seoOptimizationScore || 85,
           enhancementLevel: blogData.organizationContext.enhancementLevel,
           dataCompleteness: blogData.organizationContext.dataCompleteness,
-          recommendations: this.generateQualityRecommendations(blogData.organizationContext)
+          recommendations: this.generateQualityRecommendations(organizationContext)
         }
       };
 
@@ -386,7 +386,7 @@ CRITICAL REQUIREMENTS:
    */
   generateQualityRecommendations(organizationContext) {
     const recommendations = [];
-    const { availability, completenessScore } = organizationContext;
+    const { availability = {}, completenessScore = 0 } = organizationContext || {};
 
     if (!availability.has_blog_content) {
       recommendations.push({
