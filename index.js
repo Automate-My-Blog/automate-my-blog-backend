@@ -824,6 +824,14 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
     
     if (useEnhancedGeneration && organizationId) {
       console.log(`🚀 Using enhanced blog generation for organization: ${organizationId}`);
+      console.log(`📊 Enhanced generation parameters:`, {
+        organizationId,
+        targetSEOScore,
+        includeVisuals,
+        iterativeOptimization,
+        hasBusinessInfo: !!businessInfo,
+        hasTopic: !!topic
+      });
       
       if (iterativeOptimization) {
         // Use iterative optimization to reach target score
@@ -838,18 +846,30 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
         qualityPrediction = optimizationResult.finalScore;
       } else {
         // Use enhanced generation
-        const enhancedResult = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
-          topic,
-          businessInfo,
-          organizationId,
-          { 
-            additionalInstructions: additionalInstructions || '', 
-            includeVisuals 
-          }
-        );
-        blogPost = enhancedResult;
-        visualSuggestions = enhancedResult.visualContentSuggestions || [];
-        qualityPrediction = enhancedResult.qualityPrediction;
+        try {
+          console.log(`📝 Starting enhanced blog generation...`);
+          const enhancedResult = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
+            topic,
+            businessInfo,
+            organizationId,
+            { 
+              additionalInstructions: additionalInstructions || '', 
+              includeVisuals 
+            }
+          );
+          console.log(`✅ Enhanced generation completed successfully`);
+          blogPost = enhancedResult;
+          visualSuggestions = enhancedResult.visualContentSuggestions || [];
+          qualityPrediction = enhancedResult.qualityPrediction;
+        } catch (enhancedError) {
+          console.error(`❌ Enhanced generation failed:`, enhancedError.message);
+          console.error(`📊 Error details:`, {
+            name: enhancedError.name,
+            stack: enhancedError.stack?.split('\n')[0],
+            organizationId
+          });
+          throw enhancedError;
+        }
       }
     } else {
       console.log('📝 Using basic blog generation');
