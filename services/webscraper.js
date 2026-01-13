@@ -119,9 +119,22 @@ export class WebScraperService {
             url: url
           });
           
-          // Final fallback to enhanced Cheerio extraction
-          console.log('🔄 Falling back to enhanced Cheerio extraction...');
-          return await this.scrapeWithCheerio(url);
+          // Try Browserless.io as second fallback
+          try {
+            console.log('🔄 Falling back to Browserless.io service...');
+            return await this.scrapeWithBrowserService(url);
+          } catch (browserServiceError) {
+            console.error('❌ Browserless service also failed for', url);
+            console.error('❌ Browserless error details:', {
+              message: browserServiceError.message,
+              stack: browserServiceError.stack?.split('\n').slice(0, 3).join('\n'),
+              url: url
+            });
+            
+            // Final fallback to enhanced Cheerio extraction
+            console.log('🔄 Falling back to enhanced Cheerio extraction...');
+            return await this.scrapeWithCheerio(url);
+          }
         }
       }
     } catch (error) {
@@ -553,6 +566,128 @@ export class WebScraperService {
       if (browser) {
         await browser.close();
       }
+    }
+  }
+
+  /**
+   * Scrape with Browserless.io cloud service (serverless browser automation)
+   */
+  async scrapeWithBrowserService(url) {
+    try {
+      console.log('🚀 Starting Browserless.io scraping for:', url);
+      
+      // Check if we have a Browserless API token
+      const browserlessToken = process.env.BROWSERLESS_TOKEN;
+      if (!browserlessToken) {
+        console.warn('⚠️ BROWSERLESS_TOKEN not found, skipping Browserless.io...');
+        throw new Error('Browserless API token not configured');
+      }
+      
+      const browserlessEndpoint = `https://production-sfo.browserless.io/scrape?token=${browserlessToken}`;
+      
+      // Configure the scraping request
+      const scrapeRequest = {
+        url: url,
+        // Extract comprehensive content similar to our other methods
+        elements: [
+          { selector: 'title', name: 'title' },
+          { selector: 'meta[name="description"]', attribute: 'content', name: 'metaDescription' },
+          { selector: 'main', name: 'mainContent' },
+          { selector: 'article', name: 'articleContent' },
+          { selector: '.content', name: 'contentDiv' },
+          { selector: '.post-content', name: 'postContent' },
+          { selector: '.entry-content', name: 'entryContent' },
+          { selector: 'h1, h2, h3, h4, h5, h6', name: 'headings' },
+          { selector: 'p', name: 'paragraphs' }
+        ],
+        options: {
+          waitFor: 5000, // Wait 5 seconds for dynamic content
+          timeout: this.timeout
+        }
+      };
+      
+      console.log('🌐 Making request to Browserless.io...');
+      const response = await axios.post(browserlessEndpoint, scrapeRequest, {
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': this.userAgent
+        },
+        timeout: this.timeout + 5000 // Add buffer for API response
+      });
+      
+      if (!response.data) {
+        throw new Error('No data returned from Browserless.io');
+      }
+      
+      console.log('✅ Browserless.io response received');
+      
+      // Process the extracted content
+      const extractedData = response.data;
+      
+      // Get title
+      const title = extractedData.title || '';
+      
+      // Get meta description
+      const metaDescription = extractedData.metaDescription || '';
+      
+      // Combine content from multiple selectors, prioritizing main content areas
+      let mainContent = '';
+      const contentSources = [
+        extractedData.mainContent,
+        extractedData.articleContent,
+        extractedData.contentDiv,
+        extractedData.postContent,
+        extractedData.entryContent
+      ];
+      
+      // Use the first substantial content found
+      for (const content of contentSources) {
+        if (content && content.trim().length > 100) {
+          mainContent = content.trim();
+          console.log(`Browserless found content using prioritized selector, length: ${content.length}`);
+          break;
+        }
+      }
+      
+      // If no main content found, combine paragraphs
+      if (!mainContent || mainContent.trim().length < 100) {
+        if (extractedData.paragraphs && Array.isArray(extractedData.paragraphs)) {
+          const combinedParagraphs = extractedData.paragraphs
+            .filter(p => p && p.trim().length > 20)
+            .join(' ');
+          
+          if (combinedParagraphs.length > 100) {
+            mainContent = combinedParagraphs;
+            console.log(`Browserless found content from paragraphs, length: ${combinedParagraphs.length}`);
+          }
+        }
+      }
+      
+      // Get headings
+      const headings = Array.isArray(extractedData.headings) 
+        ? extractedData.headings
+            .filter(h => h && h.trim().length > 0)
+            .slice(0, 10)
+        : [];
+      
+      console.log('Browserless final extraction results:');
+      console.log('- Title:', title);
+      console.log('- Content length:', mainContent.length);
+      console.log('- Headings found:', headings.length);
+      
+      const content = {
+        title: title.trim(),
+        metaDescription: metaDescription.trim(),
+        content: mainContent.trim(),
+        headings,
+        url
+      };
+      
+      return this.cleanContent(content);
+      
+    } catch (error) {
+      console.error('❌ Browserless.io scraping failed:', error.message);
+      throw error;
     }
   }
 
