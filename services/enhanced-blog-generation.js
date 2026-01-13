@@ -3,11 +3,6 @@ import db from './database.js';
 import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 /**
  * Enhanced Blog Generation Service
  * Integrates website analysis data, manual inputs, and visual content generation
@@ -17,6 +12,11 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   constructor() {
     super();
     this.visualContentService = visualContentService;
+    
+    // Initialize OpenAI client with proper API key
+    this.openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+    });
   }
 
   /**
@@ -235,7 +235,7 @@ Return JSON format:
       const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
-      const completion = await openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: model,
         messages: [
           {
