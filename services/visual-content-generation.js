@@ -55,17 +55,17 @@ export class VisualContentGenerationService {
    */
   selectService(contentType, budget = 'standard', requirements = {}) {
     const servicePreferences = {
-      hero_image: ['stable_diffusion', 'dalle'],
+      hero_image: ['quickchart', 'stable_diffusion', 'dalle'], // Start with free option
       infographic: ['quickchart', 'stable_diffusion'],
       chart: ['quickchart'],
       graph: ['quickchart'],
       data_visualization: ['quickchart'],
       diagram: ['quickchart', 'stable_diffusion'],
-      illustration: ['stable_diffusion', 'dalle'],
-      social_media: ['stable_diffusion'],
-      thumbnail: ['stable_diffusion'],
-      banner: ['stable_diffusion'],
-      icon: ['stable_diffusion']
+      illustration: ['quickchart', 'stable_diffusion', 'dalle'], // Start with free option
+      social_media: ['quickchart', 'stable_diffusion'], // Start with free option
+      thumbnail: ['quickchart', 'stable_diffusion'], // Start with free option
+      banner: ['quickchart', 'stable_diffusion'], // Start with free option
+      icon: ['quickchart', 'stable_diffusion'] // Start with free option
     };
 
     const preferred = servicePreferences[contentType] || ['stable_diffusion', 'dalle'];
@@ -254,6 +254,130 @@ export class VisualContentGenerationService {
   }
 
   /**
+   * Generate a placeholder graphic using QuickChart for non-chart content
+   */
+  async generatePlaceholderWithQuickChart(prompt, contentType, options = {}) {
+    const startTime = Date.now();
+
+    try {
+      console.log(`🎨 Creating placeholder ${contentType} with QuickChart:`, prompt);
+
+      // Create different placeholder designs based on content type
+      let chartConfig;
+      const title = prompt.substring(0, 50) + (prompt.length > 50 ? '...' : '');
+
+      switch (contentType) {
+        case 'hero_image':
+          chartConfig = {
+            type: 'radialGauge',
+            data: {
+              datasets: [{
+                data: [85],
+                backgroundColor: ['#1890ff', '#f0f0f0'],
+                borderWidth: 0
+              }]
+            },
+            options: {
+              title: {
+                display: true,
+                text: title,
+                fontSize: 24,
+                fontColor: '#333'
+              },
+              responsive: false,
+              animation: false
+            }
+          };
+          break;
+
+        case 'social_media':
+          chartConfig = {
+            type: 'doughnut',
+            data: {
+              labels: ['Engagement', 'Reach', 'Impact'],
+              datasets: [{
+                data: [40, 35, 25],
+                backgroundColor: ['#1890ff', '#52c41a', '#faad14'],
+                borderWidth: 2,
+                borderColor: '#fff'
+              }]
+            },
+            options: {
+              title: {
+                display: true,
+                text: title,
+                fontSize: 16,
+                fontColor: '#333'
+              },
+              legend: {
+                display: true,
+                position: 'bottom'
+              },
+              responsive: false,
+              animation: false
+            }
+          };
+          break;
+
+        default:
+          // Generic placeholder
+          chartConfig = {
+            type: 'bar',
+            data: {
+              labels: ['Content', 'Quality', 'Impact'],
+              datasets: [{
+                label: contentType.replace('_', ' ').toUpperCase(),
+                data: [8, 9, 7],
+                backgroundColor: '#1890ff',
+                borderColor: '#1890ff',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              title: {
+                display: true,
+                text: title,
+                fontSize: 18,
+                fontColor: '#333'
+              },
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  max: 10
+                }
+              },
+              responsive: false,
+              animation: false
+            }
+          };
+      }
+
+      const width = options.width || 800;
+      const height = options.height || 600;
+      
+      // Generate URL for QuickChart
+      const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&w=${width}&h=${height}&format=png`;
+
+      const generationTime = Date.now() - startTime;
+
+      return {
+        imageUrl: chartUrl,
+        thumbnailUrl: chartUrl,
+        altText: `Generated ${contentType.replace('_', ' ')} placeholder: ${prompt}`,
+        width,
+        height,
+        generationTime,
+        cost: this.services.quickchart.costPerImage,
+        serviceResponse: { config: chartConfig, type: 'placeholder' }
+      };
+
+    } catch (error) {
+      console.error('QuickChart placeholder generation error:', error);
+      throw new Error(`QuickChart placeholder generation failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate enhanced prompt for better image quality
    */
   enhancePrompt(basePrompt, contentType, brandGuidelines = {}) {
@@ -300,39 +424,67 @@ export class VisualContentGenerationService {
     contentType,
     prompt,
     brandGuidelines = {},
-    options = {}
+    options = {},
+    servicePreference = null
   }) {
     const startTime = Date.now();
 
     try {
       console.log(`🎨 Starting visual content generation for ${contentType}`);
 
-      // Select appropriate service
-      const service = this.selectService(contentType, options.budget, options.requirements);
-      console.log(`📡 Selected service: ${service}`);
+      // Select appropriate service (use preference if provided)
+      const service = servicePreference || this.selectService(contentType, options.budget, options.requirements);
+      console.log(`📡 Selected service: ${service}${servicePreference ? ' (preferred)' : ' (auto-selected)'}`);
 
       // Enhance prompt with style and brand guidelines
       const enhancedPrompt = this.enhancePrompt(prompt, contentType, brandGuidelines);
       console.log(`✨ Enhanced prompt: ${enhancedPrompt}`);
 
-      // Generate content based on selected service
+      // Generate content based on selected service with fallback logic
       let result;
-      switch (service) {
-        case 'stable_diffusion':
-          result = await this.generateWithStableDiffusion(enhancedPrompt, options);
-          break;
-        case 'dalle':
-          result = await this.generateWithDALLE(enhancedPrompt, options);
-          break;
-        case 'quickchart':
-          if (options.chartConfig) {
-            result = await this.generateWithQuickChart(options.chartConfig, options);
-          } else {
-            throw new Error('Chart configuration required for QuickChart');
+      let actualService = service;
+      
+      try {
+        switch (service) {
+          case 'stable_diffusion':
+            result = await this.generateWithStableDiffusion(enhancedPrompt, options);
+            break;
+          case 'dalle':
+            result = await this.generateWithDALLE(enhancedPrompt, options);
+            break;
+          case 'quickchart':
+            if (options.chartConfig) {
+              result = await this.generateWithQuickChart(options.chartConfig, options);
+            } else {
+              // For non-chart content, create a simple placeholder graphic
+              result = await this.generatePlaceholderWithQuickChart(enhancedPrompt, contentType, options);
+            }
+            break;
+          default:
+            throw new Error(`Unsupported service: ${service}`);
+        }
+      } catch (primaryError) {
+        console.warn(`⚠️ Primary service ${service} failed:`, primaryError.message);
+        
+        // Try fallback to free services if primary service fails with payment/quota issues
+        if (primaryError.message.includes('402') || primaryError.message.includes('quota') || 
+            primaryError.message.includes('payment') || primaryError.message.includes('credits')) {
+          
+          console.log('💡 Attempting fallback to free service...');
+          
+          // Always try QuickChart as fallback for any content type
+          try {
+            result = await this.generatePlaceholderWithQuickChart(enhancedPrompt, contentType, options);
+            actualService = 'quickchart';
+            console.log('✅ Fallback to QuickChart successful');
+          } catch (fallbackError) {
+            console.error('❌ Fallback service also failed:', fallbackError.message);
+            throw new Error(`Primary service failed (${primaryError.message}) and fallback failed (${fallbackError.message})`);
           }
-          break;
-        default:
-          throw new Error(`Unsupported service: ${service}`);
+        } else {
+          // Re-throw non-payment related errors
+          throw primaryError;
+        }
       }
 
       // Save to database
@@ -340,7 +492,7 @@ export class VisualContentGenerationService {
         organizationId,
         postId,
         contentType,
-        serviceUsed: service,
+        serviceUsed: actualService,
         generationPrompt: enhancedPrompt,
         ...result
       });
@@ -531,17 +683,22 @@ export class VisualContentGenerationService {
     });
 
     // Enrich suggestions with service selection and cost information
-    const enrichedSuggestions = suggestions.map(suggestion => {
+    const enrichedSuggestions = suggestions.map((suggestion, index) => {
       const selectedService = this.selectService(suggestion.contentType, 'standard');
       const service = this.services[selectedService];
       
       return {
         ...suggestion,
-        selectedService: selectedService,
+        id: `visual-${suggestion.contentType}-${index}`, // Add required ID
+        title: this.getContentTitle(suggestion.contentType), // Add required title
+        recommendedService: selectedService, // Match expected field name
+        selectedService: selectedService, // Keep for backward compatibility
         serviceName: service?.name || 'Unknown',
         estimatedCost: service?.costPerImage || 0,
-        generationTime: suggestion.contentType === 'chart' ? '5-10 seconds' : '30-60 seconds',
+        estimatedTime: selectedService === 'quickchart' ? '5-10s' : '30-60s', // Match expected format based on service
+        generationTime: selectedService === 'quickchart' ? '5-10 seconds' : '30-60 seconds', // Keep for backward compatibility
         placement: this.suggestPlacement(suggestion.contentType),
+        altText: `${this.getContentTitle(suggestion.contentType)} for blog post`, // Add alt text
         description: this.getContentDescription(suggestion.contentType)
       };
     });
@@ -564,6 +721,22 @@ export class VisualContentGenerationService {
       social_media: 'End of post for sharing'
     };
     return placements[contentType] || 'Where contextually relevant';
+  }
+
+  /**
+   * Get title for different content types
+   */
+  getContentTitle(contentType) {
+    const titles = {
+      hero_image: 'Hero Image',
+      infographic: 'Process Infographic',
+      chart: 'Data Chart',
+      graph: 'Statistical Graph',
+      data_visualization: 'Data Visualization',
+      illustration: 'Custom Illustration',
+      social_media: 'Social Media Card'
+    };
+    return titles[contentType] || 'Visual Content';
   }
 
   /**

@@ -20,7 +20,8 @@ router.post('/generate', async (req, res) => {
       contentType,
       prompt,
       brandGuidelines = {},
-      options = {}
+      options = {},
+      servicePreference = null
     } = req.body;
 
     // Validate required fields
@@ -47,6 +48,9 @@ router.post('/generate', async (req, res) => {
     }
 
     console.log(`🎨 Generating ${contentType} for organization: ${organizationId}`);
+    if (servicePreference) {
+      console.log(`🎯 Service preference specified: ${servicePreference}`);
+    }
 
     const result = await visualContentService.generateVisualContent({
       organizationId,
@@ -54,7 +58,8 @@ router.post('/generate', async (req, res) => {
       contentType,
       prompt,
       brandGuidelines,
-      options
+      options,
+      servicePreference
     });
 
     res.json(result);
