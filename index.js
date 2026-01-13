@@ -858,6 +858,11 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
             }
           );
           console.log(`✅ Enhanced generation completed successfully`);
+          console.log(`🎨 Visual suggestions received:`, {
+            count: enhancedResult.visualContentSuggestions?.length || 0,
+            hasVisualSuggestions: !!enhancedResult.visualContentSuggestions,
+            suggestions: enhancedResult.visualContentSuggestions
+          });
           blogPost = enhancedResult;
           visualSuggestions = enhancedResult.visualContentSuggestions || [];
           qualityPrediction = enhancedResult.qualityPrediction;
@@ -941,7 +946,11 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
         organizationId,
         targetSEOScore,
         qualityPrediction,
-        ...(visualSuggestions.length > 0 && { visualSuggestions }),
+        visualSuggestions: visualSuggestions, // Always include, even if empty
+        visualSuggestionsDebug: {
+          count: visualSuggestions.length,
+          hasVisuals: visualSuggestions.length > 0
+        },
         // Include enhanced metadata if available
         ...(blogPost.seoOptimizationScore && { 
           seoAnalysis: {
