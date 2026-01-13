@@ -14,6 +14,7 @@ import leadService from './services/leads.js';
 import organizationService from './services/organizations.js';
 import projectsService from './services/projects.js';
 import db from './services/database.js';
+import enhancedBlogGenerationService from './services/enhanced-blog-generation.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
@@ -22,6 +23,9 @@ import postsRoutes from './routes/posts.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
+import manualInputRoutes from './routes/manual-inputs.js';
+import visualContentRoutes from './routes/visual-content.js';
+import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 
 // Load environment variables
 dotenv.config();
@@ -89,6 +93,9 @@ app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), p
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
+app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
+app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
+app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -778,12 +785,23 @@ app.post('/api/trending-topics', async (req, res) => {
   }
 });
 
-// Generate content endpoint (with optional auth for saving)
+// Generate content endpoint (with optional auth for saving) - Enhanced with Phase 3 features
 app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { topic, businessInfo, additionalInstructions, saveToAccount } = req.body;
+    const { 
+      topic, 
+      businessInfo, 
+      additionalInstructions, 
+      saveToAccount,
+      // Enhanced Phase 3 parameters (backward compatible)
+      organizationId,
+      useEnhancedGeneration = false,
+      targetSEOScore = 95,
+      includeVisuals = false,
+      iterativeOptimization = false
+    } = req.body;
 
     if (!topic || !businessInfo) {
       return res.status(400).json({
@@ -799,12 +817,49 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       });
     }
 
-    // Generate the blog post content
-    const blogPost = await openaiService.generateBlogPost(
-      topic,
-      businessInfo,
-      additionalInstructions || ''
-    );
+    // Generate the blog post content using enhanced or basic generation
+    let blogPost;
+    let visualSuggestions = [];
+    let qualityPrediction = null;
+    
+    if (useEnhancedGeneration && organizationId) {
+      console.log(`🚀 Using enhanced blog generation for organization: ${organizationId}`);
+      
+      if (iterativeOptimization) {
+        // Use iterative optimization to reach target score
+        const optimizationResult = await enhancedBlogGenerationService.generateWithOptimization(
+          topic,
+          businessInfo,
+          organizationId,
+          targetSEOScore,
+          { additionalInstructions: additionalInstructions || '', includeVisuals }
+        );
+        blogPost = optimizationResult.bestResult;
+        qualityPrediction = optimizationResult.finalScore;
+      } else {
+        // Use enhanced generation
+        const enhancedResult = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
+          topic,
+          businessInfo,
+          organizationId,
+          { 
+            additionalInstructions: additionalInstructions || '', 
+            includeVisuals 
+          }
+        );
+        blogPost = enhancedResult;
+        visualSuggestions = enhancedResult.visualContentSuggestions || [];
+        qualityPrediction = enhancedResult.qualityPrediction;
+      }
+    } else {
+      console.log('📝 Using basic blog generation');
+      // Use existing basic generation
+      blogPost = await openaiService.generateBlogPost(
+        topic,
+        businessInfo,
+        additionalInstructions || ''
+      );
+    }
 
     const generationTime = Date.now() - startTime;
     let savedPost = null;
@@ -859,7 +914,46 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       },
       blogPost,
       generatedAt: new Date().toISOString(),
-      generationTimeMs: generationTime
+      generationTimeMs: generationTime,
+      // Enhanced features (only included if used)
+      ...(useEnhancedGeneration && {
+        enhanced: true,
+        organizationId,
+        targetSEOScore,
+        qualityPrediction,
+        ...(visualSuggestions.length > 0 && { visualSuggestions }),
+        // Include enhanced metadata if available
+        ...(blogPost.seoOptimizationScore && { 
+          seoAnalysis: {
+            score: blogPost.seoOptimizationScore,
+            keywords: blogPost.seoKeywords || [],
+            recommendations: blogPost.seoRecommendations || []
+          }
+        }),
+        ...(blogPost.organizationContext && {
+          contentQuality: {
+            enhancementLevel: blogPost.organizationContext.enhancementLevel,
+            dataCompleteness: blogPost.organizationContext.dataCompleteness,
+            hasWebsiteData: blogPost.organizationContext.hasWebsiteData,
+            hasManualInputs: blogPost.organizationContext.hasManualInputs
+          }
+        }),
+        ...(blogPost.internalLinks && { 
+          strategicElements: {
+            internalLinks: blogPost.internalLinks,
+            ctaSuggestions: blogPost.ctaSuggestions || []
+          }
+        }),
+        ...(blogPost.enhancementRecommendations && {
+          improvementSuggestions: blogPost.enhancementRecommendations
+        }),
+        ...(iterativeOptimization && { 
+          optimization: {
+            targetReached: qualityPrediction >= targetSEOScore,
+            finalScore: qualityPrediction
+          }
+        })
+      })
     };
 
     // Include saved post info if applicable
