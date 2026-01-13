@@ -55,17 +55,17 @@ export class VisualContentGenerationService {
    */
   selectService(contentType, budget = 'standard', requirements = {}) {
     const servicePreferences = {
-      hero_image: ['quickchart', 'stable_diffusion', 'dalle'], // Start with free option
-      infographic: ['quickchart', 'stable_diffusion'],
+      hero_image: ['stable_diffusion', 'dalle', 'quickchart'], // Best quality for hero images
+      infographic: ['quickchart', 'stable_diffusion'], // Charts work well for infographics
       chart: ['quickchart'],
       graph: ['quickchart'],
       data_visualization: ['quickchart'],
-      diagram: ['quickchart', 'stable_diffusion'],
-      illustration: ['quickchart', 'stable_diffusion', 'dalle'], // Start with free option
-      social_media: ['quickchart', 'stable_diffusion'], // Start with free option
-      thumbnail: ['quickchart', 'stable_diffusion'], // Start with free option
-      banner: ['quickchart', 'stable_diffusion'], // Start with free option
-      icon: ['quickchart', 'stable_diffusion'] // Start with free option
+      diagram: ['stable_diffusion', 'quickchart'],
+      illustration: ['stable_diffusion', 'dalle', 'quickchart'], // Quality important for illustrations
+      social_media: ['stable_diffusion', 'quickchart'], // Quality important for social sharing
+      thumbnail: ['stable_diffusion', 'quickchart'],
+      banner: ['stable_diffusion', 'dalle', 'quickchart'],
+      icon: ['stable_diffusion', 'quickchart']
     };
 
     const preferred = servicePreferences[contentType] || ['stable_diffusion', 'dalle'];
@@ -432,9 +432,22 @@ export class VisualContentGenerationService {
     try {
       console.log(`🎨 Starting visual content generation for ${contentType}`);
 
-      // Select appropriate service (use preference if provided)
-      const service = servicePreference || this.selectService(contentType, options.budget, options.requirements);
-      console.log(`📡 Selected service: ${service}${servicePreference ? ' (preferred)' : ' (auto-selected)'}`);
+      // Select appropriate service (use preference if provided, validate it's available)
+      let service;
+      if (servicePreference) {
+        // Validate that the preferred service is available
+        if (this.services[servicePreference] && this.services[servicePreference].available) {
+          service = servicePreference;
+          console.log(`📡 Using requested service: ${service} (forced preference)`);
+        } else {
+          console.warn(`⚠️ Requested service ${servicePreference} is not available, falling back to auto-selection`);
+          service = this.selectService(contentType, options.budget, options.requirements);
+          console.log(`📡 Selected service: ${service} (auto-selected fallback)`);
+        }
+      } else {
+        service = this.selectService(contentType, options.budget, options.requirements);
+        console.log(`📡 Selected service: ${service} (auto-selected)`);
+      }
 
       // Enhance prompt with style and brand guidelines
       const enhancedPrompt = this.enhancePrompt(prompt, contentType, brandGuidelines);
@@ -621,15 +634,92 @@ export class VisualContentGenerationService {
   }
 
   /**
+   * Create detailed, context-aware prompts for visual content generation
+   */
+  createDetailedPrompt(blogContent, contentType) {
+    const title = blogContent.title || 'Blog Post';
+    const content = blogContent.content || '';
+    
+    // Extract key themes and topics from content
+    const keyPhrases = this.extractKeyPhrases(content, title);
+    
+    switch (contentType) {
+      case 'hero_image':
+        return `Professional hero image for blog post "${title}". 
+          Key themes: ${keyPhrases.join(', ')}. 
+          Style: modern, engaging, high-quality photography or digital art that captures the essence of ${title}. 
+          Should be suitable for website header, professional and eye-catching.`;
+          
+      case 'infographic':
+        return `Clean, professional infographic illustrating key concepts from "${title}". 
+          Focus on: ${keyPhrases.join(', ')}. 
+          Style: modern infographic design with clear typography, icons, and visual hierarchy. 
+          Should summarize main points visually with charts, icons, and concise text.`;
+          
+      case 'social_media':
+        return `Engaging social media image for "${title}". 
+          Highlight: ${keyPhrases.slice(0, 3).join(', ')}. 
+          Style: optimized for social sharing, bold and attention-grabbing, includes visual elements that represent ${title}. 
+          Modern design suitable for LinkedIn, Twitter, Facebook posts.`;
+          
+      default:
+        return `Professional visual content for "${title}" focusing on ${keyPhrases.slice(0, 2).join(', ')}`;
+    }
+  }
+
+  /**
+   * Extract key phrases and themes from blog content
+   */
+  extractKeyPhrases(content, title) {
+    const phrases = [];
+    
+    // Add title words as key phrases
+    if (title) {
+      const titleWords = title.toLowerCase()
+        .split(/\s+/)
+        .filter(word => word.length > 3 && !['the', 'and', 'for', 'with', 'your', 'this', 'that'].includes(word));
+      phrases.push(...titleWords);
+    }
+    
+    // Extract important terms from content
+    if (content && content.length > 100) {
+      // Look for capitalized terms (likely important concepts)
+      const capitalizedTerms = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
+      
+      // Look for terms that appear multiple times
+      const words = content.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
+      const wordCount = {};
+      words.forEach(word => {
+        if (!['this', 'that', 'with', 'have', 'will', 'from', 'they', 'been', 'more', 'like', 'time', 'very', 'when', 'much', 'some', 'what', 'even', 'most'].includes(word)) {
+          wordCount[word] = (wordCount[word] || 0) + 1;
+        }
+      });
+      
+      const frequentWords = Object.entries(wordCount)
+        .filter(([word, count]) => count > 1)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 5)
+        .map(([word]) => word);
+      
+      phrases.push(...capitalizedTerms.slice(0, 3));
+      phrases.push(...frequentWords);
+    }
+    
+    // Remove duplicates and return top phrases
+    return [...new Set(phrases)].slice(0, 6);
+  }
+
+  /**
    * Generate suggested visual content for blog post content
    */
   async suggestVisualContent(blogContent, brandGuidelines = {}) {
     const suggestions = [];
 
-    // Always suggest a hero image
+    // Always suggest a hero image with detailed prompt
+    const heroPrompt = this.createDetailedPrompt(blogContent, 'hero_image');
     suggestions.push({
       contentType: 'hero_image',
-      prompt: `Blog post hero image about: ${blogContent.title || 'the main topic'}`,
+      prompt: heroPrompt,
       priority: 'high',
       reasoning: 'Hero images increase engagement and provide visual appeal'
     });
@@ -640,9 +730,10 @@ export class VisualContentGenerationService {
       blogContent.content.includes('steps') ||
       blogContent.content.match(/\d+\./g)?.length > 2
     )) {
+      const infographicPrompt = this.createDetailedPrompt(blogContent, 'infographic');
       suggestions.push({
         contentType: 'infographic',
-        prompt: `Infographic summarizing key points from: ${blogContent.title}`,
+        prompt: infographicPrompt,
         priority: 'medium',
         reasoning: 'Content contains lists or statistics that would benefit from visual representation'
       });
@@ -675,9 +766,10 @@ export class VisualContentGenerationService {
     }
 
     // Suggest social media images for shareable content
+    const socialPrompt = this.createDetailedPrompt(blogContent, 'social_media');
     suggestions.push({
       contentType: 'social_media',
-      prompt: `Social media image for: ${blogContent.title}`,
+      prompt: socialPrompt,
       priority: 'low',
       reasoning: 'Social media images improve shareability and engagement'
     });
