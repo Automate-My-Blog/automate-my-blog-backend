@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer-core';
+import { chromium } from 'playwright-core';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import xml2js from 'xml2js';
@@ -106,9 +107,22 @@ export class WebScraperService {
           url: url
         });
         
-        // Fallback to enhanced Cheerio extraction
-        console.log('🔄 Falling back to enhanced Cheerio extraction...');
-        return await this.scrapeWithCheerio(url);
+        // Try Playwright as first fallback
+        try {
+          console.log('🔄 Falling back to Playwright extraction...');
+          return await this.scrapeWithPlaywright(url);
+        } catch (playwrightError) {
+          console.error('❌ Playwright scraping also failed for', url);
+          console.error('❌ Playwright error details:', {
+            message: playwrightError.message,
+            stack: playwrightError.stack?.split('\n').slice(0, 3).join('\n'),
+            url: url
+          });
+          
+          // Final fallback to enhanced Cheerio extraction
+          console.log('🔄 Falling back to enhanced Cheerio extraction...');
+          return await this.scrapeWithCheerio(url);
+        }
       }
     } catch (error) {
       console.error('Website scraping error:', error);
@@ -269,6 +283,258 @@ export class WebScraperService {
           .slice(0, 10);
 
         console.log('Final extraction results:');
+        console.log('- Title:', title);
+        console.log('- Content length:', mainContent.length);
+        console.log('- Headings found:', headings.length);
+
+        return {
+          title: title.trim(),
+          metaDescription: metaDescription.trim(),
+          content: mainContent.trim(),
+          headings,
+          url
+        };
+      }, url);
+
+      return this.cleanContent(content);
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  }
+
+  /**
+   * Get optimized Playwright configuration for serverless environments
+   */
+  async getPlaywrightConfig() {
+    const config = {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-dev-tools',
+        '--disable-extensions',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+        '--disable-features=TranslateUI',
+        '--disable-default-apps',
+        '--no-first-run',
+        '--disable-web-security',
+        '--allow-running-insecure-content'
+      ]
+    };
+
+    // For Vercel/serverless environments, try to use @sparticuz/chromium
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      try {
+        console.log('🔧 Attempting to configure Playwright for serverless...');
+        
+        // Use CommonJS require for @sparticuz/chromium
+        const chromium = require('@sparticuz/chromium');
+        
+        // Set executable path for Playwright
+        config.executablePath = await chromium.executablePath();
+        config.args = [...config.args, ...chromium.args];
+        
+        console.log('✅ Using @sparticuz/chromium with Playwright, executablePath:', config.executablePath);
+        console.log('🔧 Chromium args added for Playwright:', chromium.args.length);
+        
+        return config;
+      } catch (importError) {
+        console.error('❌ Failed to load @sparticuz/chromium for Playwright:', importError);
+        console.warn('⚠️ Falling back to system Chrome detection for Playwright...');
+        
+        // Try to find system Chrome as fallback
+        const possiblePaths = [
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ];
+        
+        for (const path of possiblePaths) {
+          try {
+            const fs = await import('fs');
+            if (fs.existsSync && fs.existsSync(path)) {
+              config.executablePath = path;
+              console.log('✅ Found system Chrome for Playwright at:', path);
+              return config;
+            }
+          } catch (e) {
+            // Continue checking other paths
+          }
+        }
+        
+        // If no executable found, throw a more specific error
+        throw new Error(`Chrome executable not found for Playwright. For serverless environments, ensure @sparticuz/chromium is installed. Import error: ${importError.message}`);
+      }
+    }
+
+    console.log('🔧 Using default Playwright configuration for local environment');
+    return config;
+  }
+
+  /**
+   * Scrape with Playwright for dynamic content (Puppeteer alternative)
+   */
+  async scrapeWithPlaywright(url) {
+    let browser;
+    try {
+      console.log('🚀 Starting Playwright scraping for:', url);
+      const playwrightConfig = await this.getPlaywrightConfig();
+      console.log('🔧 Playwright config obtained:', JSON.stringify(playwrightConfig, null, 2));
+      
+      console.log('🌐 Launching Playwright browser...');
+      browser = await chromium.launch(playwrightConfig);
+      console.log('✅ Playwright browser launched successfully');
+
+      const page = await browser.newPage();
+      
+      // Set user agent
+      await page.setExtraHTTPHeaders({
+        'User-Agent': this.userAgent
+      });
+      
+      // Set viewport
+      await page.setViewportSize({ width: 1920, height: 1080 });
+
+      // Navigate to page with timeout
+      console.log('🌐 Navigating to page with Playwright...');
+      await page.goto(url, {
+        waitUntil: 'networkidle',
+        timeout: this.timeout
+      });
+
+      // Wait longer for React SPAs and dynamic content to fully load
+      await page.waitForTimeout(5000);
+      
+      // For heavily JS-dependent sites, wait for meaningful content to appear
+      try {
+        await page.waitForFunction(() => {
+          const paragraphs = document.querySelectorAll('p');
+          if (paragraphs.length > 2) {
+            const totalText = Array.from(paragraphs)
+              .map(p => p.innerText || p.textContent || '')
+              .join(' ')
+              .trim();
+            if (totalText.length > 100) {
+              return true;
+            }
+          }
+          const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+          return bodyText.length > 1000;
+        }, { timeout: 15000 });
+      } catch (waitError) {
+        console.log('Playwright dynamic content wait timed out, proceeding with extraction...');
+      }
+
+      // Extract content with enhanced SPA handling (same logic as Puppeteer)
+      const content = await page.evaluate((url) => {
+        console.log('Starting Playwright content extraction for URL:', url);
+        console.log('Initial page state:');
+        console.log('- Paragraphs:', document.querySelectorAll('p').length);
+        console.log('- Articles:', document.querySelectorAll('article').length);
+        console.log('- Main elements:', document.querySelectorAll('main').length);
+
+        // Remove unwanted elements for content extraction
+        const elementsToRemove = [
+          'script', '.cookie-banner', '.popup', '.modal', '.advertisement'
+        ];
+        
+        elementsToRemove.forEach(selector => {
+          document.querySelectorAll(selector).forEach(el => el.remove());
+        });
+
+        // Get title
+        const title = document.title || '';
+
+        // Get meta description
+        const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
+
+        // Enhanced content selectors for better SPA compatibility
+        const mainSelectors = [
+          'main', '[role="main"]', '.main-content', '.content', 
+          'article', '.post-content', '.entry-content', '.blog-post', 
+          '.single-post', '[data-post]', '.content-area', '.post-body'
+        ];
+        
+        let mainContent = '';
+        for (const selector of mainSelectors) {
+          const element = document.querySelector(selector);
+          if (element) {
+            const text = element.innerText || element.textContent || '';
+            if (text.trim().length > 100) {
+              mainContent = text;
+              console.log(`Playwright found content using selector: ${selector}, length: ${text.length}`);
+              break;
+            }
+          }
+        }
+
+        // If no main content found, try aggressive fallback extraction
+        if (!mainContent || mainContent.trim().length < 100) {
+          console.log('Playwright main content not found, trying aggressive extraction...');
+          
+          // Try paragraphs first
+          const paragraphs = Array.from(document.querySelectorAll('p'))
+            .map(p => p.innerText || p.textContent || '')
+            .filter(text => text.trim().length > 20)
+            .join(' ');
+          
+          if (paragraphs.length > 100) {
+            mainContent = paragraphs;
+            console.log(`Playwright found content from paragraphs, length: ${paragraphs.length}`);
+          } else {
+            // Last resort: use TreeWalker to extract all text nodes
+            const walker = document.createTreeWalker(
+              document.body || document,
+              NodeFilter.SHOW_TEXT,
+              {
+                acceptNode: function(node) {
+                  const parent = node.parentElement;
+                  if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) {
+                    return NodeFilter.FILTER_REJECT;
+                  }
+                  if (node.textContent.trim().length > 10) {
+                    return NodeFilter.FILTER_ACCEPT;
+                  }
+                  return NodeFilter.FILTER_REJECT;
+                }
+              }
+            );
+            
+            const textNodes = [];
+            let node;
+            while (node = walker.nextNode()) {
+              textNodes.push(node.textContent.trim());
+            }
+            
+            const extractedText = textNodes.join(' ').replace(/\s+/g, ' ').trim();
+            if (extractedText.length > mainContent.length) {
+              mainContent = extractedText;
+              console.log(`Playwright found content using TreeWalker, length: ${extractedText.length}`);
+            }
+          }
+        }
+
+        // If still no content, get body text as last resort
+        if (!mainContent || mainContent.trim().length < 50) {
+          mainContent = document.body ? (document.body.innerText || document.body.textContent || '') : '';
+          console.log(`Playwright using body text as fallback, length: ${mainContent.length}`);
+        }
+
+        // Get headings
+        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+          .map(h => (h.innerText || h.textContent || '').trim())
+          .filter(text => text.length > 0)
+          .slice(0, 10);
+
+        console.log('Playwright final extraction results:');
         console.log('- Title:', title);
         console.log('- Content length:', mainContent.length);
         console.log('- Headings found:', headings.length);
