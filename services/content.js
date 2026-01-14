@@ -459,8 +459,8 @@ class ContentService {
       await db.query(`
         INSERT INTO generation_history (
           id, user_id, type, input_data, output_data, tokens_used,
-          duration_ms, success_status, ai_model, created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+          duration_ms, success_status, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
       `, [
         uuidv4(),
         userId,
@@ -469,8 +469,7 @@ class ContentService {
         JSON.stringify(generationData.outputData),
         generationData.tokensUsed || 0,
         generationData.durationMs || 0,
-        generationData.successStatus,
-        generationData.aiModel || 'unknown'
+        generationData.successStatus
       ]);
     } catch (error) {
       console.warn('Failed to record generation history:', error.message);
