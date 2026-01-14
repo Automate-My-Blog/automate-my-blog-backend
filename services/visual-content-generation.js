@@ -109,7 +109,7 @@ export class VisualContentGenerationService {
       const response = await axios.post(
         this.services.stable_diffusion.endpoint,
         {
-          version: "stability-ai/stable-diffusion:27b93a2413e7f36cd83da926f3656280b2931564ff050bf9575f1fdf9bcd7478",
+          version: "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
           input: {
             prompt: prompt,
             negative_prompt: options.negative_prompt || "blurry, low quality, distorted, watermark, text, logo",
