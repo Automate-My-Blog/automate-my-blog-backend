@@ -55,17 +55,17 @@ export class VisualContentGenerationService {
    */
   selectService(contentType, budget = 'standard', requirements = {}) {
     const servicePreferences = {
-      hero_image: ['stable_diffusion', 'dalle', 'quickchart'], // Best quality for hero images
-      infographic: ['quickchart', 'stable_diffusion'], // Charts work well for infographics
+      hero_image: ['stable_diffusion', 'dalle'], // Photos need AI generators, remove QuickChart
+      infographic: ['quickchart', 'stable_diffusion'], // Test both chart and AI approaches
       chart: ['quickchart'],
       graph: ['quickchart'],
       data_visualization: ['quickchart'],
       diagram: ['stable_diffusion', 'quickchart'],
-      illustration: ['stable_diffusion', 'dalle', 'quickchart'], // Quality important for illustrations
-      social_media: ['stable_diffusion', 'quickchart'], // Quality important for social sharing
-      thumbnail: ['stable_diffusion', 'quickchart'],
-      banner: ['stable_diffusion', 'dalle', 'quickchart'],
-      icon: ['stable_diffusion', 'quickchart']
+      illustration: ['stable_diffusion', 'dalle'],
+      social_media: ['stable_diffusion', 'dalle'], // Remove QuickChart, focus on engaging visuals
+      thumbnail: ['stable_diffusion', 'dalle'],
+      banner: ['stable_diffusion', 'dalle'],
+      icon: ['stable_diffusion', 'dalle']
     };
 
     const preferred = servicePreferences[contentType] || ['stable_diffusion', 'dalle'];
@@ -640,31 +640,62 @@ export class VisualContentGenerationService {
     const title = blogContent.title || 'Blog Post';
     const content = blogContent.content || '';
     
-    // Extract key themes and topics from content
-    const keyPhrases = this.extractKeyPhrases(content, title);
-    
     switch (contentType) {
       case 'hero_image':
-        return `Professional hero image for blog post "${title}". 
-          Key themes: ${keyPhrases.join(', ')}. 
-          Style: modern, engaging, high-quality photography or digital art that captures the essence of ${title}. 
-          Should be suitable for website header, professional and eye-catching.`;
+        // Hero images should be photos/realistic
+        return `Professional photograph for "${title}" blog post. Realistic, high-quality stock photo style showing people or scenes related to ${title.toLowerCase()}. Modern, clean composition suitable for website header. Professional lighting and composition.`;
           
       case 'infographic':
-        return `Clean, professional infographic illustrating key concepts from "${title}". 
-          Focus on: ${keyPhrases.join(', ')}. 
-          Style: modern infographic design with clear typography, icons, and visual hierarchy. 
-          Should summarize main points visually with charts, icons, and concise text.`;
+        // Use detailed test prompts to evaluate chart quality
+        return this.getTestInfographicPrompt();
           
       case 'social_media':
-        return `Engaging social media image for "${title}". 
-          Highlight: ${keyPhrases.slice(0, 3).join(', ')}. 
-          Style: optimized for social sharing, bold and attention-grabbing, includes visual elements that represent ${title}. 
-          Modern design suitable for LinkedIn, Twitter, Facebook posts.`;
+        // Social media optimized visuals
+        return `Engaging social media graphic for "${title}". Bold, modern design with text overlay and visual elements. Optimized for platforms like LinkedIn, Instagram, Twitter. Professional yet eye-catching style.`;
           
       default:
-        return `Professional visual content for "${title}" focusing on ${keyPhrases.slice(0, 2).join(', ')}`;
+        return `Professional visual content for "${title}"`;
     }
+  }
+
+  /**
+   * Get a random detailed test prompt for infographic testing
+   */
+  getTestInfographicPrompt() {
+    const testPrompts = [
+      // 1. Pie Chart
+      "Pie chart showing email marketing platform market share: Mailchimp 35%, Constant Contact 22%, Campaign Monitor 18%, GetResponse 12%, AWeber 8%, Other 5%. Include title 'Email Marketing Platform Market Share 2024', proper percentage labels on each slice, legend with company names, and data source footer 'Based on 10,000 business survey'.",
+      
+      // 2. Bar Chart  
+      "Horizontal bar chart comparing software implementation phases: Discovery (2 weeks), Planning (4 weeks), Development (12 weeks), Testing (3 weeks), Deployment (1 week), Training (2 weeks). X-axis labeled 'Duration (Weeks)', Y-axis showing phase names, title 'Software Implementation Timeline', bars in blue gradient, values displayed at end of each bar.",
+      
+      // 3. Process Journey
+      "Process flow infographic for SaaS customer onboarding: Step 1 'Sign Up' (30% conversion) → Step 2 'Email Verification' (85% completion) → Step 3 'Profile Setup' (70% completion) → Step 4 'First Login' (60% completion) → Step 5 'Feature Tour' (40% completion). Include conversion rates, progress arrows, step icons, and title 'Customer Onboarding Journey'.",
+      
+      // 4. Problem/Solution
+      "Before/After comparison infographic for marketing automation: BEFORE side showing 'Manual Email Sending: 2 hours daily, 15% open rate, 3% click rate, $50 cost per customer'. AFTER side showing 'Automated Campaigns: 10 minutes daily, 28% open rate, 12% click rate, $12 cost per customer'. Include improvement arrows, percentage gains, and title 'Marketing Automation Impact'.",
+      
+      // 5. Timeline
+      "Timeline infographic showing product development milestones: Q1 2024 'MVP Launch' (completed), Q2 2024 'User Analytics' (in progress), Q3 2024 'Mobile App' (planned), Q4 2024 'API Integration' (planned), Q1 2025 'Enterprise Features' (future). Include quarter labels, status indicators, milestone descriptions, and title 'Product Roadmap 2024-2025'.",
+      
+      // 6. Funnel
+      "Sales funnel diagram showing lead conversion: 10,000 Website Visitors → 2,500 Email Signups (25%) → 500 Demo Requests (20%) → 150 Proposals Sent (30%) → 45 Customers Acquired (30%). Include exact numbers, conversion percentages between stages, funnel shape visualization, and title 'B2B Sales Conversion Funnel'.",
+      
+      // 7. Comparison Matrix
+      "Feature comparison matrix for project management tools: Rows: Task Management, Time Tracking, Reporting, Team Chat, File Storage, Mobile App. Columns: Asana, Trello, Monday.com. Use checkmarks (✓) for included features, X for missing features. Include pricing row: Asana $10.99, Trello $5.00, Monday.com $8.00. Title 'Project Management Tool Comparison 2024'.",
+      
+      // 8. Flow Diagram
+      "Content marketing workflow flowchart: Start 'Content Idea' → Decision 'Audience Research?' (Yes/No) → 'Keyword Research' → 'Content Creation' → Decision 'SEO Optimized?' (Yes/No) → 'Publish Content' → 'Social Media Promotion' → 'Track Performance' → End. Include decision diamonds, process rectangles, arrows with labels, and title 'Content Marketing Process Flow'.",
+      
+      // 9. Before/After Performance
+      "Website optimization before/after infographic: BEFORE metrics: Page Load Speed 4.2 seconds, Bounce Rate 65%, Conversion Rate 2.1%, Mobile Score 45/100. AFTER metrics: Page Load Speed 1.8 seconds (57% improvement), Bounce Rate 38% (42% improvement), Conversion Rate 4.7% (124% improvement), Mobile Score 92/100 (104% improvement). Include improvement percentages and visual gauges.",
+      
+      // 10. Statistical Dashboard
+      "Email marketing dashboard showing campaign metrics: Total Emails Sent 50,000, Delivery Rate 97.5% (48,750), Open Rate 24.3% (11,846), Click Rate 6.8% (3,400), Unsubscribe Rate 0.5% (250). Include KPI boxes with large numbers, percentage indicators, color coding (green for good metrics, red for concerning), trend arrows, and title 'Email Campaign Performance Dashboard'."
+    ];
+    
+    // Return a random test prompt for variety
+    return testPrompts[Math.floor(Math.random() * testPrompts.length)];
   }
 
   /**
