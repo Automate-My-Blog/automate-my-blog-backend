@@ -724,6 +724,10 @@ app.post('/api/analyze-website', async (req, res) => {
 
     // Store CTAs regardless of whether organization save succeeded
     // Find organization ID from database (created by lead capture or organization save)
+    // Declare variables outside try-catch so they're accessible for response building
+    let foundOrganizationId = null;
+    let ctaStoredCount = 0;
+
     try {
       const token = req.headers.authorization?.replace('Bearer ', '');
       let userId = null;
@@ -737,8 +741,6 @@ app.post('/api/analyze-website', async (req, res) => {
           console.warn('JWT verification failed for CTA storage:', jwtError.message);
         }
       }
-
-      let foundOrganizationId = null;
 
       // Query by website_url to find the organization created by lead capture
       // Lead capture creates organizations without user_id/session_id, so we search by URL
@@ -771,7 +773,7 @@ app.post('/api/analyze-website', async (req, res) => {
           ctaCount: scrapedContent.ctas.length
         });
 
-        let ctaStoredCount = 0;
+        // ctaStoredCount is already declared at outer scope
         for (const cta of scrapedContent.ctas) {
           try {
             // Normalize CTA using centralized utility
