@@ -25,6 +25,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   async getOrganizationContext(organizationId) {
     try {
       console.log(`📊 Loading organization context for: ${organizationId}`);
+      console.log('📊 [CTA DEBUG] Content Gen: Loading organization context:', { organizationId });
 
       // Get data availability
       const availabilityResult = await db.query(
@@ -43,6 +44,16 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         completeness_score: 0
       };
       const settings = availabilityResult.rows[0].blog_generation_settings || {};
+
+      console.log('📊 [CTA DEBUG] Content Gen: Data availability check:', {
+        organizationId,
+        availability: {
+          has_blog_content: availability.has_blog_content,
+          has_cta_data: availability.has_cta_data,
+          has_internal_links: availability.has_internal_links,
+          completeness_score: availability.completeness_score
+        }
+      });
 
       // Get manual inputs
       const manualInputs = await db.query(
@@ -70,12 +81,34 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         }
       }
 
+      console.log('🎯 [CTA DEBUG] Content Gen: Checking if has_cta_data flag is true:', {
+        organizationId,
+        has_cta_data: availability.has_cta_data
+      });
+
       if (availability.has_cta_data) {
         const ctaResult = await db.query(
           'SELECT cta_text, cta_type, placement, href, context, data_source FROM cta_analysis WHERE organization_id = $1 ORDER BY conversion_potential DESC LIMIT 10',
           [organizationId]
         );
         websiteData.ctas = ctaResult.rows;
+
+        console.log('📊 [CTA DEBUG] Content Gen: CTA query result:', {
+          organizationId,
+          ctaCount: ctaResult.rows.length,
+          ctas: ctaResult.rows.map(cta => ({
+            cta_text: cta.cta_text,
+            cta_type: cta.cta_type,
+            href: cta.href,
+            placement: cta.placement,
+            data_source: cta.data_source
+          }))
+        });
+      } else {
+        console.warn('⚠️ [CTA DEBUG] Content Gen: has_cta_data is FALSE - skipping CTA query:', {
+          organizationId,
+          availability
+        });
       }
 
       if (availability.has_internal_links) {
@@ -85,6 +118,14 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         );
         websiteData.internal_links = linkResult.rows;
       }
+
+      console.log('✅ [CTA DEBUG] Content Gen: Organization context loaded:', {
+        organizationId,
+        hasWebsiteData: Object.keys(websiteData).length > 0,
+        websiteDataCTACount: websiteData?.ctas?.length || 0,
+        websiteDataCTAs: websiteData?.ctas || [],
+        completenessScore: availability.completeness_score || 0
+      });
 
       return {
         availability,
@@ -156,7 +197,23 @@ When citing medical information, research, statistics, or expert opinions:
     contextSections.push(externalRefInstructions);
 
     // CTA context with real URLs
+    console.log('🎯 [CTA DEBUG] Prompt Building: Checking CTA availability:', {
+      hasWebsiteDataCTAs: websiteData?.ctas && websiteData.ctas.length > 0,
+      ctaCount: websiteData?.ctas?.length || 0,
+      hasManualCTAPreferences: !!manualData?.cta_preferences
+    });
+
     if (websiteData.ctas && websiteData.ctas.length > 0) {
+      console.log('✅ [CTA DEBUG] Prompt Building: Adding REAL CTAs to prompt:', {
+        ctaCount: websiteData.ctas.length,
+        ctas: websiteData.ctas.map(cta => ({
+          text: cta.cta_text,
+          href: cta.href,
+          type: cta.cta_type,
+          placement: cta.placement
+        }))
+      });
+
       const ctaContext = `AVAILABLE CTAS (use these EXACT URLs - do not modify):
 
 ${websiteData.ctas.map((cta, i) =>
@@ -174,9 +231,16 @@ CRITICAL CTA INSTRUCTIONS:
 - If no CTAs fit, it's okay to have none`;
       contextSections.push(ctaContext);
     } else if (manualData.cta_preferences) {
+      console.log('⚠️ [CTA DEBUG] Prompt Building: Using manual CTA preferences (no real CTAs):', {
+        cta_preferences: manualData.cta_preferences
+      });
       const ctaContext = `CTA PREFERENCES: ${JSON.stringify(manualData.cta_preferences)}`;
       contextSections.push(ctaContext);
     } else {
+      console.warn('🚨 [CTA DEBUG] Prompt Building: NO CTAs AVAILABLE - instructing OpenAI to skip CTAs:', {
+        hasWebsiteDataCTAs: false,
+        hasManualCTAPreferences: false
+      });
       // No CTAs available - inform OpenAI
       const noCTAContext = `NO CTAS AVAILABLE: This organization has not configured CTAs yet. Do not include any calls-to-action or generate placeholder URLs. Create informational content only.`;
       contextSections.push(noCTAContext);
@@ -193,6 +257,11 @@ CRITICAL CTA INSTRUCTIONS:
     const hasInternalLinks = websiteData.internal_links && websiteData.internal_links.length > 0;
     const hasCTAs = websiteData.ctas && websiteData.ctas.length > 0;
 
+    console.log('🎯 [CTA DEBUG] Prompt Building: CTA flag for SEO instructions:', {
+      hasCTAs,
+      willIncludeCTAInstruction: hasCTAs ? 'Yes - use provided CTAs' : 'No - skip CTAs'
+    });
+
     const seoInstructions = `
 SEO OPTIMIZATION TARGET: ${seoTarget}+ score
 CRITICAL SEO REQUIREMENTS:
@@ -208,6 +277,12 @@ ${hasCTAs ? '- Add 2-3 relevant CTAs based on content flow (ONLY from the provid
 
     // Data completeness indicator
     const dataContext = `DATA COMPLETENESS: ${completenessScore}% (${availability.has_blog_content ? '✓' : '✗'} Brand voice, ${availability.has_cta_data ? '✓' : '✗'} CTAs, ${availability.has_internal_links ? '✓' : '✗'} Internal links)`;
+
+    console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
+      promptLength: contextSections.length,
+      hasCTASection: contextSections.some(section => section.includes('AVAILABLE CTAS') || section.includes('NO CTAS AVAILABLE')),
+      ctaSectionPreview: contextSections.find(s => s.includes('CTA')) || 'No CTA section found'
+    });
 
     return `Write a high-quality blog post optimized for ${seoTarget}+ SEO score:
 
@@ -271,14 +346,42 @@ Return JSON format:
     try {
       console.log(`🚀 Starting enhanced blog generation for organization: ${organizationId}`);
 
+      console.log('🚩 [CHECKPOINT 3] Content Generation Starting:', {
+        organizationId,
+        topicTitle: topic.title,
+        willLoadCTAs: 'Checking availability flags...',
+        nextStep: 'Load organization context with CTAs'
+      });
+
       // Load organization context
       const organizationContext = await this.getOrganizationContext(organizationId);
       console.log(`📊 Organization context loaded: ${organizationContext.completenessScore}% complete`);
+
+      console.log('📊 [CTA DEBUG] Generation: Organization context retrieved:', {
+        organizationId,
+        completenessScore: organizationContext.completenessScore,
+        hasWebsiteDataCTAs: organizationContext.websiteData?.ctas?.length > 0,
+        ctaCount: organizationContext.websiteData?.ctas?.length || 0
+      });
+
+      console.log('🚩 [CHECKPOINT 4] Organization Context Loaded:', {
+        organizationId,
+        has_cta_data_flag: organizationContext.availability?.has_cta_data,
+        ctaCount: organizationContext.websiteData?.ctas?.length || 0,
+        hasCTAs: organizationContext.websiteData?.ctas?.length > 0,
+        nextStep: organizationContext.websiteData?.ctas?.length > 0 ? 'Build prompt with CTAs' : 'ERROR: No CTAs found'
+      });
 
       // Build enhanced prompt with all available data
       const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
+      console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
+        organizationId,
+        topicTitle: topic.title,
+        hasCTAsInPrompt: enhancedPrompt.includes('AVAILABLE CTAS'),
+        promptIncludesNoCTAWarning: enhancedPrompt.includes('NO CTAS AVAILABLE')
+      });
       const completion = await this.openai.chat.completions.create({
         model: model,
         messages: [
@@ -316,6 +419,20 @@ CRITICAL REQUIREMENTS:
 
       const response = completion.choices[0].message.content;
       const blogData = this.parseOpenAIResponse(response);
+
+      console.log('✅ [CTA DEBUG] Generation: OpenAI response received:', {
+        organizationId,
+        contentLength: blogData.content?.length || 0,
+        hasContent: !!blogData.content,
+        contentPreview: blogData.content?.substring(0, 200) + '...'
+      });
+
+      // Check if CTAs appear in generated content
+      const ctaLinkMatches = blogData.content?.match(/\[.*?\]\(.*?\)/g) || [];
+      console.log('🔍 [CTA DEBUG] Generation: CTA links in generated content:', {
+        ctaLinkCount: ctaLinkMatches.length,
+        ctaLinks: ctaLinkMatches.slice(0, 5) // Show first 5
+      });
 
       // Enhance blog data with organization context
       blogData.organizationContext = {

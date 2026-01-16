@@ -27,6 +27,8 @@ router.get('/:organizationId/ctas', async (req, res) => {
       });
     }
 
+    console.log('📊 [CTA DEBUG] API: Fetching CTAs for organization:', { organizationId });
+
     // Fetch CTAs for this organization
     const ctaResult = await db.query(`
       SELECT
@@ -49,7 +51,27 @@ router.get('/:organizationId/ctas', async (req, res) => {
     const count = ctas.length;
     const has_sufficient_ctas = count >= 3;
 
+    console.log('📊 [CTA DEBUG] API: Database query result:', {
+      organizationId,
+      ctaCount: ctas.length,
+      ctas: ctas.map(cta => ({
+        id: cta.id,
+        text: cta.text,
+        type: cta.type,
+        href: cta.href,
+        placement: cta.placement,
+        data_source: cta.data_source
+      }))
+    });
+
     console.log(`📊 Retrieved ${count} CTAs for organization ${organizationId}`);
+
+    console.log('✅ [CTA DEBUG] API: Sending CTA response:', {
+      organizationId,
+      ctaCount: count,
+      has_sufficient_ctas: has_sufficient_ctas,
+      response: { success: true, ctas: ctas, count: count, has_sufficient_ctas: has_sufficient_ctas }
+    });
 
     res.json({
       success: true,
@@ -63,6 +85,11 @@ router.get('/:organizationId/ctas', async (req, res) => {
 
   } catch (error) {
     console.error('Error fetching organization CTAs:', error);
+    console.error('🚨 [CTA DEBUG] API: Failed to fetch CTAs:', {
+      organizationId: req.params.organizationId,
+      error: error.message,
+      stack: error.stack
+    });
     res.status(500).json({
       success: false,
       error: 'Failed to fetch CTAs',

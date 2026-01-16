@@ -484,7 +484,12 @@ router.post('/discover-content', async (req, res) => {
   try {
     console.log('🔍 Starting comprehensive content discovery...');
     console.log('🔧 Enhanced debugging version: 2026-01-12-v2 - with detailed scraping logs');
-    
+
+    console.log('🌐 [CTA DEBUG] API: Website analysis requested:', {
+      organizationId: req.body.organizationId || 'Will be determined',
+      websiteUrl: req.body.websiteUrl
+    });
+
     const userContext = extractUserContext(req);
     validateUserContext(userContext);
 
@@ -546,12 +551,35 @@ router.post('/discover-content', async (req, res) => {
     console.log(`📊 Analyzing website content: ${websiteUrl}`);
     const analysisResults = await blogAnalyzer.analyzeBlogContent(organizationId, websiteUrl);
 
+    console.log('🌐 [CTA DEBUG] API: CTA analysis completed:', {
+      organizationId,
+      ctaAnalysisResult: {
+        totalCTAs: analysisResults?.cta_analysis?.totalCTAs || 0,
+        pagesAnalyzed: analysisResults?.cta_analysis?.pagesAnalyzed?.length || 0,
+        success: !!analysisResults?.cta_analysis
+      }
+    });
+
     // Update organization's last analyzed timestamp
     await db.query(`
       UPDATE organizations SET last_analyzed_at = NOW() WHERE id = $1
     `, [organizationId]);
 
     console.log('✅ Content discovery completed successfully');
+
+    console.log('✅ [CTA DEBUG] API: Website analysis response:', {
+      organizationId,
+      success: true,
+      hasCTAData: analysisResults?.cta_analysis?.totalCTAs > 0,
+      ctaCount: analysisResults?.cta_analysis?.totalCTAs || 0
+    });
+
+    console.log('🚩 [CHECKPOINT 1] Website Analysis Complete:', {
+      organizationId,
+      ctasExtracted: analysisResults?.cta_analysis?.totalCTAs || 0,
+      ctasStored: 'Check database',
+      nextStep: 'Verify cta_analysis table has rows for this org'
+    });
 
     res.json({
       success: true,

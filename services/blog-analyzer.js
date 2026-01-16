@@ -87,6 +87,7 @@ class BlogAnalyzerService {
   async analyzeCTAs(organizationId, websiteUrl, blogPosts = []) {
     try {
       console.log('🎯 Analyzing CTAs and conversion elements...');
+      console.log('🎯 [CTA DEBUG] Starting CTA analysis for:', { organizationId, websiteUrl, blogPostCount: blogPosts.length });
 
       const urlObj = new URL(websiteUrl);
       const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
@@ -107,6 +108,11 @@ class BlogAnalyzerService {
       for (const pageUrl of pagesToAnalyze) {
         try {
           const ctas = await webscraper.extractCTAs(pageUrl);
+          console.log('🎯 [CTA DEBUG] Extracted CTAs from page:', {
+            pageUrl: pageUrl,
+            ctaCount: ctas.length,
+            ctas: ctas.map(c => ({ text: c.text, type: c.type, href: c.href }))
+          });
           if (ctas.length > 0) {
             allCTAs.push(...ctas.map(cta => ({ ...cta, page_url: pageUrl })));
             pageAnalysis.push({
@@ -116,6 +122,10 @@ class BlogAnalyzerService {
             });
           }
         } catch (error) {
+          console.error('🚨 [CTA DEBUG] Failed to extract CTAs from page:', {
+            pageUrl: pageUrl,
+            error: error.message
+          });
           console.warn(`Could not analyze CTAs on ${pageUrl}`);
         }
       }
@@ -141,10 +151,23 @@ class BlogAnalyzerService {
         }
       }
 
+      console.log('🎯 [CTA DEBUG] Blog post CTA processing complete:', {
+        totalBlogCTAs: blogCtaCount,
+        blogPostsWithCTAs: blogPosts.filter(p => p.ctas && p.ctas.length > 0).length
+      });
+
       console.log(`🎯 Total CTAs found: ${allCTAs.length} (${blogCtaCount} from blog posts, ${allCTAs.length - blogCtaCount} from static pages)`);
 
       // Analyze CTA patterns with AI
       const ctaStrategy = await this.analyzeCtaPatterns(allCTAs);
+
+      console.log('🎯 [CTA DEBUG] CTA analysis complete:', {
+        totalCTAs: allCTAs.length,
+        blogCTAs: blogCtaCount,
+        staticPageCTAs: allCTAs.length - blogCtaCount,
+        pagesAnalyzed: pageAnalysis.length,
+        ctaSummary: allCTAs.map(c => ({ page: c.page_url, text: c.text, href: c.href }))
+      });
 
       return {
         totalCTAs: allCTAs.length,
@@ -157,6 +180,12 @@ class BlogAnalyzerService {
       };
     } catch (error) {
       console.error('CTA analysis error:', error);
+      console.error('🚨 [CTA DEBUG] CTA analysis failed completely:', {
+        organizationId,
+        websiteUrl,
+        error: error.message,
+        stack: error.stack
+      });
       return {
         totalCTAs: 0,
         blogCTAs: 0,
@@ -672,10 +701,26 @@ Provide analysis in JSON format:
       let ctaStoredCount = 0;
       if (analysisData.ctaAnalysis && analysisData.ctaAnalysis.ctasByPage) {
         console.log('🎯 Storing CTA analysis data...');
+        console.log('🎯 [CTA DEBUG] Preparing to store CTAs:', {
+          organizationId,
+          hasCTAData: analysisData.ctaAnalysis?.totalCTAs > 0,
+          ctaCount: analysisData.ctaAnalysis?.totalCTAs || 0,
+          ctaPages: analysisData.ctaAnalysis?.ctasByPage?.length || 0
+        });
         
         for (const pageAnalysis of analysisData.ctaAnalysis.ctasByPage) {
           for (const cta of pageAnalysis.ctas) {
             try {
+              console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
+                pageUrl: cta.page_url || pageAnalysis.url,
+                ctaText: cta.text || 'Unknown CTA',
+                ctaType: cta.type || 'unknown',
+                href: cta.href || '',
+                placement: cta.placement || 'unknown',
+                dataSource: 'scraped',
+                conversionPotential: cta.conversion_potential || 70
+              });
+
               await db.query(`
                 INSERT INTO cta_analysis (
                   organization_id, page_url, cta_text, cta_type, placement,
@@ -710,9 +755,19 @@ Provide analysis in JSON format:
                 'blog_scraping',
                 'scraped'  // Track that this CTA came from website scraping
               ]);
-              
+
               ctaStoredCount++;
+              console.log('✅ [CTA DEBUG] CTA stored successfully:', {
+                ctaText: cta.text || 'Unknown CTA',
+                organizationId
+              });
             } catch (ctaError) {
+              console.error('🚨 [CTA DEBUG] Failed to store individual CTA:', {
+                ctaText: cta.text || 'Unknown CTA',
+                pageUrl: cta.page_url || pageAnalysis.url,
+                error: ctaError.message,
+                organizationId
+              });
               console.warn(`Failed to store CTA: ${ctaError.message}`);
             }
           }
@@ -720,6 +775,12 @@ Provide analysis in JSON format:
       }
 
       console.log(`✅ Stored ${ctaStoredCount} CTAs in database`);
+      console.log('✅ [CTA DEBUG] CTA storage complete:', {
+        totalStoredCTAs: ctaStoredCount,
+        expectedCTAs: analysisData.ctaAnalysis?.ctasByPage?.reduce((sum, page) => sum + page.ctas.length, 0) || 0,
+        organizationId,
+        success: ctaStoredCount > 0
+      });
     } catch (error) {
       console.error('Failed to store analysis results:', error.message);
       console.error('Error details:', error);
