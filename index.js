@@ -621,21 +621,13 @@ app.post('/api/analyze-website', async (req, res) => {
           is_current: true
         };
         
-        // Check if organization already exists for this user/session and URL
-        let existingOrganization = null;
-        if (userId) {
-          const existingResult = await db.query(
-            'SELECT id FROM organizations WHERE owner_user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
-            [userId, url]
-          );
-          existingOrganization = existingResult.rows[0];
-        } else if (sessionId) {
-          const existingResult = await db.query(
-            'SELECT id FROM organizations WHERE session_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
-            [sessionId, url]
-          );
-          existingOrganization = existingResult.rows[0];
-        }
+        // Check if organization already exists for this URL
+        // Lead capture creates organizations by URL only, so we query by URL
+        const existingResult = await db.query(
+          'SELECT id FROM organizations WHERE website_url = $1 ORDER BY created_at DESC LIMIT 1',
+          [url]
+        );
+        const existingOrganization = existingResult.rows[0] || null;
         
         let organizationId;
         
@@ -747,28 +739,22 @@ app.post('/api/analyze-website', async (req, res) => {
 
       let foundOrganizationId = null;
 
-      if (userId) {
-        const orgResult = await db.query(
-          'SELECT id FROM organizations WHERE owner_user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
-          [userId, url]
-        );
-        if (orgResult.rows.length > 0) {
-          foundOrganizationId = orgResult.rows[0].id;
-        }
-      }
+      // Query by website_url to find the organization created by lead capture
+      // Lead capture creates organizations without user_id/session_id, so we search by URL
+      const orgResult = await db.query(
+        'SELECT id FROM organizations WHERE website_url = $1 ORDER BY created_at DESC LIMIT 1',
+        [url]
+      );
 
-      // If no organization found for authenticated user, try session
-      if (!foundOrganizationId) {
-        const sessionId = req.headers['x-session-id'];
-        if (sessionId) {
-          const orgResult = await db.query(
-            'SELECT id FROM organizations WHERE session_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
-            [sessionId, url]
-          );
-          if (orgResult.rows.length > 0) {
-            foundOrganizationId = orgResult.rows[0].id;
-          }
-        }
+      if (orgResult.rows.length > 0) {
+        foundOrganizationId = orgResult.rows[0].id;
+        console.log('🎯 [CTA DEBUG] Found organization by website URL:', {
+          organizationId: foundOrganizationId,
+          url,
+          method: 'website_url_lookup'
+        });
+      } else {
+        console.warn('⚠️ [CTA DEBUG] No organization found for URL:', { url });
       }
 
       console.log('🎯 [CTA DEBUG] Found organization for CTA storage:', {
