@@ -586,34 +586,21 @@ export class WebScraperService {
       }
 
       console.log('✅ Browserless API token found, using Browserless.io service');
-      const browserlessEndpoint = `https://production-sfo.browserless.io/scrape?token=${browserlessToken}`;
-      
-      // Configure the scraping request
+      const browserlessEndpoint = `https://production-sfo.browserless.io/content?token=${browserlessToken}`;
+
+      // Configure the scraping request - use /content endpoint for full HTML
       const scrapeRequest = {
         url: url,
-        // Extract comprehensive content similar to our other methods
-        elements: [
-          { selector: 'title', name: 'title' },
-          { selector: 'meta[name="description"]', attribute: 'content', name: 'metaDescription' },
-          { selector: 'main', name: 'mainContent' },
-          { selector: 'article', name: 'articleContent' },
-          { selector: '.content', name: 'contentDiv' },
-          { selector: '.post-content', name: 'postContent' },
-          { selector: '.entry-content', name: 'entryContent' },
-          { selector: 'h1, h2, h3, h4, h5, h6', name: 'headings' },
-          { selector: 'p', name: 'paragraphs' }
-        ],
-        options: {
-          waitFor: 5000, // Wait 5 seconds for dynamic content
+        gotoOptions: {
+          waitUntil: 'networkidle2',
           timeout: this.timeout
         }
       };
-      
+
       console.log('🌐 Making request to Browserless.io...');
       const response = await axios.post(browserlessEndpoint, scrapeRequest, {
         headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': this.userAgent
+          'Content-Type': 'application/json'
         },
         timeout: this.timeout + 5000 // Add buffer for API response
       });
@@ -621,63 +608,58 @@ export class WebScraperService {
       if (!response.data) {
         throw new Error('No data returned from Browserless.io');
       }
-      
-      console.log('✅ Browserless.io response received');
-      
-      // Process the extracted content
-      const extractedData = response.data;
-      
-      // Get title
-      const title = extractedData.title || '';
-      
-      // Get meta description
-      const metaDescription = extractedData.metaDescription || '';
-      
-      // Combine content from multiple selectors, prioritizing main content areas
+
+      console.log('✅ Browserless.io response received, parsing HTML...');
+
+      // Parse the HTML with Cheerio
+      const $ = cheerio.load(response.data);
+
+      // Extract title
+      const title = $('title').text().trim() || '';
+
+      // Extract meta description
+      const metaDescription = $('meta[name="description"]').attr('content') ||
+                             $('meta[property="og:description"]').attr('content') || '';
+
+      // Extract main content - try multiple selectors
       let mainContent = '';
-      const contentSources = [
-        extractedData.mainContent,
-        extractedData.articleContent,
-        extractedData.contentDiv,
-        extractedData.postContent,
-        extractedData.entryContent
+      const contentSelectors = [
+        'main',
+        'article',
+        '.content',
+        '.post-content',
+        '.entry-content',
+        '#content',
+        '.main-content'
       ];
-      
-      // Use the first substantial content found
-      for (const content of contentSources) {
-        if (content && content.trim().length > 100) {
-          mainContent = content.trim();
-          console.log(`Browserless found content using prioritized selector, length: ${content.length}`);
+
+      for (const selector of contentSelectors) {
+        const content = $(selector).text().trim();
+        if (content && content.length > 100) {
+          mainContent = content;
+          console.log(`Browserless found content using selector "${selector}", length: ${content.length}`);
           break;
         }
       }
-      
-      // If no main content found, combine paragraphs
-      if (!mainContent || mainContent.trim().length < 100) {
-        if (extractedData.paragraphs && Array.isArray(extractedData.paragraphs)) {
-          const combinedParagraphs = extractedData.paragraphs
-            .filter(p => p && p.trim().length > 20)
-            .join(' ');
-          
-          if (combinedParagraphs.length > 100) {
-            mainContent = combinedParagraphs;
-            console.log(`Browserless found content from paragraphs, length: ${combinedParagraphs.length}`);
-          }
-        }
+
+      // If no main content found, get all paragraphs
+      if (!mainContent || mainContent.length < 100) {
+        mainContent = $('p').map((i, el) => $(el).text().trim()).get()
+          .filter(p => p.length > 20)
+          .join(' ');
+        console.log(`Browserless found content from paragraphs, length: ${mainContent.length}`);
       }
-      
-      // Get headings
-      const headings = Array.isArray(extractedData.headings) 
-        ? extractedData.headings
-            .filter(h => h && h.trim().length > 0)
-            .slice(0, 10)
-        : [];
-      
+
+      // Extract headings
+      const headings = $('h1, h2, h3, h4, h5, h6').map((i, el) => $(el).text().trim()).get()
+        .filter(h => h.length > 0)
+        .slice(0, 10);
+
       console.log('Browserless final extraction results:');
       console.log('- Title:', title);
       console.log('- Content length:', mainContent.length);
       console.log('- Headings found:', headings.length);
-      
+
       const content = {
         title: title.trim(),
         metaDescription: metaDescription.trim(),
@@ -685,7 +667,7 @@ export class WebScraperService {
         headings,
         url
       };
-      
+
       return this.cleanContent(content);
       
     } catch (error) {
