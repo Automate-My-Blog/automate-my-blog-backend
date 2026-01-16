@@ -773,10 +773,32 @@ app.post('/api/analyze-website', async (req, res) => {
         let ctaStoredCount = 0;
         for (const cta of scrapedContent.ctas) {
           try {
-            console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
+            // Map scraper CTA type to database-valid type
+            const typeMapping = {
+              'contact': 'contact_link',
+              'signup': 'signup_link',
+              'demo': 'demo_link',
+              'trial': 'trial_link',
+              'phone': 'phone_link',
+              'download': 'download_link',
+              'button': 'button',
+              'form': 'form'
+            };
+            const validType = typeMapping[cta.type] || 'cta_element';
+
+            // Use valid placement value (database constraint)
+            // Valid values: 'header', 'footer', 'navigation', 'sidebar', 'main_content', 'popup', 'banner'
+            const validPlacement = cta.placement && ['header', 'footer', 'navigation', 'sidebar', 'main_content', 'popup', 'banner'].includes(cta.placement)
+              ? cta.placement
+              : 'main_content';
+
+            console.log('🎯 [CTA DEBUG] Storing individual CTA (mapped):', {
               organizationId: foundOrganizationId,
               ctaText: cta.text,
-              ctaType: cta.type,
+              originalType: cta.type,
+              mappedType: validType,
+              originalPlacement: cta.placement,
+              mappedPlacement: validPlacement,
               href: cta.href
             });
 
@@ -796,8 +818,8 @@ app.post('/api/analyze-website', async (req, res) => {
               foundOrganizationId,
               url,
               cta.text || 'Unknown CTA',
-              cta.type || 'unknown',
-              cta.placement || 'unknown',
+              validType,
+              validPlacement,
               cta.href || '',
               cta.context || '',
               cta.className || '',
