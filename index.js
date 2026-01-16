@@ -26,6 +26,7 @@ import contentUploadRoutes from './routes/content-upload.js';
 import manualInputRoutes from './routes/manual-inputs.js';
 import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
+import organizationRoutes from './routes/organizations.js';
 
 // Load environment variables
 dotenv.config();
@@ -96,6 +97,7 @@ app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), 
 app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
+app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

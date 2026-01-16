@@ -72,7 +72,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
 
       if (availability.has_cta_data) {
         const ctaResult = await db.query(
-          'SELECT cta_text, cta_type, placement FROM cta_analysis WHERE organization_id = $1 ORDER BY conversion_potential DESC LIMIT 10',
+          'SELECT cta_text, cta_type, placement, href, context, data_source FROM cta_analysis WHERE organization_id = $1 ORDER BY conversion_potential DESC LIMIT 10',
           [organizationId]
         );
         websiteData.ctas = ctaResult.rows;
@@ -122,28 +122,64 @@ export class EnhancedBlogGenerationService extends OpenAIService {
     }
     contextSections.push(brandContext);
 
-    // Internal linking context
+    // Internal linking context with real pages
     if (websiteData.internal_links && websiteData.internal_links.length > 0) {
-      const linkContext = `INTERNAL LINKING OPPORTUNITIES:
-${websiteData.internal_links.map(link => 
-  `- Link to "${link.target_url}" with anchor text like "${link.anchor_text}" (${link.link_type} content)`
-).join('\n')}`;
+      const linkContext = `INTERNAL LINKS (real pages from your website):
+
+${websiteData.internal_links.map((link, i) =>
+  `${i + 1}. ${link.anchor_text} → ${link.target_url}
+   Content type: ${link.link_type}`
+).join('\n')}
+
+INTERNAL LINKING INSTRUCTIONS:
+- Use these links when referencing your own services, content, or company information
+- ONLY link to pages from the list above - do not create placeholder internal links
+- Link naturally within the content flow - don't force links
+- Use descriptive anchor text that matches the context
+- Aim for 3-5 internal links if they fit naturally`;
       contextSections.push(linkContext);
     } else if (manualData.internal_linking) {
       const linkContext = `INTERNAL LINKING STRATEGY: ${JSON.stringify(manualData.internal_linking)}`;
       contextSections.push(linkContext);
     }
 
-    // CTA context
+    // External references instructions
+    const externalRefInstructions = `EXTERNAL REFERENCES (for citations and credibility):
+When citing medical information, research, statistics, or expert opinions:
+- You may reference well-known, authoritative sources (e.g., NIH, CDC, Mayo Clinic, academic institutions)
+- Use general knowledge about these sources - do NOT fabricate specific studies or statistics
+- Reference the type of information available from these sources (e.g., "According to medical research..." rather than "A 2024 study found...")
+- Prefer .gov sites, .edu sites, established medical institutions, and professional organizations
+- Only reference information that is widely known and established in the field
+- DO NOT create fake URLs or specific article titles
+- If you're not certain about a source or statistic, omit it rather than fabricate it`;
+    contextSections.push(externalRefInstructions);
+
+    // CTA context with real URLs
     if (websiteData.ctas && websiteData.ctas.length > 0) {
-      const ctaContext = `CALL-TO-ACTION PATTERNS (from website analysis):
-${websiteData.ctas.map(cta => 
-  `- "${cta.cta_text}" (${cta.cta_type}, ${cta.placement})`
-).join('\n')}`;
+      const ctaContext = `AVAILABLE CTAS (use these EXACT URLs - do not modify):
+
+${websiteData.ctas.map((cta, i) =>
+  `${i + 1}. "${cta.cta_text}" → ${cta.href}
+   Type: ${cta.cta_type} | Best placement: ${cta.placement}
+   Context: ${cta.context || 'General use'}`
+).join('\n\n')}
+
+CRITICAL CTA INSTRUCTIONS:
+- ONLY use CTAs from the list above
+- Use the EXACT href URLs provided - do not modify them
+- Integrate CTAs naturally where they fit the content flow
+- If a CTA doesn't fit naturally, skip it (don't force it)
+- NEVER create placeholder URLs like "https://www.yourwebsite.com/..."
+- If no CTAs fit, it's okay to have none`;
       contextSections.push(ctaContext);
     } else if (manualData.cta_preferences) {
       const ctaContext = `CTA PREFERENCES: ${JSON.stringify(manualData.cta_preferences)}`;
       contextSections.push(ctaContext);
+    } else {
+      // No CTAs available - inform OpenAI
+      const noCTAContext = `NO CTAS AVAILABLE: This organization has not configured CTAs yet. Do not include any calls-to-action or generate placeholder URLs. Create informational content only.`;
+      contextSections.push(noCTAContext);
     }
 
     // Target audience context

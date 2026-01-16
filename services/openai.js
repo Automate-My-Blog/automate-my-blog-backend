@@ -483,7 +483,8 @@ CRITICAL REQUIREMENTS:
 1. FACTUAL ACCURACY: Never fabricate statistics, studies, case studies, or personal stories. Work only with established knowledge and general principles.
 2. ANALYTICAL DEPTH: Provide unique insights through analysis and synthesis of existing knowledge, not generic advice.
 3. EMOTIONAL INTELLIGENCE: Demonstrate deep understanding of the reader's lived experience and emotional reality.
-4. ORIGINALITY: Avoid predictable templates. Create content that makes readers think "I never thought of it that way" or "This person really understands my situation."`
+4. ORIGINALITY: Avoid predictable templates. Create content that makes readers think "I never thought of it that way" or "This person really understands my situation."
+5. CTA INTEGRITY: ONLY use CTAs explicitly provided in the "AVAILABLE CTAS" section. Use the EXACT href URLs - never modify or generate new ones. Place CTAs naturally where they enhance content, not randomly. If no CTAs are provided, do NOT create any - just informational content. NEVER generate placeholder URLs like "yourwebsite.com" or "example.com". Better to have no CTA than a fake/placeholder CTA.`
           },
           {
             role: 'user',
