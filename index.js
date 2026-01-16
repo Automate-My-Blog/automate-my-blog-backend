@@ -530,6 +530,12 @@ app.post('/api/analyze-website', async (req, res) => {
     const scrapedContent = await webScraperService.scrapeWebsite(url);
     console.log('Scraping completed. Title:', scrapedContent.title);
     console.log('Content length:', scrapedContent.content?.length || 0);
+
+    console.log('🎯 [CTA DEBUG] Scraper found CTAs:', {
+      url,
+      ctaCount: scrapedContent.ctas?.length || 0,
+      ctas: scrapedContent.ctas?.map(c => ({ text: c.text, type: c.type, href: c.href })) || []
+    });
     
     // Combine title, description, content for analysis
     const fullContent = `
@@ -714,7 +720,107 @@ app.post('/api/analyze-website', async (req, res) => {
         );
         
         console.log('✅ Created new organization intelligence record');
-        
+
+        // Store CTAs found by scraper
+        if (organizationId && scrapedContent.ctas && scrapedContent.ctas.length > 0) {
+          console.log('🎯 [CTA DEBUG] Storing CTAs for organization:', {
+            organizationId,
+            ctaCount: scrapedContent.ctas.length
+          });
+
+          let ctaStoredCount = 0;
+          for (const cta of scrapedContent.ctas) {
+            try {
+              console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
+                organizationId,
+                ctaText: cta.text,
+                ctaType: cta.type,
+                href: cta.href,
+                placement: cta.placement || 'unknown'
+              });
+
+              await db.query(`
+                INSERT INTO cta_analysis (
+                  organization_id, page_url, cta_text, cta_type, placement,
+                  href, context, class_name, tag_name, conversion_potential,
+                  visibility_score, page_type, analysis_source, data_source, scraped_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+                ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
+                  cta_type = EXCLUDED.cta_type,
+                  href = EXCLUDED.href,
+                  context = EXCLUDED.context,
+                  data_source = EXCLUDED.data_source,
+                  scraped_at = EXCLUDED.scraped_at
+              `, [
+                organizationId,
+                url,
+                cta.text || 'Unknown CTA',
+                cta.type || 'unknown',
+                cta.placement || 'unknown',
+                cta.href || '',
+                cta.context || '',
+                cta.className || '',
+                cta.tagName || 'a',
+                cta.conversion_potential || 70,
+                cta.visibility_score || 70,
+                'homepage',
+                'website_scraping',
+                'scraped'
+              ]);
+
+              ctaStoredCount++;
+              console.log('✅ [CTA DEBUG] CTA stored successfully:', {
+                ctaText: cta.text,
+                organizationId
+              });
+            } catch (ctaError) {
+              console.error('🚨 [CTA DEBUG] Failed to store individual CTA:', {
+                ctaText: cta.text,
+                error: ctaError.message,
+                organizationId
+              });
+            }
+          }
+
+          console.log('✅ [CTA DEBUG] CTA storage complete:', {
+            totalStoredCTAs: ctaStoredCount,
+            expectedCTAs: scrapedContent.ctas.length,
+            organizationId
+          });
+
+          // Update organization has_cta_data flag
+          if (ctaStoredCount > 0) {
+            await db.query(`
+              UPDATE organizations
+              SET data_availability = jsonb_set(
+                COALESCE(data_availability, '{}'::jsonb),
+                '{has_cta_data}',
+                'true'::jsonb
+              )
+              WHERE id = $1
+            `, [organizationId]);
+
+            console.log('🎯 [CTA DEBUG] Updated organization has_cta_data flag:', {
+              organizationId,
+              has_cta_data: true,
+              cta_count: ctaStoredCount
+            });
+          }
+
+          console.log('🚩 [CHECKPOINT 1] Website Analysis Complete:', {
+            organizationId,
+            ctasExtracted: scrapedContent.ctas.length,
+            ctasStored: ctaStoredCount,
+            nextStep: 'Verify cta_analysis table has rows for this org'
+          });
+        } else {
+          console.log('⚠️ [CTA DEBUG] No CTAs to store:', {
+            hasOrganizationId: !!organizationId,
+            hasCTAs: !!(scrapedContent.ctas && scrapedContent.ctas.length > 0),
+            ctaCount: scrapedContent.ctas?.length || 0
+          });
+        }
+
       } else {
         console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
       }
