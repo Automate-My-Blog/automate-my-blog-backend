@@ -130,103 +130,108 @@ TONE GUIDELINES:
 - Focus on how poor quality hurts customer trust and conversions
 - Use analogies but be realistic about business impact
 
+CRITICAL: The scores shown below are ONLY to demonstrate the JSON structure.
+DO NOT copy these example values. You MUST calculate unique, accurate scores
+based on the actual content quality. Each piece of content will have different
+scores - they should vary significantly based on real analysis.
+
 Return analysis in this exact JSON structure:
 {
   "titleAnalysis": {
     "titleEffectiveness": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Educational explanation with specific quotes from their content..."
     },
     "titleLength": {
-      "score": 92,
-      "characterCount": 35,
+      "score": <0-100 based on actual content>,
+      "characterCount": <actual character count>,
       "explanation": "Simple explanation of why length matters for search results..."
     },
     "clickThroughPotential": {
-      "score": 78,
+      "score": <0-100 based on actual content>,
       "explanation": "Analysis of emotional hooks and compelling language..."
     },
     "headlineHierarchy": {
-      "score": 88,
-      "h1Count": 1,
-      "h2Count": 3,
-      "h3Count": 7,
+      "score": <0-100 based on actual content>,
+      "h1Count": <actual count>,
+      "h2Count": <actual count>,
+      "h3Count": <actual count>,
       "explanation": "How heading structure guides readers and search engines..."
     },
     "subheadingQuality": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Analysis of scannable format and user questions answered..."
     }
   },
   "contentFlow": {
     "introductionEffectiveness": {
-      "score": 92,
+      "score": <0-100 based on actual content>,
       "explanation": "Analysis of opening hook with quoted example...",
       "hookQuote": "Actual quote from their opening"
     },
     "logicalProgression": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "How content flows from problem to solution..."
     },
     "paragraphLength": {
-      "score": 85,
-      "averageWordsPerParagraph": 45,
+      "score": <0-100 based on actual content>,
+      "averageWordsPerParagraph": <actual average>,
       "explanation": "Mobile readability and bite-sized content analysis..."
     },
     "transitionQuality": {
-      "score": 82,
+      "score": <0-100 based on actual content>,
       "explanation": "How sections connect smoothly..."
     },
     "conclusionStrength": {
-      "score": 79,
+      "score": <0-100 based on actual content>,
       "explanation": "Analysis of ending impact and call-to-action..."
     }
   },
   "engagementUX": {
     "readingLevel": {
-      "score": 88,
-      "grade": "8th grade",
+      "score": <0-100 based on actual content>,
+      "grade": "<calculated reading level>",
       "explanation": "Accessibility for target audience..."
     },
     "sentenceVariety": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Mix of short and long sentences for engagement..."
     },
     "activeVoiceUsage": {
-      "score": 90,
-      "percentage": 85,
+      "score": <0-100 based on actual content>,
+      "percentage": <actual percentage>,
       "explanation": "Direct, actionable language analysis..."
     },
     "questionUsage": {
-      "score": 82,
+      "score": <0-100 based on actual content>,
       "explanation": "Mental engagement through strategic questions..."
     },
     "storytellingElements": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Concrete examples and relatable scenarios..."
     }
   },
   "authorityEAT": {
     "expertiseDemonstration": {
-      "score": 83,
+      "score": <0-100 based on actual content>,
       "explanation": "Specific knowledge and professional insights shown..."
     },
     "authoritySignals": {
-      "score": 75,
+      "score": <0-100 based on actual content>,
       "explanation": "Credentials and professional background indicators..."
     },
     "trustworthinessIndicators": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Empathy and authentic approach to audience concerns..."
     },
     "personalExperience": {
-      "score": 90,
+      "score": <0-100 based on actual content>,
       "explanation": "First-hand knowledge and authentic anecdotes..."
     }
   },
   "technicalSEO": {
     "internalLinkingOpportunities": {
-      "score": 65,
+      "score": <0-100 based on actual content>,
       "explanation": "Potential for helpful content connections...",
       "suggestions": [
         "Link 'specific phrase' to related content topic",
@@ -234,146 +239,146 @@ Return analysis in this exact JSON structure:
       ]
     },
     "externalLinkQuality": {
-      "score": 70,
+      "score": <0-100 based on actual content>,
       "explanation": "Credibility through authoritative sources..."
     },
     "featuredSnippetOptimization": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Clear answers optimized for search features..."
     },
     "schemaMarkupPotential": {
-      "score": 80,
+      "score": <0-100 based on actual content>,
       "explanation": "Structured data opportunities for better visibility..."
     }
   },
   "conversionOptimization": {
     "valuePropositionClarity": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Clear benefits and outcomes for readers..."
     },
     "trustBuildingElements": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Empathy and realistic expectations..."
     },
     "urgencyCreation": {
-      "score": 65,
+      "score": <0-100 based on actual content>,
       "explanation": "Gentle motivation without being pushy..."
     },
     "leadMagnetPotential": {
-      "score": 90,
+      "score": <0-100 based on actual content>,
       "explanation": "Content that could become valuable resources..."
     },
     "emailCaptureOptimization": {
-      "score": 75,
+      "score": <0-100 based on actual content>,
       "explanation": "Natural opportunities for continued engagement..."
     }
   },
   "contentDepth": {
     "topicCoverage": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Comprehensive addressing of audience needs..."
     },
     "competingContentAnalysis": {
-      "score": 82,
+      "score": <0-100 based on actual content>,
       "explanation": "Differentiation from typical generic advice..."
     },
     "informationGaps": {
-      "score": 78,
+      "score": <0-100 based on actual content>,
       "explanation": "Additional topics that could enhance value..."
     },
     "uniqueAngle": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Distinctive approach that sets content apart..."
     },
     "resourceCompleteness": {
-      "score": 80,
+      "score": <0-100 based on actual content>,
       "explanation": "Actionable tools and next steps provided..."
     }
   },
   "mobileAccessibility": {
     "mobileReadability": {
-      "score": 90,
+      "score": <0-100 based on actual content>,
       "explanation": "Mobile-friendly formatting and structure..."
     },
     "voiceSearchOptimization": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Natural language matching voice queries..."
     },
     "accessibilityConsiderations": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Inclusive design for all readers..."
     },
     "loadingSpeedImpact": {
-      "score": 92,
+      "score": <0-100 based on actual content>,
       "explanation": "Lightweight content for fast loading..."
     }
   },
   "socialSharing": {
     "shareabilityFactors": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Quotable insights and valuable takeaways..."
     },
     "socialProofIntegration": {
-      "score": 70,
+      "score": <0-100 based on actual content>,
       "explanation": "Testimonials and success stories potential..."
     },
     "visualContentNeeds": {
-      "score": 75,
+      "score": <0-100 based on actual content>,
       "explanation": "Infographic and visual enhancement opportunities..."
     },
     "viralPotential": {
-      "score": 80,
+      "score": <0-100 based on actual content>,
       "explanation": "Emotional connection and community sharing appeal..."
     }
   },
   "contentFreshness": {
     "evergreenPotential": {
-      "score": 95,
+      "score": <0-100 based on actual content>,
       "explanation": "Timeless value that remains relevant..."
     },
     "updateRequirements": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Minimal maintenance needed for ongoing relevance..."
     },
     "seasonalRelevance": {
-      "score": 80,
+      "score": <0-100 based on actual content>,
       "explanation": "Opportunities for seasonal content refreshes..."
     },
     "contentSeriesPotential": {
-      "score": 90,
+      "score": <0-100 based on actual content>,
       "explanation": "Foundation for expanded content library..."
     }
   },
   "competitiveDifferentiation": {
     "uniqueValueAdds": {
-      "score": 88,
+      "score": <0-100 based on actual content>,
       "explanation": "Distinctive elements that set content apart..."
     },
     "contentGapAnalysis": {
-      "score": 82,
+      "score": <0-100 based on actual content>,
       "explanation": "Market opportunities and underserved topics..."
     },
     "competitiveAdvantages": {
-      "score": 85,
+      "score": <0-100 based on actual content>,
       "explanation": "Strengths that differentiate from competitors..."
     },
     "marketPositioning": {
-      "score": 87,
+      "score": <0-100 based on actual content>,
       "explanation": "Brand voice and expertise positioning..."
     }
   },
   "overallAssessment": {
-    "score": 87,
-    "summary": "Your content perfectly balances expertise with empathy, making your target audience feel both understood and guided. The specific examples and actionable advice set you apart from generic content.",
+    "score": <0-100 calculated from all section scores>,
+    "summary": "Your honest assessment of the content quality...",
     "topStrengths": [
-      "Emotional connection with real examples",
-      "Specific, actionable advice",
-      "Perfect reading level for target audience"
+      "Specific strength 1 from actual content",
+      "Specific strength 2 from actual content",
+      "Specific strength 3 from actual content"
     ],
     "topImprovements": [
-      "Add authority signals (credentials/experience)",
-      "Include more internal links to related content",
-      "Create gentle urgency without being pushy"
+      "Specific improvement 1 for actual content",
+      "Specific improvement 2 for actual content",
+      "Specific improvement 3 for actual content"
     ]
   }
 }`;
@@ -613,7 +618,7 @@ Return analysis in this exact JSON structure:
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',       // Use faster gpt-4o instead of gpt-4o-mini
         max_tokens: 3500,      // Slightly reduced for faster response
-        temperature: 0.3,      // Balanced creativity and consistency
+        temperature: 0.5,      // Allow more variation in scores while maintaining quality
         messages: [
           {
             role: 'system',
