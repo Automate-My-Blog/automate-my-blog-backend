@@ -600,13 +600,26 @@ Return analysis in this exact JSON structure:
       
       // Validate content
       this.validateContent(content);
-      
+
       // Generate content hash for deduplication
       const contentHash = this.generateContentHash(content);
-      
+
+      // Check for existing analysis (cache)
+      const existingAnalysis = await this.checkExistingAnalysis(userId, contentHash);
+      if (existingAnalysis) {
+        const duration = Date.now() - startTime;
+        console.log(`✅ Using cached analysis for user: ${userId} (${duration}ms)`);
+        return {
+          success: true,
+          analysisId: existingAnalysis.id,
+          fromCache: true,
+          analysis: this.formatStoredAnalysis(existingAnalysis)
+        };
+      }
+
       // Build comprehensive prompt
       const prompt = this.buildComprehensivePrompt(content, context);
-      
+
       // Call OpenAI for analysis
       console.log('🧠 Calling OpenAI for comprehensive SEO analysis...');
       
