@@ -579,12 +579,13 @@ export class WebScraperService {
       console.log('🚀 Starting Browserless.io scraping for:', url);
       
       // Check if we have a Browserless API token
-      const browserlessToken = process.env.BROWSERLESS_TOKEN;
+      const browserlessToken = process.env.BROWSERLESS_API_TOKEN || process.env.BROWSERLESS_TOKEN;
       if (!browserlessToken) {
-        console.warn('⚠️ BROWSERLESS_TOKEN not found, skipping Browserless.io...');
+        console.warn('⚠️ BROWSERLESS_API_TOKEN not found, skipping Browserless.io...');
         throw new Error('Browserless API token not configured');
       }
-      
+
+      console.log('✅ Browserless API token found, using Browserless.io service');
       const browserlessEndpoint = `https://production-sfo.browserless.io/scrape?token=${browserlessToken}`;
       
       // Configure the scraping request
