@@ -865,17 +865,49 @@ app.post('/api/analyze-website', async (req, res) => {
       console.error('🚨 [CTA DEBUG] CTA storage failed:', ctaStorageError.message);
     }
 
+    // Fetch stored CTAs to include in response
+    let storedCTAs = [];
+    if (foundOrganizationId && ctaStoredCount > 0) {
+      try {
+        const ctaResult = await db.query(`
+          SELECT id, cta_text as text, cta_type as type, href, placement,
+                 conversion_potential, data_source
+          FROM cta_analysis
+          WHERE organization_id = $1
+          ORDER BY conversion_potential DESC
+          LIMIT 5
+        `, [foundOrganizationId]);
+        storedCTAs = ctaResult.rows;
+        console.log('📊 [CTA DEBUG] Fetched CTAs for response:', {
+          organizationId: foundOrganizationId,
+          ctaCount: storedCTAs.length
+        });
+      } catch (fetchError) {
+        console.warn('⚠️ Failed to fetch CTAs for response:', fetchError.message);
+      }
+    }
+
     const response = {
       success: true,
       url,
       scrapedAt: scrapedContent.scrapedAt,
-      analysis,
+      analysis: {
+        ...analysis,
+        organizationId: foundOrganizationId  // Add organizationId for frontend
+      },
       metadata: {
         title: scrapedContent.title,
         headings: scrapedContent.headings
-      }
+      },
+      ctas: storedCTAs,  // Include CTAs in response
+      ctaCount: storedCTAs.length,
+      hasSufficientCTAs: storedCTAs.length >= 3
     };
 
+    console.log('📊 [CTA DEBUG] Sending response with CTAs:', {
+      ctaCount: storedCTAs.length,
+      hasOrganizationId: !!foundOrganizationId
+    });
     console.log('Sending successful response');
     res.json(response);
 
