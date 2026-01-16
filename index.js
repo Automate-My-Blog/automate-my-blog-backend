@@ -721,112 +721,157 @@ app.post('/api/analyze-website', async (req, res) => {
         
         console.log('✅ Created new organization intelligence record');
 
-        // Store CTAs found by scraper
-        if (organizationId && scrapedContent.ctas && scrapedContent.ctas.length > 0) {
-          console.log('🎯 [CTA DEBUG] Storing CTAs for organization:', {
-            organizationId,
-            ctaCount: scrapedContent.ctas.length
-          });
-
-          let ctaStoredCount = 0;
-          for (const cta of scrapedContent.ctas) {
-            try {
-              console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
-                organizationId,
-                ctaText: cta.text,
-                ctaType: cta.type,
-                href: cta.href,
-                placement: cta.placement || 'unknown'
-              });
-
-              await db.query(`
-                INSERT INTO cta_analysis (
-                  organization_id, page_url, cta_text, cta_type, placement,
-                  href, context, class_name, tag_name, conversion_potential,
-                  visibility_score, page_type, analysis_source, data_source, scraped_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-                ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
-                  cta_type = EXCLUDED.cta_type,
-                  href = EXCLUDED.href,
-                  context = EXCLUDED.context,
-                  data_source = EXCLUDED.data_source,
-                  scraped_at = EXCLUDED.scraped_at
-              `, [
-                organizationId,
-                url,
-                cta.text || 'Unknown CTA',
-                cta.type || 'unknown',
-                cta.placement || 'unknown',
-                cta.href || '',
-                cta.context || '',
-                cta.className || '',
-                cta.tagName || 'a',
-                cta.conversion_potential || 70,
-                cta.visibility_score || 70,
-                'homepage',
-                'website_scraping',
-                'scraped'
-              ]);
-
-              ctaStoredCount++;
-              console.log('✅ [CTA DEBUG] CTA stored successfully:', {
-                ctaText: cta.text,
-                organizationId
-              });
-            } catch (ctaError) {
-              console.error('🚨 [CTA DEBUG] Failed to store individual CTA:', {
-                ctaText: cta.text,
-                error: ctaError.message,
-                organizationId
-              });
-            }
-          }
-
-          console.log('✅ [CTA DEBUG] CTA storage complete:', {
-            totalStoredCTAs: ctaStoredCount,
-            expectedCTAs: scrapedContent.ctas.length,
-            organizationId
-          });
-
-          // Update organization has_cta_data flag
-          if (ctaStoredCount > 0) {
-            await db.query(`
-              UPDATE organizations
-              SET data_availability = jsonb_set(
-                COALESCE(data_availability, '{}'::jsonb),
-                '{has_cta_data}',
-                'true'::jsonb
-              )
-              WHERE id = $1
-            `, [organizationId]);
-
-            console.log('🎯 [CTA DEBUG] Updated organization has_cta_data flag:', {
-              organizationId,
-              has_cta_data: true,
-              cta_count: ctaStoredCount
-            });
-          }
-
-          console.log('🚩 [CHECKPOINT 1] Website Analysis Complete:', {
-            organizationId,
-            ctasExtracted: scrapedContent.ctas.length,
-            ctasStored: ctaStoredCount,
-            nextStep: 'Verify cta_analysis table has rows for this org'
-          });
-        } else {
-          console.log('⚠️ [CTA DEBUG] No CTAs to store:', {
-            hasOrganizationId: !!organizationId,
-            hasCTAs: !!(scrapedContent.ctas && scrapedContent.ctas.length > 0),
-            ctaCount: scrapedContent.ctas?.length || 0
-          });
-        }
-
       } else {
         console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
       }
     } catch (saveError) {
       // Don't fail the main request if saving to database fails
       console.error('Failed to save organization intelligence to database:', saveError.message);
+    }
+
+    // Store CTAs regardless of whether organization save succeeded
+    // Find organization ID from database (created by lead capture or organization save)
+    try {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      let userId = null;
+
+      if (token) {
+        try {
+          const jwt = await import('jsonwebtoken');
+          const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+          userId = payload.userId;
+        } catch (jwtError) {
+          console.warn('JWT verification failed for CTA storage:', jwtError.message);
+        }
+      }
+
+      let foundOrganizationId = null;
+
+      if (userId) {
+        const orgResult = await db.query(
+          'SELECT id FROM organizations WHERE owner_user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+          [userId, url]
+        );
+        if (orgResult.rows.length > 0) {
+          foundOrganizationId = orgResult.rows[0].id;
+        }
+      }
+
+      // If no organization found for authenticated user, try session
+      if (!foundOrganizationId) {
+        const sessionId = req.headers['x-session-id'];
+        if (sessionId) {
+          const orgResult = await db.query(
+            'SELECT id FROM organizations WHERE session_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1',
+            [sessionId, url]
+          );
+          if (orgResult.rows.length > 0) {
+            foundOrganizationId = orgResult.rows[0].id;
+          }
+        }
+      }
+
+      console.log('🎯 [CTA DEBUG] Found organization for CTA storage:', {
+        organizationId: foundOrganizationId,
+        url,
+        hasUserId: !!userId
+      });
+
+      // Store CTAs if we have an organization and CTAs exist
+      if (foundOrganizationId && scrapedContent.ctas && scrapedContent.ctas.length > 0) {
+        console.log('🎯 [CTA DEBUG] Storing CTAs for organization:', {
+          organizationId: foundOrganizationId,
+          ctaCount: scrapedContent.ctas.length
+        });
+
+        let ctaStoredCount = 0;
+        for (const cta of scrapedContent.ctas) {
+          try {
+            console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
+              organizationId: foundOrganizationId,
+              ctaText: cta.text,
+              ctaType: cta.type,
+              href: cta.href
+            });
+
+            await db.query(`
+              INSERT INTO cta_analysis (
+                organization_id, page_url, cta_text, cta_type, placement,
+                href, context, class_name, tag_name, conversion_potential,
+                visibility_score, page_type, analysis_source, data_source, scraped_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+              ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
+                cta_type = EXCLUDED.cta_type,
+                href = EXCLUDED.href,
+                context = EXCLUDED.context,
+                data_source = EXCLUDED.data_source,
+                scraped_at = EXCLUDED.scraped_at
+            `, [
+              foundOrganizationId,
+              url,
+              cta.text || 'Unknown CTA',
+              cta.type || 'unknown',
+              cta.placement || 'unknown',
+              cta.href || '',
+              cta.context || '',
+              cta.className || '',
+              cta.tagName || 'a',
+              cta.conversion_potential || 70,
+              cta.visibility_score || 70,
+              'homepage',
+              'website_scraping',
+              'scraped'
+            ]);
+
+            ctaStoredCount++;
+            console.log('✅ [CTA DEBUG] CTA stored successfully:', { ctaText: cta.text });
+          } catch (ctaError) {
+            console.error('🚨 [CTA DEBUG] Failed to store CTA:', {
+              ctaText: cta.text,
+              error: ctaError.message
+            });
+          }
+        }
+
+        console.log('✅ [CTA DEBUG] CTA storage complete:', {
+          totalStoredCTAs: ctaStoredCount,
+          expectedCTAs: scrapedContent.ctas.length,
+          organizationId: foundOrganizationId
+        });
+
+        // Update organization has_cta_data flag
+        if (ctaStoredCount > 0) {
+          await db.query(`
+            UPDATE organizations
+            SET data_availability = jsonb_set(
+              COALESCE(data_availability, '{}'::jsonb),
+              '{has_cta_data}',
+              'true'::jsonb
+            )
+            WHERE id = $1
+          `, [foundOrganizationId]);
+
+          console.log('🎯 [CTA DEBUG] Updated has_cta_data flag:', {
+            organizationId: foundOrganizationId,
+            has_cta_data: true
+          });
+        }
+
+        console.log('🚩 [CHECKPOINT 1] Website Analysis Complete:', {
+          organizationId: foundOrganizationId,
+          ctasExtracted: scrapedContent.ctas.length,
+          ctasStored: ctaStoredCount,
+          nextStep: 'CTAs should now appear in topic cards'
+        });
+      } else {
+        console.log('⚠️ [CTA DEBUG] Cannot store CTAs:', {
+          hasOrganizationId: !!foundOrganizationId,
+          hasCTAs: !!(scrapedContent.ctas && scrapedContent.ctas.length > 0),
+          ctaCount: scrapedContent.ctas?.length || 0
+        });
+      }
+    } catch (ctaStorageError) {
+      console.error('🚨 [CTA DEBUG] CTA storage failed:', ctaStorageError.message);
     }
 
     const response = {
