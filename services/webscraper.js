@@ -38,17 +38,18 @@ export class WebScraperService {
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
       try {
         console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
-        
-        // Use CommonJS require instead of ES module import for better compatibility
-        const chromium = require('@sparticuz/chromium');
-        
+
+        // Use dynamic import for ES modules
+        const chromiumModule = await import('@sparticuz/chromium');
+        const chromium = chromiumModule.default || chromiumModule;
+
         // Use the documented 2024 pattern for @sparticuz/chromium
         config.executablePath = await chromium.executablePath();
         config.args = [...config.args, ...chromium.args];
-        
+
         console.log('✅ Using @sparticuz/chromium with executablePath:', config.executablePath);
         console.log('🔧 Chromium args added:', chromium.args.length);
-        
+
         return config;
       } catch (importError) {
         console.error('❌ Failed to load @sparticuz/chromium:', importError);
@@ -345,17 +346,18 @@ export class WebScraperService {
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
       try {
         console.log('🔧 Attempting to configure Playwright for serverless...');
-        
-        // Use CommonJS require for @sparticuz/chromium
-        const chromium = require('@sparticuz/chromium');
-        
+
+        // Use dynamic import for ES modules
+        const chromiumModule = await import('@sparticuz/chromium');
+        const chromium = chromiumModule.default || chromiumModule;
+
         // Set executable path for Playwright
         config.executablePath = await chromium.executablePath();
         config.args = [...config.args, ...chromium.args];
-        
+
         console.log('✅ Using @sparticuz/chromium with Playwright, executablePath:', config.executablePath);
         console.log('🔧 Chromium args added for Playwright:', chromium.args.length);
-        
+
         return config;
       } catch (importError) {
         console.error('❌ Failed to load @sparticuz/chromium for Playwright:', importError);

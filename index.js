@@ -603,7 +603,7 @@ app.post('/api/analyze-website', async (req, res) => {
           target_audience: analysis?.targetAudience,
           brand_voice: analysis?.brandVoice,
           website_goals: analysis?.websiteGoals,
-          search_behavior_summary: analysis?.searchBehavior,
+          // search_behavior_summary: analysis?.searchBehavior, // Column not yet migrated in production DB
           last_analyzed_at: now
         };
         
