@@ -458,15 +458,19 @@ Return analysis in this exact JSON structure:
   }
 
   /**
-   * Check for existing analysis
+   * Check for existing analysis by post ID
    */
-  async checkExistingAnalysis(userId, contentHash) {
+  async checkExistingAnalysis(userId, postId) {
     try {
+      if (!postId) {
+        return null; // No post ID means we can't check for existing analysis
+      }
+
       const result = await db.query(
-        'SELECT * FROM comprehensive_seo_analyses WHERE user_id = $1 AND content_hash = $2 ORDER BY created_at DESC LIMIT 1',
-        [userId, contentHash]
+        'SELECT * FROM comprehensive_seo_analyses WHERE user_id = $1 AND post_id = $2 ORDER BY created_at DESC LIMIT 1',
+        [userId, postId]
       );
-      
+
       return result.rows[0] || null;
     } catch (error) {
       console.error('Error checking existing analysis:', error);
@@ -523,12 +527,16 @@ Return analysis in this exact JSON structure:
     const insertValues = Object.values(insertData);
     const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
     
-    // Use UPSERT to handle potential duplicate content hash for same user
+    // Use UPSERT to handle re-analyzing the same post
+    // Each post has one analysis; re-analyzing updates it
     const result = await db.query(
-      `INSERT INTO comprehensive_seo_analyses (${insertFields.join(', ')}) 
-       VALUES (${insertPlaceholders}) 
-       ON CONFLICT (content_hash, user_id) 
+      `INSERT INTO comprehensive_seo_analyses (${insertFields.join(', ')})
+       VALUES (${insertPlaceholders})
+       ON CONFLICT (post_id, user_id)
        DO UPDATE SET
+         content_hash = EXCLUDED.content_hash,
+         content_preview = EXCLUDED.content_preview,
+         content_word_count = EXCLUDED.content_word_count,
          title_analysis = EXCLUDED.title_analysis,
          content_flow = EXCLUDED.content_flow,
          engagement_ux = EXCLUDED.engagement_ux,
@@ -591,30 +599,40 @@ Return analysis in this exact JSON structure:
    */
   async analyzeContent(userId, content, context = {}, postId = null) {
     const startTime = Date.now();
-    
+
     try {
+      // Validate required parameters
+      if (!postId) {
+        throw new Error('Post ID is required for SEO analysis. Each analysis must be linked to a specific post.');
+      }
+
       // Rate limiting check
       if (!this.checkRateLimit(userId)) {
         throw new Error('Rate limit exceeded. Maximum 10 analyses per hour.');
       }
-      
+
       // Validate content
       this.validateContent(content);
 
-      // Generate content hash for deduplication
+      // Generate content hash for tracking content changes
       const contentHash = this.generateContentHash(content);
 
-      // Check for existing analysis (cache)
-      const existingAnalysis = await this.checkExistingAnalysis(userId, contentHash);
+      // Check for existing analysis for this specific post
+      const existingAnalysis = await this.checkExistingAnalysis(userId, postId);
       if (existingAnalysis) {
-        const duration = Date.now() - startTime;
-        console.log(`✅ Using cached analysis for user: ${userId} (${duration}ms)`);
-        return {
-          success: true,
-          analysisId: existingAnalysis.id,
-          fromCache: true,
-          analysis: this.formatStoredAnalysis(existingAnalysis)
-        };
+        // Check if content has changed
+        if (existingAnalysis.content_hash === contentHash) {
+          const duration = Date.now() - startTime;
+          console.log(`✅ Using cached analysis for post ${postId} (content unchanged, ${duration}ms)`);
+          return {
+            success: true,
+            analysisId: existingAnalysis.id,
+            fromCache: true,
+            analysis: this.formatStoredAnalysis(existingAnalysis)
+          };
+        } else {
+          console.log(`🔄 Content changed for post ${postId}, regenerating analysis...`);
+        }
       }
 
       // Build comprehensive prompt
@@ -793,7 +811,7 @@ router.post('/', async (req, res) => {
   try {
     const { content, context = {}, postId } = req.body;
     const userId = req.user.userId;
-    
+
     if (!content) {
       return res.status(400).json({
         success: false,
@@ -801,8 +819,16 @@ router.post('/', async (req, res) => {
         message: 'Content is required for analysis'
       });
     }
-    
-    console.log(`📊 Starting comprehensive SEO analysis for user: ${userId}`);
+
+    if (!postId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required field',
+        message: 'Post ID is required for analysis. Each analysis must be linked to a specific post.'
+      });
+    }
+
+    console.log(`📊 Starting comprehensive SEO analysis for user: ${userId}, post: ${postId}`);
     
     const result = await seoAnalysisService.analyzeContent(
       userId,
