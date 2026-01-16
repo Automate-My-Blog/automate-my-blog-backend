@@ -784,6 +784,25 @@ Provide analysis in JSON format:
         organizationId,
         success: ctaStoredCount > 0
       });
+
+      // Update organization has_cta_data flag if CTAs were stored
+      if (ctaStoredCount > 0) {
+        await db.query(`
+          UPDATE organizations
+          SET data_availability = jsonb_set(
+            COALESCE(data_availability, '{}'::jsonb),
+            '{has_cta_data}',
+            'true'::jsonb
+          )
+          WHERE id = $1
+        `, [organizationId]);
+
+        console.log('🎯 [CTA DEBUG] Updated has_cta_data flag in blog analyzer:', {
+          organizationId,
+          has_cta_data: true,
+          ctasStored: ctaStoredCount
+        });
+      }
     } catch (error) {
       console.error('Failed to store analysis results:', error.message);
       console.error('Error details:', error);
