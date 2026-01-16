@@ -680,8 +680,8 @@ Provide analysis in JSON format:
                 INSERT INTO cta_analysis (
                   organization_id, page_url, cta_text, cta_type, placement,
                   href, context, class_name, tag_name, conversion_potential,
-                  visibility_score, page_type, analysis_source, scraped_at
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+                  visibility_score, page_type, analysis_source, data_source, scraped_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
                 ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
                   cta_type = EXCLUDED.cta_type,
                   href = EXCLUDED.href,
@@ -692,6 +692,7 @@ Provide analysis in JSON format:
                   visibility_score = EXCLUDED.visibility_score,
                   page_type = EXCLUDED.page_type,
                   analysis_source = EXCLUDED.analysis_source,
+                  data_source = EXCLUDED.data_source,
                   scraped_at = EXCLUDED.scraped_at
               `, [
                 organizationId,
@@ -706,7 +707,8 @@ Provide analysis in JSON format:
                 cta.conversion_potential || 70,
                 cta.visibility_score || 70,
                 pageAnalysis.pageType || (pageAnalysis.url?.includes('/blog/') ? 'blog_post' : 'static_page'),
-                'blog_scraping'
+                'blog_scraping',
+                'scraped'  // Track that this CTA came from website scraping
               ]);
               
               ctaStoredCount++;
