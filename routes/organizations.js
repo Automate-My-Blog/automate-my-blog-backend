@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../services/database.js';
+import { normalizeCTA } from '../utils/cta-normalizer.js';
 
 const router = Router();
 
@@ -178,6 +179,9 @@ router.post('/:organizationId/ctas/manual', async (req, res) => {
     let insertedCount = 0;
     for (const cta of ctas) {
       try {
+        // Normalize CTA using centralized utility
+        const normalized = normalizeCTA(cta);
+
         await db.query(`
           INSERT INTO cta_analysis (
             organization_id,
@@ -204,11 +208,11 @@ router.post('/:organizationId/ctas/manual', async (req, res) => {
         `, [
           organizationId,
           websiteUrl || 'manual-entry',
-          cta.text,
-          cta.type,
-          cta.placement,
-          cta.href,
-          cta.context || `Manually entered CTA for ${cta.type}`,
+          normalized.cta_text,
+          normalized.cta_type,
+          normalized.placement,
+          normalized.href,
+          cta.context || `Manually entered CTA for ${normalized.cta_type}`,
           cta.conversion_potential || 75,  // Default potential for manual CTAs
           80,  // Default visibility
           'manual_entry',

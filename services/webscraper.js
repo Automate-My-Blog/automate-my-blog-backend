@@ -819,13 +819,13 @@ export class WebScraperService {
         $(selector).each((i, el) => {
           const text = $(el).text().trim();
           const href = $(el).attr('href') || '';
-          
+
           if (text && text.length > 0 && text.length < 100) {
             ctas.push({
               text,
               href,
               type: this.classifyCTA(text, href),
-              placement: 'content',
+              placement: 'main_content', // Database-valid placement value
               tagName: el.tagName.toLowerCase()
             });
           }
@@ -2511,55 +2511,74 @@ export class WebScraperService {
 
   /**
    * Classify CTA type based on text and context
+   * Returns database-valid CTA types that match schema constraints
+   *
+   * Valid types: 'button', 'contact_link', 'signup_link', 'demo_link', 'trial_link',
+   *              'form', 'email_capture', 'cta_element', 'phone_link', 'download_link'
    */
   classifyCTA(text, href = '') {
     const lowerText = text.toLowerCase();
     const lowerHref = href.toLowerCase();
-    
+
     // Contact/Support CTAs
-    if (lowerText.includes('contact') || lowerText.includes('support') || 
+    if (lowerText.includes('contact') || lowerText.includes('support') ||
         lowerText.includes('help') || lowerHref.includes('contact')) {
-      return 'contact';
+      return 'contact_link';
     }
-    
-    // Purchase/Buy CTAs
-    if (lowerText.includes('buy') || lowerText.includes('purchase') || 
-        lowerText.includes('shop') || lowerText.includes('add to cart') ||
-        lowerHref.includes('cart') || lowerHref.includes('checkout')) {
-      return 'purchase';
+
+    // Phone CTAs
+    if (lowerText.includes('call') || lowerText.includes('phone') ||
+        lowerHref.includes('tel:')) {
+      return 'phone_link';
     }
-    
-    // Demo/Trial CTAs
-    if (lowerText.includes('demo') || lowerText.includes('trial') || 
-        lowerText.includes('try') || lowerText.includes('preview')) {
-      return 'demo';
+
+    // Signup/Register CTAs
+    if (lowerText.includes('sign up') || lowerText.includes('signup') ||
+        lowerText.includes('register') || lowerText.includes('join') ||
+        lowerHref.includes('signup') || lowerHref.includes('register')) {
+      return 'signup_link';
     }
-    
+
+    // Demo CTAs
+    if (lowerText.includes('demo') || lowerText.includes('preview') ||
+        lowerHref.includes('demo')) {
+      return 'demo_link';
+    }
+
+    // Trial CTAs
+    if (lowerText.includes('trial') || lowerText.includes('try') ||
+        lowerHref.includes('trial')) {
+      return 'trial_link';
+    }
+
     // Email/Newsletter CTAs
-    if (lowerText.includes('subscribe') || lowerText.includes('newsletter') || 
-        lowerText.includes('email') || lowerText.includes('sign up')) {
+    if (lowerText.includes('subscribe') || lowerText.includes('newsletter') ||
+        lowerText.includes('email')) {
       return 'email_capture';
     }
-    
+
     // Download CTAs
-    if (lowerText.includes('download') || lowerText.includes('get') || 
+    if (lowerText.includes('download') || lowerText.includes('get') ||
         lowerHref.includes('download')) {
-      return 'download';
+      return 'download_link';
     }
-    
-    // Learn More CTAs
-    if (lowerText.includes('learn') || lowerText.includes('read more') || 
+
+    // Purchase/Buy CTAs - map to button
+    if (lowerText.includes('buy') || lowerText.includes('purchase') ||
+        lowerText.includes('shop') || lowerText.includes('add to cart') ||
+        lowerHref.includes('cart') || lowerHref.includes('checkout')) {
+      return 'button';
+    }
+
+    // Action CTAs (Get Started, Learn More, etc.) - map to button
+    if (lowerText.includes('get started') || lowerText.includes('start') ||
+        lowerText.includes('learn more') || lowerText.includes('read more') ||
         lowerText.includes('discover') || lowerText.includes('explore')) {
-      return 'learn_more';
+      return 'button';
     }
-    
-    // Generic action CTAs
-    if (lowerText.includes('click') || lowerText.includes('view') || 
-        lowerText.includes('see') || lowerText.includes('get started')) {
-      return 'action';
-    }
-    
-    return 'unknown';
+
+    // Generic fallback
+    return 'cta_element';
   }
 }
 

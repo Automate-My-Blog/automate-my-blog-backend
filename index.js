@@ -27,6 +27,7 @@ import manualInputRoutes from './routes/manual-inputs.js';
 import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 import organizationRoutes from './routes/organizations.js';
+import { normalizeCTA } from './utils/cta-normalizer.js';
 
 // Load environment variables
 dotenv.config();
@@ -773,33 +774,15 @@ app.post('/api/analyze-website', async (req, res) => {
         let ctaStoredCount = 0;
         for (const cta of scrapedContent.ctas) {
           try {
-            // Map scraper CTA type to database-valid type
-            const typeMapping = {
-              'contact': 'contact_link',
-              'signup': 'signup_link',
-              'demo': 'demo_link',
-              'trial': 'trial_link',
-              'phone': 'phone_link',
-              'download': 'download_link',
-              'button': 'button',
-              'form': 'form'
-            };
-            const validType = typeMapping[cta.type] || 'cta_element';
+            // Normalize CTA using centralized utility
+            const normalized = normalizeCTA(cta);
 
-            // Use valid placement value (database constraint)
-            // Valid values: 'header', 'footer', 'navigation', 'sidebar', 'main_content', 'popup', 'banner'
-            const validPlacement = cta.placement && ['header', 'footer', 'navigation', 'sidebar', 'main_content', 'popup', 'banner'].includes(cta.placement)
-              ? cta.placement
-              : 'main_content';
-
-            console.log('🎯 [CTA DEBUG] Storing individual CTA (mapped):', {
+            console.log('🎯 [CTA DEBUG] Storing individual CTA (normalized):', {
               organizationId: foundOrganizationId,
-              ctaText: cta.text,
-              originalType: cta.type,
-              mappedType: validType,
-              originalPlacement: cta.placement,
-              mappedPlacement: validPlacement,
-              href: cta.href
+              ctaText: normalized.cta_text,
+              ctaType: normalized.cta_type,
+              placement: normalized.placement,
+              href: normalized.href
             });
 
             await db.query(`
@@ -817,22 +800,22 @@ app.post('/api/analyze-website', async (req, res) => {
             `, [
               foundOrganizationId,
               url,
-              cta.text || 'Unknown CTA',
-              validType,
-              validPlacement,
-              cta.href || '',
-              cta.context || '',
-              cta.className || '',
-              cta.tagName || 'a',
-              cta.conversion_potential || 70,
-              cta.visibility_score || 70,
+              normalized.cta_text,
+              normalized.cta_type,
+              normalized.placement,
+              normalized.href,
+              normalized.context,
+              normalized.class_name,
+              normalized.tag_name,
+              normalized.conversion_potential,
+              normalized.visibility_score,
               'homepage',
               'website_scraping',
               'scraped'
             ]);
 
             ctaStoredCount++;
-            console.log('✅ [CTA DEBUG] CTA stored successfully:', { ctaText: cta.text });
+            console.log('✅ [CTA DEBUG] CTA stored successfully:', { ctaText: normalized.cta_text });
           } catch (ctaError) {
             console.error('🚨 [CTA DEBUG] Failed to store CTA:', {
               ctaText: cta.text,

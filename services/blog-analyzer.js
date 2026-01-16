@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import db from './database.js';
 import webscraper from './webscraper.js';
+import { normalizeCTA } from '../utils/cta-normalizer.js';
 
 /**
  * Blog Content Analysis Service
@@ -711,14 +712,16 @@ Provide analysis in JSON format:
         for (const pageAnalysis of analysisData.ctaAnalysis.ctasByPage) {
           for (const cta of pageAnalysis.ctas) {
             try {
-              console.log('🎯 [CTA DEBUG] Storing individual CTA:', {
-                pageUrl: cta.page_url || pageAnalysis.url,
-                ctaText: cta.text || 'Unknown CTA',
-                ctaType: cta.type || 'unknown',
-                href: cta.href || '',
-                placement: cta.placement || 'unknown',
-                dataSource: 'scraped',
-                conversionPotential: cta.conversion_potential || 70
+              // Normalize CTA using centralized utility
+              const normalized = normalizeCTA(cta);
+              const pageUrl = cta.page_url || pageAnalysis.url;
+
+              console.log('🎯 [CTA DEBUG] Storing individual CTA (normalized):', {
+                pageUrl,
+                ctaText: normalized.cta_text,
+                ctaType: normalized.cta_type,
+                placement: normalized.placement,
+                href: normalized.href
               });
 
               await db.query(`
@@ -741,16 +744,16 @@ Provide analysis in JSON format:
                   scraped_at = EXCLUDED.scraped_at
               `, [
                 organizationId,
-                cta.page_url || pageAnalysis.url,
-                cta.text || 'Unknown CTA',
-                cta.type || 'unknown',
-                cta.placement || 'unknown',
-                cta.href || '',
-                cta.context || '',
-                cta.className || '',
-                cta.tagName || '',
-                cta.conversion_potential || 70,
-                cta.visibility_score || 70,
+                pageUrl,
+                normalized.cta_text,
+                normalized.cta_type,
+                normalized.placement,
+                normalized.href,
+                normalized.context,
+                normalized.class_name,
+                normalized.tag_name,
+                normalized.conversion_potential,
+                normalized.visibility_score,
                 pageAnalysis.pageType || (pageAnalysis.url?.includes('/blog/') ? 'blog_post' : 'static_page'),
                 'blog_scraping',
                 'scraped'  // Track that this CTA came from website scraping
@@ -758,7 +761,7 @@ Provide analysis in JSON format:
 
               ctaStoredCount++;
               console.log('✅ [CTA DEBUG] CTA stored successfully:', {
-                ctaText: cta.text || 'Unknown CTA',
+                ctaText: normalized.cta_text,
                 organizationId
               });
             } catch (ctaError) {
