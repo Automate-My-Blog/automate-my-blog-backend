@@ -556,8 +556,11 @@ router.post('/discover-content', async (req, res) => {
     res.json({
       success: true,
       message: 'Website content analysis completed',
-      analysis: analysisResults,
-      organizationId: organizationId,
+      analysis: {
+        ...analysisResults,
+        organizationId: organizationId  // Include organizationId in analysis object for frontend
+      },
+      organizationId: organizationId,  // Keep at top level for backwards compatibility
       analyzedAt: new Date().toISOString()
     });
 

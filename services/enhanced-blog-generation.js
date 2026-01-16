@@ -188,8 +188,11 @@ CRITICAL CTA INSTRUCTIONS:
       contextSections.push(audienceContext);
     }
 
-    // SEO optimization instructions
+    // SEO optimization instructions (conditional based on available data)
     const seoTarget = settings.target_seo_score || 95;
+    const hasInternalLinks = websiteData.internal_links && websiteData.internal_links.length > 0;
+    const hasCTAs = websiteData.ctas && websiteData.ctas.length > 0;
+
     const seoInstructions = `
 SEO OPTIMIZATION TARGET: ${seoTarget}+ score
 CRITICAL SEO REQUIREMENTS:
@@ -197,8 +200,8 @@ CRITICAL SEO REQUIREMENTS:
 - Meta description: 150-160 characters, action-oriented
 - Headings: Use H1, H2, H3 hierarchy with target keywords
 - Content: 1200-1800 words for comprehensive coverage
-- Include 3-5 internal links naturally within content
-- Add 2-3 relevant CTAs based on content flow
+${hasInternalLinks ? '- Include 3-5 internal links naturally within content (ONLY from the provided INTERNAL LINKS list)' : '- Do NOT include internal links to other pages (no internal links available)'}
+${hasCTAs ? '- Add 2-3 relevant CTAs based on content flow (ONLY from the provided AVAILABLE CTAS list)' : '- Do NOT include CTAs (no CTAs configured)'}
 - Use semantic keywords and related terms throughout
 - Ensure mobile-friendly structure with scannable paragraphs
 - Include actionable takeaways and clear value propositions`;
