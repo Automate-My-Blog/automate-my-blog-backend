@@ -12,19 +12,18 @@ const router = Router();
 router.get('/:organizationId/ctas', async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user.userId;
 
-    // Verify user has access to this organization
+    // Verify organization exists
     const orgCheck = await db.query(
-      'SELECT id FROM organizations WHERE id = $1 AND user_id = $2',
-      [organizationId, userId]
+      'SELECT id, website_url FROM organizations WHERE id = $1',
+      [organizationId]
     );
 
     if (orgCheck.rows.length === 0) {
-      return res.status(403).json({
+      return res.status(404).json({
         success: false,
-        error: 'Access denied',
-        message: 'You do not have access to this organization'
+        error: 'Organization not found',
+        message: 'The requested organization does not exist'
       });
     }
 
@@ -108,19 +107,18 @@ router.post('/:organizationId/ctas/manual', async (req, res) => {
   try {
     const { organizationId } = req.params;
     const { ctas } = req.body;
-    const userId = req.user.userId;
 
-    // Verify user has access to this organization
+    // Verify organization exists
     const orgCheck = await db.query(
-      'SELECT id, website_url FROM organizations WHERE id = $1 AND user_id = $2',
-      [organizationId, userId]
+      'SELECT id, website_url FROM organizations WHERE id = $1',
+      [organizationId]
     );
 
     if (orgCheck.rows.length === 0) {
-      return res.status(403).json({
+      return res.status(404).json({
         success: false,
-        error: 'Access denied',
-        message: 'You do not have access to this organization'
+        error: 'Organization not found',
+        message: 'The requested organization does not exist'
       });
     }
 
