@@ -144,9 +144,138 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Get highlight box types used in previous post to avoid repetition
+   */
+  async getPreviousPostHighlightBoxTypes(organizationId) {
+    try {
+      console.log(`📊 Retrieving previous post highlight box types for organization: ${organizationId}`);
+
+      // Query database for most recent blog post by this organization
+      const query = `
+        SELECT content
+        FROM blog_posts
+        WHERE organization_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `;
+
+      const result = await db.query(query, [organizationId]);
+
+      if (!result.rows || result.rows.length === 0) {
+        console.log('📊 No previous posts found - this is the first post');
+        return []; // No previous posts
+      }
+
+      const previousContent = result.rows[0].content;
+
+      // Extract all highlight box types from content using regex
+      const highlightBoxRegex = /data-highlight-type="(\w+)"/g;
+      const boxTypes = new Set();
+      let match;
+
+      while ((match = highlightBoxRegex.exec(previousContent)) !== null) {
+        boxTypes.add(match[1]);
+      }
+
+      const typesArray = Array.from(boxTypes);
+      console.log(`✅ Found ${typesArray.length} highlight box types in previous post:`, typesArray);
+
+      return typesArray;
+    } catch (error) {
+      console.error('Error retrieving previous highlight box types:', error);
+      return []; // Fail gracefully
+    }
+  }
+
+  /**
+   * Process image placeholders and replace with generated images
+   */
+  async processImagePlaceholders(content, topic, organizationId) {
+    try {
+      console.log('🎨 Processing image placeholders in content...');
+
+      // Extract all image placeholders using regex
+      const imageRegex = /!\[IMAGE:(\w+):(.*?)\]/g;
+      const placeholders = [];
+      let match;
+
+      while ((match = imageRegex.exec(content)) !== null) {
+        placeholders.push({
+          fullMatch: match[0],
+          type: match[1],
+          description: match[2]
+        });
+      }
+
+      if (placeholders.length === 0) {
+        console.log('📊 No image placeholders found in content');
+        return content;
+      }
+
+      console.log(`📊 Found ${placeholders.length} image placeholders to process`);
+
+      // Get brand guidelines if available
+      const brandResult = await db.query(
+        'SELECT input_data FROM user_manual_inputs WHERE organization_id = $1 AND input_type = $2 AND validated = TRUE',
+        [organizationId, 'brand_colors']
+      );
+
+      let brandGuidelines = {};
+      if (brandResult.rows.length > 0) {
+        brandGuidelines = JSON.parse(brandResult.rows[0].input_data);
+      }
+
+      // Generate images for each placeholder in parallel
+      const imagePromises = placeholders.map(async (placeholder, index) => {
+        try {
+          console.log(`🎨 Generating image ${index + 1}/${placeholders.length}: ${placeholder.type}`);
+
+          const imageResult = await this.visualContentService.generateVisualContent({
+            prompt: placeholder.description,
+            contentType: placeholder.type,
+            brandGuidelines: brandGuidelines
+          });
+
+          return {
+            placeholder: placeholder.fullMatch,
+            imageUrl: imageResult.imageUrl,
+            altText: placeholder.description.substring(0, 100)
+          };
+        } catch (error) {
+          console.error(`❌ Failed to generate image for placeholder:`, error.message);
+          return null;
+        }
+      });
+
+      const generatedImages = await Promise.all(imagePromises);
+
+      // Replace placeholders with markdown image syntax
+      let processedContent = content;
+      let replacedCount = 0;
+
+      generatedImages.forEach(image => {
+        if (image && image.imageUrl) {
+          const markdownImage = `![${image.altText}](${image.imageUrl})`;
+          processedContent = processedContent.replace(image.placeholder, markdownImage);
+          replacedCount++;
+          console.log(`✅ Replaced image placeholder with: ${image.imageUrl.substring(0, 50)}...`);
+        }
+      });
+
+      console.log(`✅ Image processing complete: ${replacedCount}/${placeholders.length} images generated`);
+      return processedContent;
+
+    } catch (error) {
+      console.error('❌ Error processing image placeholders:', error);
+      // Return original content if image processing fails
+      return content;
+    }
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    */
-  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '') {
+  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = []) {
     const { availability, settings, manualData, websiteData, completenessScore } = organizationContext;
 
     // Build context sections based on available data
@@ -278,10 +407,84 @@ ${hasCTAs ? '- Add 2-3 relevant CTAs based on content flow (ONLY from the provid
     // Data completeness indicator
     const dataContext = `DATA COMPLETENESS: ${completenessScore}% (${availability.has_blog_content ? '✓' : '✗'} Brand voice, ${availability.has_cta_data ? '✓' : '✗'} CTAs, ${availability.has_internal_links ? '✓' : '✗'} Internal links)`;
 
+    // Build highlight box instructions with exclusions
+    const allBoxTypes = ['statistic', 'pullquote', 'takeaway', 'warning', 'tip', 'definition', 'process', 'comparison'];
+    const availableBoxTypes = allBoxTypes.filter(type => !previousBoxTypes.includes(type));
+
+    let highlightBoxInstructions = `
+## HIGHLIGHT BOX INSTRUCTIONS
+
+You MUST automatically wrap qualifying content in highlight boxes using this HTML format:
+
+<blockquote data-highlight-box="" data-highlight-type="TYPE" data-width="WIDTH" data-font-size="SIZE" data-layout="LAYOUT" data-align="ALIGN" data-custom-bg="BG_COLOR" data-custom-border="BORDER_COLOR">CONTENT</blockquote>
+
+**8 Highlight Box Types:**
+
+1. **statistic** - For numbers, percentages, data points
+   - Example: <blockquote data-highlight-box="" data-highlight-type="statistic" data-width="100%" data-font-size="xxlarge" data-layout="block" data-align="center" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">73% increase in engagement</blockquote>
+
+2. **pullquote** - For expert quotes, testimonials, insights
+   - Example: <blockquote data-highlight-box="" data-highlight-type="pullquote" data-width="50%" data-font-size="large" data-layout="float-right" data-align="left" data-custom-bg="#f6ffed" data-custom-border="#52c41a">"Content marketing generates 3x more leads"</blockquote>
+
+3. **takeaway** - For main points, conclusions
+   - Example: <blockquote data-highlight-box="" data-highlight-type="takeaway" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#fff7e6" data-custom-border="#fa8c16">The bottom line: Email marketing remains the highest ROI channel</blockquote>
+
+4. **warning** - For critical info, alerts
+   - Example: <blockquote data-highlight-box="" data-highlight-type="warning" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#fff1f0" data-custom-border="#ff4d4f">Critical: Never buy email lists!</blockquote>
+
+5. **tip** - For pro tips, best practices
+   - Example: <blockquote data-highlight-box="" data-highlight-type="tip" data-width="50%" data-font-size="small" data-layout="float-left" data-align="left" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">Pro tip: Test subject lines with A/B testing</blockquote>
+
+6. **definition** - For glossary terms, acronyms
+   - Example: <blockquote data-highlight-box="" data-highlight-type="definition" data-width="100%" data-font-size="small" data-layout="block" data-align="left" data-custom-bg="#f0f5ff" data-custom-border="#2f54eb"><strong>SEO:</strong> Increasing website visibility in search results</blockquote>
+
+7. **process** - For step-by-step instructions
+   - Example: <blockquote data-highlight-box="" data-highlight-type="process" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#f9f0ff" data-custom-border="#722ed1"><strong>Step 3:</strong> Set up automated sequences</blockquote>
+
+8. **comparison** - For versus, plan differences
+   - Example: <blockquote data-highlight-box="" data-highlight-type="comparison" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#e6fffb" data-custom-border="#13c2c2"><strong>Free vs Pro:</strong> Free includes 1,000 contacts</blockquote>
+
+**Highlight Box Rules:**
+- Use MAXIMUM 3 highlight boxes per post (regardless of length)
+`;
+
+    if (previousBoxTypes.length > 0) {
+      highlightBoxInstructions += `- DO NOT use these box types (used in previous post): ${previousBoxTypes.join(', ')}\n`;
+      highlightBoxInstructions += `- Choose from remaining types: ${availableBoxTypes.join(', ')}\n`;
+    }
+
+    highlightBoxInstructions += `- Float layouts (float-left, float-right) for tips and pull quotes (50% width)
+- Block layouts for statistics, takeaways, warnings, definitions, processes, comparisons (100% width)
+- Vary box types for visual diversity
+- Place boxes strategically to break up content`;
+
+    const imageInstructions = `
+## IMAGE PLACEMENT INSTRUCTIONS
+
+You MUST insert image placeholders throughout the blog post. Use this exact format:
+
+![IMAGE:type:description]
+
+Where:
+- type = hero_image | infographic | chart | illustration | diagram
+- description = detailed image generation prompt (50-100 words)
+
+**Required Image Placements:**
+1. Hero image after introduction (before first H2)
+2. Supporting image every 300-400 words
+3. Infographic for complex data or processes
+4. Chart/graph when presenting statistics
+5. Illustration for examples or case studies
+
+**Example:**
+![IMAGE:infographic:Create an infographic showing the 5-step email marketing funnel. Include icons for: awareness (magnifying glass), interest (lightbulb), consideration (scales), intent (shopping cart), and conversion (checkmark). Use blue and green color scheme with arrows connecting each stage.]`;
+
     console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
       promptLength: contextSections.length,
       hasCTASection: contextSections.some(section => section.includes('AVAILABLE CTAS') || section.includes('NO CTAS AVAILABLE')),
-      ctaSectionPreview: contextSections.find(s => s.includes('CTA')) || 'No CTA section found'
+      ctaSectionPreview: contextSections.find(s => s.includes('CTA')) || 'No CTA section found',
+      previousBoxTypes: previousBoxTypes.join(', ') || 'none',
+      availableBoxTypes: availableBoxTypes.join(', ')
     });
 
     return `Write a high-quality blog post optimized for ${seoTarget}+ SEO score:
@@ -296,6 +499,10 @@ ${contextSections.join('\n\n')}
 ${dataContext}
 
 ${seoInstructions}
+
+${imageInstructions}
+
+${highlightBoxInstructions}
 
 CONTENT REQUIREMENTS:
 1. STRATEGIC VALUE: Provide actionable insights that demonstrate expertise
@@ -372,8 +579,12 @@ Return JSON format:
         nextStep: organizationContext.websiteData?.ctas?.length > 0 ? 'Build prompt with CTAs' : 'ERROR: No CTAs found'
       });
 
+      // Get previous post's highlight box types to avoid repetition
+      const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
+      console.log(`📊 Previous post used ${previousBoxTypes.length} highlight box types:`, previousBoxTypes);
+
       // Build enhanced prompt with all available data
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -404,7 +615,7 @@ CRITICAL REQUIREMENTS:
           }
         ],
         temperature: 0.3, // Lower temperature for more consistent quality
-        max_tokens: 3500
+        max_tokens: 5000 // Increased to accommodate images and highlight boxes
       });
 
       const endTime = Date.now();
@@ -433,6 +644,14 @@ CRITICAL REQUIREMENTS:
         ctaLinkCount: ctaLinkMatches.length,
         ctaLinks: ctaLinkMatches.slice(0, 5) // Show first 5
       });
+
+      // Process image placeholders and replace with generated images
+      if (blogData.content && blogData.content.includes('![IMAGE:')) {
+        console.log('🎨 Detected image placeholders in content - processing...');
+        blogData.content = await this.processImagePlaceholders(blogData.content, topic, organizationId);
+      } else {
+        console.log('📊 No image placeholders detected in generated content');
+      }
 
       // Enhance blog data with organization context
       blogData.organizationContext = {
