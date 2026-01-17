@@ -831,22 +831,62 @@ app.post('/api/analyze-website', async (req, res) => {
         }
       }
 
-      // Query by website_url to find the organization created by lead capture
-      // Lead capture creates organizations without user_id/session_id, so we search by URL
-      const orgResult = await db.query(
-        'SELECT id FROM organizations WHERE website_url = $1 ORDER BY created_at DESC LIMIT 1',
-        [url]
-      );
+      // Use same user-first lookup as main organization creation
+      // This ensures CTAs are stored in the correct organization
+      if (userId) {
+        console.log('🔍 [CTA DEBUG] Looking up organization by user ID for CTA storage:', { userId });
 
-      if (orgResult.rows.length > 0) {
-        foundOrganizationId = orgResult.rows[0].id;
-        console.log('🎯 [CTA DEBUG] Found organization by website URL:', {
-          organizationId: foundOrganizationId,
-          url,
-          method: 'website_url_lookup'
-        });
+        const userOrgResult = await db.query(
+          'SELECT id FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
+          [userId]
+        );
+
+        if (userOrgResult.rows.length > 0) {
+          foundOrganizationId = userOrgResult.rows[0].id;
+          console.log('✅ [CTA DEBUG] Found user organization for CTA storage:', {
+            organizationId: foundOrganizationId,
+            userId,
+            method: 'user_id_lookup'
+          });
+        } else {
+          // Fallback to URL lookup for anonymous org adoption case
+          console.log('🔍 [CTA DEBUG] No user org found, checking by URL for CTA storage');
+
+          const urlOrgResult = await db.query(
+            'SELECT id FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
+            [url]
+          );
+
+          if (urlOrgResult.rows.length > 0) {
+            foundOrganizationId = urlOrgResult.rows[0].id;
+            console.log('✅ [CTA DEBUG] Found anonymous org by URL for CTA storage:', {
+              organizationId: foundOrganizationId,
+              url,
+              method: 'anonymous_url_lookup'
+            });
+          } else {
+            console.warn('⚠️ [CTA DEBUG] No organization found for authenticated user:', { userId, url });
+          }
+        }
       } else {
-        console.warn('⚠️ [CTA DEBUG] No organization found for URL:', { url });
+        // Anonymous user - lookup by URL
+        console.log('🔍 [CTA DEBUG] Anonymous user, looking up organization by URL for CTA storage');
+
+        const urlOrgResult = await db.query(
+          'SELECT id FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
+          [url]
+        );
+
+        if (urlOrgResult.rows.length > 0) {
+          foundOrganizationId = urlOrgResult.rows[0].id;
+          console.log('✅ [CTA DEBUG] Found anonymous organization for CTA storage:', {
+            organizationId: foundOrganizationId,
+            url,
+            method: 'anonymous_url_lookup'
+          });
+        } else {
+          console.warn('⚠️ [CTA DEBUG] No organization found for URL:', { url });
+        }
       }
 
       console.log('🎯 [CTA DEBUG] Found organization for CTA storage:', {
