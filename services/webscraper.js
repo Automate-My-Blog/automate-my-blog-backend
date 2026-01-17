@@ -1771,22 +1771,78 @@ export class WebScraperService {
 
         // Extract CTAs from the blog post (before removing elements)
         const ctaElements = [];
-        
-        // Enhanced CTA selectors for blog posts
+
+        // Navigation link filter - these are NOT conversion CTAs
+        const navigationPatterns = [
+          /blog/i,
+          /cart/i,
+          /about/i,
+          /home/i,
+          /services/i,
+          /products/i,
+          /gallery/i,
+          /portfolio/i,
+          /team/i,
+          /careers/i,
+          /faq/i,
+          /privacy/i,
+          /terms/i
+        ];
+
+        const isNavigationLink = (href, text) => {
+          if (!href && !text) return false;
+
+          const hrefLower = (href || '').toLowerCase();
+          const textLower = (text || '').toLowerCase();
+
+          // Check if href or text matches navigation patterns
+          return navigationPatterns.some(pattern =>
+            pattern.test(hrefLower) || pattern.test(textLower)
+          );
+        };
+
+        // Unified conversion-focused CTA selectors
         const ctaSelectors = [
-          { selector: 'button, .btn, .button', type: 'button' },
+          // Contact CTAs
           { selector: 'a[href*="contact"]', type: 'contact_link' },
-          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
-          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+          { selector: 'button[class*="contact"]', type: 'contact_link' },
+
+          // Scheduling CTAs
+          { selector: 'a[href*="schedule"]', type: 'schedule_link' },
+          { selector: 'a[href*="book"]', type: 'schedule_link' },
+          { selector: 'a[href*="appointment"]', type: 'schedule_link' },
+          { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
+
+          // Consultation CTAs
+          { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
+
+          // Demo/Trial CTAs
           { selector: 'a[href*="demo"]', type: 'demo_link' },
           { selector: 'a[href*="trial"]', type: 'trial_link' },
-          { selector: 'a[href*="product"], a[href*="shop"], a[href*="buy"]', type: 'product_link' },
-          { selector: 'a[href*="download"]', type: 'download_link' },
-          { selector: '.share-buttons a, .social-share a', type: 'social_share' },
-          { selector: 'form', type: 'form' },
+          { selector: 'a[href*="free"]', type: 'trial_link' },
+
+          // Purchase CTAs
+          { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
+          { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
+
+          // Request CTAs
+          { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
+          { selector: 'button[class*="request"]', type: 'request_link' },
+
+          // Signup/Subscribe CTAs
+          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+
+          // Generic CTA classes
+          { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
+          { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
+
+          // Form CTAs
+          { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
           { selector: 'input[type="email"]', type: 'email_capture' },
-          { selector: '[class*="cta"], [id*="cta"]', type: 'cta_element' },
-          { selector: 'a[href*="blog"]:not([href*="' + window.location.pathname + '"])', type: 'blog_navigation' }
+
+          // Button CTAs (generic, filtered by context)
+          { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
         ];
 
         for (const { selector, type } of ctaSelectors) {
@@ -1794,23 +1850,41 @@ export class WebScraperService {
           
           elements.forEach((el, index) => {
             if (index >= 8) return; // Limit per type for blog posts
-            
+
             const text = el.textContent?.trim() || el.placeholder || el.value || '';
             const href = el.href || el.action || '';
-            
+
             if (!text && !href) return;
-            
-            // Skip if CTA text is too generic or too long
+
+            // Filter out navigation links
+            if (isNavigationLink(href, text)) {
+              console.log('🚫 [CTA DEBUG] Filtered out navigation link:', { href, text, selector: type });
+              return;
+            }
+
+            // Validate CTA text
             if (!text || text.length < 2 || text.length > 100) return;
-            
+
+            // Skip generic/meaningless text
+            const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
+            if (genericTexts.includes(text.toLowerCase())) return;
+
             // Determine placement
             let placement = 'unknown';
+            const inNav = el.closest('nav, .nav, .navigation') !== null;
             if (el.closest('header, .header')) placement = 'header';
             else if (el.closest('footer, .footer')) placement = 'footer';
-            else if (el.closest('nav, .nav')) placement = 'navigation';
+            else if (inNav) placement = 'navigation';
             else if (el.closest('aside, .sidebar')) placement = 'sidebar';
+            else if (el.closest('.modal, .popup')) placement = 'modal';
             else if (el.closest('article, .post-content, .entry-content')) placement = 'article_content';
             else placement = 'main_content';
+
+            // Skip navigation links in navigation placement
+            if (inNav && isNavigationLink(href, text)) {
+              console.log('🚫 [CTA DEBUG] Navigation link in nav element, skipping:', { href, text });
+              return;
+            }
 
             // Get surrounding context for analysis
             const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
@@ -2175,12 +2249,12 @@ export class WebScraperService {
         })();
 
         // Now remove unwanted elements for clean content extraction
+        // NOTE: Do NOT remove .modal, .popup, .sidebar as they may contain valid CTAs
         const elementsToRemove = [
-          'script', 'style', 'nav', 'header', 'footer', 
-          '.cookie-banner', '.popup', '.modal', '.advertisement',
-          '.social-share', '.comments', '.sidebar'
+          'script', 'style', 'nav', 'header', 'footer',
+          '.cookie-banner', '.advertisement', '.social-share', '.comments'
         ];
-        
+
         elementsToRemove.forEach(selector => {
           document.querySelectorAll(selector).forEach(el => el.remove());
         });
@@ -2237,41 +2311,123 @@ export class WebScraperService {
 
       const ctas = await page.evaluate(() => {
         const ctaElements = [];
-        
-        // CTA selectors and their types
+
+        // Navigation link filter - these are NOT conversion CTAs
+        const navigationPatterns = [
+          /blog/i,
+          /cart/i,
+          /about/i,
+          /home/i,
+          /services/i,
+          /products/i,
+          /gallery/i,
+          /portfolio/i,
+          /team/i,
+          /careers/i,
+          /faq/i,
+          /privacy/i,
+          /terms/i
+        ];
+
+        const isNavigationLink = (href, text) => {
+          if (!href && !text) return false;
+
+          const hrefLower = (href || '').toLowerCase();
+          const textLower = (text || '').toLowerCase();
+
+          // Check if href or text matches navigation patterns
+          return navigationPatterns.some(pattern =>
+            pattern.test(hrefLower) || pattern.test(textLower)
+          );
+        };
+
+        // Unified conversion-focused CTA selectors (same as blog extraction)
         const ctaSelectors = [
-          { selector: 'button, .btn, .button', type: 'button' },
+          // Contact CTAs
           { selector: 'a[href*="contact"]', type: 'contact_link' },
-          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+          { selector: 'button[class*="contact"]', type: 'contact_link' },
+
+          // Scheduling CTAs
+          { selector: 'a[href*="schedule"]', type: 'schedule_link' },
+          { selector: 'a[href*="book"]', type: 'schedule_link' },
+          { selector: 'a[href*="appointment"]', type: 'schedule_link' },
+          { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
+
+          // Consultation CTAs
+          { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
+
+          // Demo/Trial CTAs
           { selector: 'a[href*="demo"]', type: 'demo_link' },
           { selector: 'a[href*="trial"]', type: 'trial_link' },
-          { selector: 'form', type: 'form' },
+          { selector: 'a[href*="free"]', type: 'trial_link' },
+
+          // Purchase CTAs
+          { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
+          { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
+
+          // Request CTAs
+          { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
+          { selector: 'button[class*="request"]', type: 'request_link' },
+
+          // Signup/Subscribe CTAs
+          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+
+          // Generic CTA classes
+          { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
+          { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
+
+          // Form CTAs
+          { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
           { selector: 'input[type="email"]', type: 'email_capture' },
-          { selector: '[class*="cta"], [id*="cta"]', type: 'cta_element' }
+
+          // Button CTAs (generic, filtered by context)
+          { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
         ];
 
         for (const { selector, type } of ctaSelectors) {
           const elements = document.querySelectorAll(selector);
-          
+
           elements.forEach((el, index) => {
             if (index >= 10) return; // Limit per type
-            
+
             const text = el.textContent?.trim() || el.placeholder || el.value || '';
             const href = el.href || '';
-            
+
             if (!text && !href) return;
-            
+
+            // Filter out navigation links
+            if (isNavigationLink(href, text)) {
+              console.log('🚫 [CTA DEBUG] Filtered out navigation link:', { href, text, type });
+              return;
+            }
+
+            // Validate CTA text
+            if (!text || text.length < 2 || text.length > 100) return;
+
+            // Skip generic/meaningless text
+            const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
+            if (genericTexts.includes(text.toLowerCase())) return;
+
             // Determine placement
             let placement = 'unknown';
+            const inNav = el.closest('nav, .nav, .navigation') !== null;
             if (el.closest('header, .header')) placement = 'header';
             else if (el.closest('footer, .footer')) placement = 'footer';
-            else if (el.closest('nav, .nav')) placement = 'navigation';
+            else if (inNav) placement = 'navigation';
             else if (el.closest('aside, .sidebar')) placement = 'sidebar';
+            else if (el.closest('.modal, .popup')) placement = 'modal';
             else placement = 'main_content';
+
+            // Skip navigation links in navigation placement
+            if (inNav && isNavigationLink(href, text)) {
+              console.log('🚫 [CTA DEBUG] Navigation link in nav element, skipping:', { href, text });
+              return;
+            }
 
             // Get surrounding context for analysis
             const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
-            
+
             ctaElements.push({
               type,
               text: text.slice(0, 100),

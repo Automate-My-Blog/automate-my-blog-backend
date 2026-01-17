@@ -622,24 +622,99 @@ app.post('/api/analyze-website', async (req, res) => {
           is_current: true
         };
         
-        // Check if organization already exists for this URL
-        // Lead capture creates organizations by URL only, so we query by URL
-        const existingResult = await db.query(
-          'SELECT id FROM organizations WHERE website_url = $1 ORDER BY created_at DESC LIMIT 1',
-          [url]
-        );
-        const existingOrganization = existingResult.rows[0] || null;
-        
+        // PRIORITY-BASED ORGANIZATION LOOKUP (with session adoption)
+        let existingOrganization = null;
+        let organizationSource = null;
+        let shouldAdoptAnonymousOrg = false;
+
+        // PRIORITY 1: Check if authenticated user already has an organization
+        if (userId) {
+          console.log('🔍 [ORG DEBUG] Checking for existing organization by user ID:', { userId });
+
+          const userOrgResult = await db.query(
+            'SELECT id, website_url FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
+            [userId]
+          );
+
+          if (userOrgResult.rows.length > 0) {
+            existingOrganization = userOrgResult.rows[0];
+            organizationSource = 'user_owned';
+            console.log('✅ [ORG DEBUG] Found user\'s existing organization:', {
+              organizationId: existingOrganization.id,
+              currentWebsiteUrl: existingOrganization.website_url,
+              newWebsiteUrl: url,
+              action: 'will_update'
+            });
+          } else {
+            // PRIORITY 2: Check if there's an anonymous org for this URL to adopt
+            console.log('🔍 [ORG DEBUG] No user org found, checking for anonymous org to adopt');
+
+            const anonymousOrgResult = await db.query(
+              'SELECT id, website_url FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
+              [url]
+            );
+
+            if (anonymousOrgResult.rows.length > 0) {
+              existingOrganization = anonymousOrgResult.rows[0];
+              organizationSource = 'anonymous_adoption';
+              shouldAdoptAnonymousOrg = true;
+              console.log('✅ [ORG DEBUG] Found anonymous org to adopt:', {
+                organizationId: existingOrganization.id,
+                websiteUrl: url,
+                action: 'will_adopt_and_update'
+              });
+            } else {
+              console.log('ℹ️ [ORG DEBUG] No existing org found, will create new one for user');
+              organizationSource = 'new_for_user';
+            }
+          }
+        } else {
+          // PRIORITY 3: For anonymous users, check by URL (no adoption)
+          console.log('🔍 [ORG DEBUG] Anonymous user - checking for existing organization by URL');
+
+          const urlOrgResult = await db.query(
+            'SELECT id, website_url FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
+            [url]
+          );
+
+          if (urlOrgResult.rows.length > 0) {
+            existingOrganization = urlOrgResult.rows[0];
+            organizationSource = 'anonymous_session';
+            console.log('✅ [ORG DEBUG] Found anonymous organization by URL:', {
+              organizationId: existingOrganization.id,
+              websiteUrl: url
+            });
+          } else {
+            console.log('ℹ️ [ORG DEBUG] No existing anonymous organization for URL, will create new one');
+            organizationSource = 'new_anonymous';
+          }
+        }
+
         let organizationId;
-        
+
+        // Update existing organization or create new one
         if (existingOrganization) {
-          // Update existing organization
           organizationId = existingOrganization.id;
-          
+
+          console.log('🔄 [ORG DEBUG] Updating existing organization:', {
+            organizationId,
+            source: organizationSource,
+            userId: userId || 'anonymous',
+            websiteUrl: url,
+            willAdopt: shouldAdoptAnonymousOrg
+          });
+
           const updateFields = [];
           const updateValues = [];
           let paramIndex = 1;
-          
+
+          // If adopting anonymous org, set owner_user_id
+          if (shouldAdoptAnonymousOrg) {
+            updateFields.push(`owner_user_id = $${paramIndex}`);
+            updateValues.push(userId);
+            paramIndex++;
+          }
+
           for (const [key, value] of Object.entries(organizationData)) {
             if (key !== 'name') { // Don't update name usually
               updateFields.push(`${key} = $${paramIndex}`);
@@ -649,28 +724,39 @@ app.post('/api/analyze-website', async (req, res) => {
           }
           updateFields.push(`updated_at = NOW()`);
           updateValues.push(organizationId);
-          
+
           await db.query(
             `UPDATE organizations SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
             updateValues
           );
-          
-          console.log('✅ Updated existing organization:', organizationId);
-          
+
+          console.log('✅ [ORG DEBUG] Updated existing organization:', {
+            organizationId,
+            source: organizationSource,
+            adopted: shouldAdoptAnonymousOrg,
+            websiteUrlUpdated: existingOrganization.website_url !== url
+          });
+
           // Mark previous intelligence records as not current
           await db.query(
             'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',
             [organizationId]
           );
-          
+
         } else {
           // Create new organization
           organizationId = uuidv4();
-          
+
+          console.log('➕ [ORG DEBUG] Creating new organization:', {
+            source: organizationSource,
+            userId: userId || 'anonymous',
+            websiteUrl: url
+          });
+
           const insertFields = ['id', 'slug', ...Object.keys(organizationData), 'created_at', 'updated_at'];
           const orgSlug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
           const insertValues = [organizationId, orgSlug, ...Object.values(organizationData), now, now];
-          
+
           // Add owner_user_id or session_id
           if (userId) {
             insertFields.push('owner_user_id');
@@ -679,15 +765,18 @@ app.post('/api/analyze-website', async (req, res) => {
             insertFields.push('session_id');
             insertValues.push(sessionId);
           }
-          
+
           const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
-          
+
           await db.query(
             `INSERT INTO organizations (${insertFields.join(', ')}) VALUES (${insertPlaceholders})`,
             insertValues
           );
-          
-          console.log('✅ Created new organization for:', userId ? `user ${userId}` : `session ${sessionId}`);
+
+          console.log('✅ [ORG DEBUG] Created new organization:', {
+            organizationId,
+            source: organizationSource
+          });
         }
         
         // Create new intelligence record
@@ -765,6 +854,35 @@ app.post('/api/analyze-website', async (req, res) => {
         url,
         hasUserId: !!userId
       });
+
+      // Clear old CTAs before storing new ones (for re-analysis scenarios)
+      if (foundOrganizationId) {
+        try {
+          console.log('🗑️ [CTA DEBUG] Clearing old CTAs before storing new analysis:', {
+            organizationId: foundOrganizationId
+          });
+
+          await db.query(
+            'DELETE FROM cta_analysis WHERE organization_id = $1',
+            [foundOrganizationId]
+          );
+
+          // Reset has_cta_data flag (will be set to true later if CTAs found)
+          await db.query(`
+            UPDATE organizations
+            SET data_availability = jsonb_set(
+              COALESCE(data_availability, '{}'::jsonb),
+              '{has_cta_data}',
+              'false'::jsonb
+            )
+            WHERE id = $1
+          `, [foundOrganizationId]);
+
+          console.log('✅ [CTA DEBUG] Old CTAs cleared and flag reset, ready for new analysis');
+        } catch (clearError) {
+          console.error('🚨 [CTA DEBUG] Failed to clear old CTAs:', clearError.message);
+        }
+      }
 
       // Store CTAs if we have an organization and CTAs exist
       if (foundOrganizationId && scrapedContent.ctas && scrapedContent.ctas.length > 0) {
