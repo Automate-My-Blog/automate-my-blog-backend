@@ -1806,6 +1806,8 @@ export class WebScraperService {
           // Contact CTAs
           { selector: 'a[href*="contact"]', type: 'contact_link' },
           { selector: 'button[class*="contact"]', type: 'contact_link' },
+          { selector: 'a[href^="mailto:"]', type: 'contact_link' },
+          { selector: 'a[href^="tel:"]', type: 'phone_link' },
 
           // Scheduling CTAs
           { selector: 'a[href*="schedule"]', type: 'schedule_link' },
@@ -1854,6 +1856,26 @@ export class WebScraperService {
             const text = el.textContent?.trim() || el.placeholder || el.value || '';
             const href = el.href || el.action || '';
 
+            // Enhanced type classification for custom components
+            let actualType = type;  // Start with selector type
+            const lowerText = text.toLowerCase();
+            const lowerHref = href.toLowerCase();
+
+            // Override type if text/href indicates specific CTA type
+            if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
+                lowerText.includes('send us a message')) {
+              actualType = 'contact_link';
+            } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
+                       lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
+              actualType = 'phone_link';
+            } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
+                       lowerText.includes('reach us') || lowerText.includes('reach out')) {
+              actualType = 'contact_link';
+            } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
+                       lowerText.includes('appointment')) {
+              actualType = 'schedule_link';
+            }
+
             if (!text && !href) return;
 
             // Filter out navigation links
@@ -1888,9 +1910,9 @@ export class WebScraperService {
 
             // Get surrounding context for analysis
             const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
-            
+
             ctaElements.push({
-              type,
+              type: actualType,
               text: text.slice(0, 100),
               href: href.slice(0, 200),
               placement,
@@ -2356,6 +2378,8 @@ export class WebScraperService {
           // Contact CTAs
           { selector: 'a[href*="contact"]', type: 'contact_link' },
           { selector: 'button[class*="contact"]', type: 'contact_link' },
+          { selector: 'a[href^="mailto:"]', type: 'contact_link' },
+          { selector: 'a[href^="tel:"]', type: 'phone_link' },
 
           // Scheduling CTAs
           { selector: 'a[href*="schedule"]', type: 'schedule_link' },
@@ -2404,6 +2428,26 @@ export class WebScraperService {
             const text = el.textContent?.trim() || el.placeholder || el.value || '';
             const href = el.href || '';
 
+            // Enhanced type classification for custom components
+            let actualType = type;  // Start with selector type
+            const lowerText = text.toLowerCase();
+            const lowerHref = href.toLowerCase();
+
+            // Override type if text/href indicates specific CTA type
+            if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
+                lowerText.includes('send us a message')) {
+              actualType = 'contact_link';
+            } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
+                       lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
+              actualType = 'phone_link';
+            } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
+                       lowerText.includes('reach us') || lowerText.includes('reach out')) {
+              actualType = 'contact_link';
+            } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
+                       lowerText.includes('appointment')) {
+              actualType = 'schedule_link';
+            }
+
             if (!text && !href) return;
 
             // Filter out navigation links
@@ -2439,7 +2483,7 @@ export class WebScraperService {
             const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
 
             ctaElements.push({
-              type,
+              type: actualType,
               text: text.slice(0, 100),
               href: href.slice(0, 200),
               placement,
