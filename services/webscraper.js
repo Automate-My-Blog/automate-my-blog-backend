@@ -1902,6 +1902,16 @@ export class WebScraperService {
           });
         }
 
+        console.log('📊 [CTA DEBUG] Blog CTA extraction summary:', {
+          url: originalUrl,
+          totalCTAsFound: ctaElements.length,
+          ctaTypes: ctaElements.reduce((acc, cta) => {
+            acc[cta.type] = (acc[cta.type] || 0) + 1;
+            return acc;
+          }, {}),
+          sampleCTAs: ctaElements.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
+        });
+
         // Extract granular visual design information with element-specific mapping
         const visualDesign = (() => {
           const design = {
@@ -2439,6 +2449,15 @@ export class WebScraperService {
             });
           });
         }
+
+        console.log('📊 [CTA DEBUG] Main CTA extraction summary:', {
+          totalCTAsFound: ctaElements.length,
+          ctaTypes: ctaElements.reduce((acc, cta) => {
+            acc[cta.type] = (acc[cta.type] || 0) + 1;
+            return acc;
+          }, {}),
+          sampleCTAs: ctaElements.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
+        });
 
         return ctaElements;
       });
