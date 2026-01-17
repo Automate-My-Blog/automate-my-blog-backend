@@ -252,20 +252,27 @@ export class EnhancedBlogGenerationService extends OpenAIService {
 
       const generatedImages = await Promise.all(imagePromises);
 
-      // Replace placeholders with markdown image syntax
+      // Replace placeholders with markdown image syntax, or remove if failed
       let processedContent = content;
       let replacedCount = 0;
+      let removedCount = 0;
 
-      generatedImages.forEach(image => {
+      generatedImages.forEach((image, index) => {
         if (image && image.imageUrl) {
           const markdownImage = `![${image.altText}](${image.imageUrl})`;
           processedContent = processedContent.replace(image.placeholder, markdownImage);
           replacedCount++;
           console.log(`✅ Replaced image placeholder with: ${image.imageUrl.substring(0, 50)}...`);
+        } else {
+          // Remove failed placeholder to avoid showing raw markdown
+          const failedPlaceholder = placeholders[index].fullMatch;
+          processedContent = processedContent.replace(failedPlaceholder, '');
+          removedCount++;
+          console.log(`⚠️ Removed failed image placeholder: ${placeholders[index].type}`);
         }
       });
 
-      console.log(`✅ Image processing complete: ${replacedCount}/${placeholders.length} images generated`);
+      console.log(`✅ Image processing complete: ${replacedCount}/${placeholders.length} images generated, ${removedCount} placeholders removed`);
       return processedContent;
 
     } catch (error) {
@@ -639,6 +646,17 @@ CRITICAL REQUIREMENTS:
         contentLength: blogData.content?.length || 0,
         hasContent: !!blogData.content,
         contentPreview: blogData.content?.substring(0, 200) + '...'
+      });
+
+      // Debug: Check if highlight boxes were generated and if they have content
+      const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
+      console.log('📦 [HIGHLIGHT BOX DEBUG] Highlight boxes in generated content:', {
+        count: highlightBoxMatches.length,
+        boxes: highlightBoxMatches.map(box => ({
+          type: box.match(/data-highlight-type="(\w+)"/)?.[1],
+          hasContent: !box.match(/<blockquote[^>]*><\/blockquote>/),
+          contentPreview: box.substring(0, 150) + '...'
+        }))
       });
 
       // Check if CTAs appear in generated content
