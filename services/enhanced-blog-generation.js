@@ -151,11 +151,13 @@ export class EnhancedBlogGenerationService extends OpenAIService {
       console.log(`📊 Retrieving previous post highlight box types for organization: ${organizationId}`);
 
       // Query database for most recent blog post by this organization
+      // blog_posts doesn't have organization_id, so we JOIN with projects
       const query = `
-        SELECT content
-        FROM blog_posts
-        WHERE organization_id = $1
-        ORDER BY created_at DESC
+        SELECT bp.content
+        FROM blog_posts bp
+        INNER JOIN projects p ON bp.project_id = p.id
+        WHERE p.organization_id = $1
+        ORDER BY bp.created_at DESC
         LIMIT 1
       `;
 
@@ -231,6 +233,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
           console.log(`🎨 Generating image ${index + 1}/${placeholders.length}: ${placeholder.type}`);
 
           const imageResult = await this.visualContentService.generateVisualContent({
+            organizationId: organizationId,
             prompt: placeholder.description,
             contentType: placeholder.type,
             brandGuidelines: brandGuidelines
