@@ -658,11 +658,16 @@ CRITICAL REQUIREMENTS:
       const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
       console.log('📦 [HIGHLIGHT BOX DEBUG] Highlight boxes in generated content:', {
         count: highlightBoxMatches.length,
-        boxes: highlightBoxMatches.map(box => ({
-          type: box.match(/data-highlight-type="(\w+)"/)?.[1],
-          hasContent: !box.match(/<blockquote[^>]*><\/blockquote>/),
-          contentPreview: box.substring(0, 150) + '...'
-        }))
+        boxes: highlightBoxMatches.map(box => {
+          const innerContent = box.replace(/<blockquote[^>]*>/, '').replace(/<\/blockquote>/, '');
+          return {
+            type: box.match(/data-highlight-type="(\w+)"/)?.[1],
+            isEmpty: !box.match(/<blockquote[^>]*><\/blockquote>/),
+            innerContentLength: innerContent.length,
+            innerContentPreview: innerContent.substring(0, 200),
+            fullBoxPreview: box.substring(0, 300) + '...'
+          };
+        })
       });
 
       // Check if CTAs appear in generated content
@@ -697,6 +702,21 @@ CRITICAL REQUIREMENTS:
         enhancementLevel: blogData.organizationContext.enhancementLevel,
         generatedAt: new Date().toISOString()
       };
+
+      // Final check: Log highlight boxes in final content being returned
+      const finalBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
+      console.log('📦 [FINAL CHECK] Highlight boxes in content being returned to frontend:', {
+        count: finalBoxMatches.length,
+        boxes: finalBoxMatches.map(box => {
+          const innerText = box.replace(/<blockquote[^>]*>/, '').replace(/<\/blockquote>/, '');
+          return {
+            type: box.match(/data-highlight-type="(\w+)"/)?.[1],
+            innerTextLength: innerText.length,
+            innerText: innerText.substring(0, 300),
+            fullBox: box
+          };
+        })
+      });
 
       return blogData;
 
