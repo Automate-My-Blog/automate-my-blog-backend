@@ -239,11 +239,16 @@ export class EnhancedBlogGenerationService extends OpenAIService {
             brandGuidelines: brandGuidelines
           });
 
-          return {
-            placeholder: placeholder.fullMatch,
-            imageUrl: imageResult.imageUrl,
-            altText: placeholder.description.substring(0, 100)
-          };
+          // Check if generation succeeded
+          if (imageResult.success && imageResult.data?.imageUrl) {
+            return {
+              placeholder: placeholder.fullMatch,
+              imageUrl: imageResult.data.imageUrl,
+              altText: placeholder.description.substring(0, 100)
+            };
+          } else {
+            return null;
+          }
         } catch (error) {
           console.error(`❌ Failed to generate image for placeholder:`, error.message);
           return null;
@@ -258,17 +263,18 @@ export class EnhancedBlogGenerationService extends OpenAIService {
       let removedCount = 0;
 
       generatedImages.forEach((image, index) => {
+        const placeholderType = placeholders[index].type;
         if (image && image.imageUrl) {
           const markdownImage = `![${image.altText}](${image.imageUrl})`;
           processedContent = processedContent.replace(image.placeholder, markdownImage);
           replacedCount++;
-          console.log(`✅ Replaced image placeholder with: ${image.imageUrl.substring(0, 50)}...`);
+          console.log(`✅ Inserted ${placeholderType} image: ${image.imageUrl.substring(0, 60)}...`);
         } else {
           // Remove failed placeholder to avoid showing raw markdown
           const failedPlaceholder = placeholders[index].fullMatch;
           processedContent = processedContent.replace(failedPlaceholder, '');
           removedCount++;
-          console.log(`⚠️ Removed failed image placeholder: ${placeholders[index].type}`);
+          console.log(`⚠️ Removed failed ${placeholderType} placeholder (generation failed)`);
         }
       });
 
