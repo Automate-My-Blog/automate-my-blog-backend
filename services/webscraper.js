@@ -149,6 +149,7 @@ export class WebScraperService {
    */
   async scrapeWithPuppeteer(url) {
     let browser;
+    let page; // Need page variable for CTA extraction
     try {
       console.log('🚀 Starting Puppeteer scraping for:', url);
       const puppeteerConfig = await this.getPuppeteerConfig();
@@ -158,7 +159,7 @@ export class WebScraperService {
       browser = await puppeteer.launch(puppeteerConfig);
       console.log('✅ Browser launched successfully');
 
-      const page = await browser.newPage();
+      page = await browser.newPage();
       
       // Set user agent
       await page.setUserAgent(this.userAgent);
@@ -310,6 +311,141 @@ export class WebScraperService {
         };
       }, url);
 
+      // Extract CTAs using inline extraction logic
+      console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Puppeteer scraper');
+      let extractedCTAs = [];
+      try {
+        extractedCTAs = await page.evaluate(() => {
+          // Navigation filter patterns
+          const navigationPatterns = [
+            /blog/i, /cart/i, /about/i, /home/i, /services/i,
+            /products/i, /gallery/i, /portfolio/i, /team/i,
+            /careers/i, /faq/i, /privacy/i, /terms/i
+          ];
+
+          const isNavigationLink = (href, text) => {
+            if (!href && !text) return false;
+            const hrefLower = (href || '').toLowerCase();
+            const textLower = (text || '').toLowerCase();
+            return navigationPatterns.some(pattern =>
+              pattern.test(hrefLower) || pattern.test(textLower)
+            );
+          };
+
+          // CTA selectors (same as extractCTAs method)
+          const ctaSelectors = [
+            { selector: 'a[href*="contact"]', type: 'contact_link' },
+            { selector: 'button[class*="contact"]', type: 'contact_link' },
+            { selector: 'a[href^="mailto:"]', type: 'contact_link' },
+            { selector: 'a[href^="tel:"]', type: 'phone_link' },
+            { selector: 'a[href*="schedule"]', type: 'schedule_link' },
+            { selector: 'a[href*="book"]', type: 'schedule_link' },
+            { selector: 'a[href*="appointment"]', type: 'schedule_link' },
+            { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
+            { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
+            { selector: 'a[href*="demo"]', type: 'demo_link' },
+            { selector: 'a[href*="trial"]', type: 'trial_link' },
+            { selector: 'a[href*="free"]', type: 'trial_link' },
+            { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
+            { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
+            { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
+            { selector: 'button[class*="request"]', type: 'request_link' },
+            { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+            { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+            { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
+            { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
+            { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
+            { selector: 'input[type="email"]', type: 'email_capture' },
+            { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
+          ];
+
+          const ctaElements = [];
+
+          for (const { selector, type } of ctaSelectors) {
+            const elements = document.querySelectorAll(selector);
+
+            elements.forEach((el, index) => {
+              if (index >= 10) return; // Limit per type
+
+              const text = el.textContent?.trim() || el.placeholder || el.value || '';
+              const href = el.href || '';
+
+              // Enhanced type classification for custom components
+              let actualType = type;
+              const lowerText = text.toLowerCase();
+              const lowerHref = href.toLowerCase();
+
+              if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
+                  lowerText.includes('send us a message')) {
+                actualType = 'contact_link';
+              } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
+                         lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
+                actualType = 'phone_link';
+              } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
+                         lowerText.includes('reach us') || lowerText.includes('reach out')) {
+                actualType = 'contact_link';
+              } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
+                         lowerText.includes('appointment')) {
+                actualType = 'schedule_link';
+              }
+
+              if (!text && !href) return;
+
+              // Filter out navigation links
+              if (isNavigationLink(href, text)) {
+                return;
+              }
+
+              // Validate CTA text
+              if (!text || text.length < 2 || text.length > 100) return;
+
+              // Skip generic/meaningless text
+              const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
+              if (genericTexts.includes(text.toLowerCase())) return;
+
+              // Determine placement
+              let placement = 'unknown';
+              const inNav = el.closest('nav, .nav, .navigation') !== null;
+              if (el.closest('header, .header')) placement = 'header';
+              else if (el.closest('footer, .footer')) placement = 'footer';
+              else if (inNav) placement = 'navigation';
+              else if (el.closest('aside, .sidebar')) placement = 'sidebar';
+              else if (el.closest('.modal, .popup')) placement = 'modal';
+              else placement = 'main_content';
+
+              // Skip navigation links in navigation placement
+              if (inNav && isNavigationLink(href, text)) {
+                return;
+              }
+
+              ctaElements.push({
+                type: actualType,
+                text: text.slice(0, 100),
+                href: href.slice(0, 200),
+                placement,
+                className: el.className || '',
+                tagName: el.tagName.toLowerCase()
+              });
+            });
+          }
+
+          return ctaElements;
+        });
+
+        console.log('✅ [CTA DEBUG] Puppeteer CTA extraction:', {
+          ctaCount: extractedCTAs.length,
+          ctaTypes: extractedCTAs.reduce((acc, cta) => {
+            acc[cta.type] = (acc[cta.type] || 0) + 1;
+            return acc;
+          }, {}),
+          sampleCTAs: extractedCTAs.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
+        });
+      } catch (error) {
+        console.error('❌ [CTA DEBUG] Failed to extract CTAs in Puppeteer:', error.message);
+      }
+
+      // Return combined content with CTAs
+      content.ctas = extractedCTAs;
       return this.cleanContent(content);
     } finally {
       if (browser) {
@@ -399,6 +535,7 @@ export class WebScraperService {
    */
   async scrapeWithPlaywright(url) {
     let browser;
+    let page; // Need page variable for CTA extraction
     try {
       console.log('🚀 Starting Playwright scraping for:', url);
       const playwrightConfig = await this.getPlaywrightConfig();
@@ -408,7 +545,7 @@ export class WebScraperService {
       browser = await chromium.launch(playwrightConfig);
       console.log('✅ Playwright browser launched successfully');
 
-      const page = await browser.newPage();
+      page = await browser.newPage();
       
       // Set user agent
       await page.setExtraHTTPHeaders({
@@ -563,6 +700,141 @@ export class WebScraperService {
         };
       }, url);
 
+      // Extract CTAs using inline extraction logic
+      console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Playwright scraper');
+      let extractedCTAs = [];
+      try {
+        extractedCTAs = await page.evaluate(() => {
+          // Navigation filter patterns
+          const navigationPatterns = [
+            /blog/i, /cart/i, /about/i, /home/i, /services/i,
+            /products/i, /gallery/i, /portfolio/i, /team/i,
+            /careers/i, /faq/i, /privacy/i, /terms/i
+          ];
+
+          const isNavigationLink = (href, text) => {
+            if (!href && !text) return false;
+            const hrefLower = (href || '').toLowerCase();
+            const textLower = (text || '').toLowerCase();
+            return navigationPatterns.some(pattern =>
+              pattern.test(hrefLower) || pattern.test(textLower)
+            );
+          };
+
+          // CTA selectors (same as extractCTAs method)
+          const ctaSelectors = [
+            { selector: 'a[href*="contact"]', type: 'contact_link' },
+            { selector: 'button[class*="contact"]', type: 'contact_link' },
+            { selector: 'a[href^="mailto:"]', type: 'contact_link' },
+            { selector: 'a[href^="tel:"]', type: 'phone_link' },
+            { selector: 'a[href*="schedule"]', type: 'schedule_link' },
+            { selector: 'a[href*="book"]', type: 'schedule_link' },
+            { selector: 'a[href*="appointment"]', type: 'schedule_link' },
+            { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
+            { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
+            { selector: 'a[href*="demo"]', type: 'demo_link' },
+            { selector: 'a[href*="trial"]', type: 'trial_link' },
+            { selector: 'a[href*="free"]', type: 'trial_link' },
+            { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
+            { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
+            { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
+            { selector: 'button[class*="request"]', type: 'request_link' },
+            { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
+            { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
+            { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
+            { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
+            { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
+            { selector: 'input[type="email"]', type: 'email_capture' },
+            { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
+          ];
+
+          const ctaElements = [];
+
+          for (const { selector, type } of ctaSelectors) {
+            const elements = document.querySelectorAll(selector);
+
+            elements.forEach((el, index) => {
+              if (index >= 10) return; // Limit per type
+
+              const text = el.textContent?.trim() || el.placeholder || el.value || '';
+              const href = el.href || '';
+
+              // Enhanced type classification for custom components
+              let actualType = type;
+              const lowerText = text.toLowerCase();
+              const lowerHref = href.toLowerCase();
+
+              if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
+                  lowerText.includes('send us a message')) {
+                actualType = 'contact_link';
+              } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
+                         lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
+                actualType = 'phone_link';
+              } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
+                         lowerText.includes('reach us') || lowerText.includes('reach out')) {
+                actualType = 'contact_link';
+              } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
+                         lowerText.includes('appointment')) {
+                actualType = 'schedule_link';
+              }
+
+              if (!text && !href) return;
+
+              // Filter out navigation links
+              if (isNavigationLink(href, text)) {
+                return;
+              }
+
+              // Validate CTA text
+              if (!text || text.length < 2 || text.length > 100) return;
+
+              // Skip generic/meaningless text
+              const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
+              if (genericTexts.includes(text.toLowerCase())) return;
+
+              // Determine placement
+              let placement = 'unknown';
+              const inNav = el.closest('nav, .nav, .navigation') !== null;
+              if (el.closest('header, .header')) placement = 'header';
+              else if (el.closest('footer, .footer')) placement = 'footer';
+              else if (inNav) placement = 'navigation';
+              else if (el.closest('aside, .sidebar')) placement = 'sidebar';
+              else if (el.closest('.modal, .popup')) placement = 'modal';
+              else placement = 'main_content';
+
+              // Skip navigation links in navigation placement
+              if (inNav && isNavigationLink(href, text)) {
+                return;
+              }
+
+              ctaElements.push({
+                type: actualType,
+                text: text.slice(0, 100),
+                href: href.slice(0, 200),
+                placement,
+                className: el.className || '',
+                tagName: el.tagName.toLowerCase()
+              });
+            });
+          }
+
+          return ctaElements;
+        });
+
+        console.log('✅ [CTA DEBUG] Playwright CTA extraction:', {
+          ctaCount: extractedCTAs.length,
+          ctaTypes: extractedCTAs.reduce((acc, cta) => {
+            acc[cta.type] = (acc[cta.type] || 0) + 1;
+            return acc;
+          }, {}),
+          sampleCTAs: extractedCTAs.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
+        });
+      } catch (error) {
+        console.error('❌ [CTA DEBUG] Failed to extract CTAs in Playwright:', error.message);
+      }
+
+      // Return combined content with CTAs
+      content.ctas = extractedCTAs;
       return this.cleanContent(content);
     } finally {
       if (browser) {
