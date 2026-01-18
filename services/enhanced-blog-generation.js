@@ -601,17 +601,36 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 You MUST insert image placeholders throughout the blog post. Use these formats:
 
 **For charts/graphs (when presenting data):**
-![CHART:chartType|Chart Title|Label1,Label2,Label3|Value1,Value2,Value3]
+
+CRITICAL CHART REQUIREMENTS:
+- ONLY create charts for data you ACTUALLY MENTION in the post text
+- NEVER make up statistics or data points
+- The chart data must match what you write in the surrounding paragraphs
+- ALWAYS add explanatory text BEFORE the chart introducing it
+- ALWAYS add source citation AFTER the chart
+
+Format: ![CHART:chartType|Chart Title|Label1,Label2,Label3|Value1,Value2,Value3]
 
 Chart types: bar, pie, line
 - Keep titles short (max 40 characters)
 - Use 3-5 data points for clarity
-- Values should reflect the content being discussed
+- Values MUST be mentioned in your post text
 
-**Examples:**
-![CHART:bar|Treatment Effectiveness|Therapy,Medication,Combined Approach|75,65,92]
+**Complete Example with Context:**
+
+Research shows that combined therapeutic approaches yield the best outcomes for postpartum anxiety. Studies indicate that therapy alone achieves 75% effectiveness, medication alone reaches 65%, while combined approaches demonstrate 92% effectiveness.
+
+![CHART:bar|Treatment Effectiveness Rates|Therapy,Medication,Combined Approach|75,65,92]
+
+*Source: American Journal of Psychiatry, 2023 meta-analysis of postpartum treatment outcomes*
+
+**Another Example:**
+
+The distribution of postpartum anxiety symptoms varies significantly. Our clinical data shows that 45% of patients report primarily anxiety-related symptoms, 30% experience sleep disturbances, and 25% report mood changes.
+
 ![CHART:pie|Symptom Distribution|Anxiety,Sleep Issues,Mood Changes|45,30,25]
-![CHART:line|Recovery Timeline|Week 1,Week 4,Week 8,Week 12|30,55,75,90]
+
+*Source: Clinical observations from reproductive psychiatry practice, 2024*
 
 **For all other images (photos, illustrations, infographics):**
 ![IMAGE:type:description]
@@ -624,7 +643,7 @@ Description = detailed image generation prompt (50-100 words)
 
 **Required Placements:**
 1. Hero image after introduction
-2. Chart/graph when presenting statistics or data
+2. Chart/graph ONLY when you present statistics in the text (with context and source)
 3. Supporting image every 300-400 words
 4. Illustration for examples or case studies`;
 
