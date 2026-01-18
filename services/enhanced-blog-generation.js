@@ -190,22 +190,128 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Build QuickChart configuration from structured chart data
+   */
+  buildChartConfig(chartData) {
+    const { type, title, labels, values } = chartData;
+
+    // Color palettes for different chart types
+    const colors = ['#1890ff', '#52c41a', '#faad14', '#f5222d', '#722ed1', '#13c2c2'];
+
+    switch (type.toLowerCase()) {
+      case 'bar':
+        return {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              backgroundColor: colors[0]
+            }]
+          },
+          options: {
+            title: { display: true, text: title },
+            legend: { display: false }
+          }
+        };
+
+      case 'pie':
+        return {
+          type: 'pie',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              backgroundColor: colors.slice(0, labels.length)
+            }]
+          },
+          options: {
+            title: { display: true, text: title },
+            plugins: {
+              datalabels: {
+                formatter: (val) => val + '%'
+              }
+            }
+          }
+        };
+
+      case 'line':
+        return {
+          type: 'line',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              borderColor: colors[0],
+              fill: false,
+              tension: 0.1
+            }]
+          },
+          options: {
+            title: { display: true, text: title },
+            legend: { display: false }
+          }
+        };
+
+      default:
+        // Fallback to bar chart
+        return {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{ data: values, backgroundColor: colors[0] }]
+          },
+          options: {
+            title: { display: true, text: title }
+          }
+        };
+    }
+  }
+
+  /**
    * Process image placeholders and replace with generated images
+   * Supports two formats:
+   * 1. ![IMAGE:type:description] - for photos/illustrations
+   * 2. ![CHART:type|title|labels|values] - for structured chart data
    */
   async processImagePlaceholders(content, topic, organizationId) {
     try {
       console.log('🎨 Processing image placeholders in content...');
 
-      // Extract all image placeholders using regex
-      const imageRegex = /!\[IMAGE:(\w+):(.*?)\]/g;
       const placeholders = [];
-      let match;
 
+      // Extract IMAGE placeholders: ![IMAGE:type:description]
+      const imageRegex = /!\[IMAGE:(\w+):(.*?)\]/g;
+      let match;
       while ((match = imageRegex.exec(content)) !== null) {
         placeholders.push({
           fullMatch: match[0],
+          format: 'IMAGE',
           type: match[1],
-          description: match[2]
+          description: match[2],
+          chartData: null
+        });
+      }
+
+      // Extract CHART placeholders: ![CHART:type|title|labels|values]
+      const chartRegex = /!\[CHART:(\w+)\|(.*?)\|(.*?)\|(.*?)\]/g;
+      while ((match = chartRegex.exec(content)) !== null) {
+        const chartType = match[1];
+        const title = match[2];
+        const labels = match[3].split(',').map(l => l.trim());
+        const values = match[4].split(',').map(v => parseFloat(v.trim()));
+
+        placeholders.push({
+          fullMatch: match[0],
+          format: 'CHART',
+          type: 'chart',
+          description: `${chartType} chart: ${title}`,
+          chartData: {
+            type: chartType,
+            title: title,
+            labels: labels,
+            values: values
+          }
         });
       }
 
@@ -214,7 +320,10 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         return content;
       }
 
-      console.log(`📊 Found ${placeholders.length} image placeholders to process`);
+      console.log(`📊 Found ${placeholders.length} placeholders to process:`, {
+        imageCount: placeholders.filter(p => p.format === 'IMAGE').length,
+        chartCount: placeholders.filter(p => p.format === 'CHART').length
+      });
 
       // Get brand guidelines if available
       const brandResult = await db.query(
@@ -230,27 +339,39 @@ export class EnhancedBlogGenerationService extends OpenAIService {
       // Generate images for each placeholder in parallel
       const imagePromises = placeholders.map(async (placeholder, index) => {
         try {
-          console.log(`🎨 Generating image ${index + 1}/${placeholders.length}: ${placeholder.type}`);
+          console.log(`🎨 Generating ${placeholder.format} ${index + 1}/${placeholders.length}: ${placeholder.type}`);
 
-          const imageResult = await this.visualContentService.generateVisualContent({
+          // Build options object with chartData if it's a CHART placeholder
+          const options = {
             organizationId: organizationId,
             prompt: placeholder.description,
             contentType: placeholder.type,
             brandGuidelines: brandGuidelines
-          });
+          };
+
+          // For CHART format, pass structured chart configuration
+          if (placeholder.format === 'CHART' && placeholder.chartData) {
+            console.log(`📊 Generating chart with data:`, placeholder.chartData);
+            options.chartConfig = this.buildChartConfig(placeholder.chartData);
+            options.servicePreference = 'quickchart'; // Force QuickChart for charts
+          }
+
+          const imageResult = await this.visualContentService.generateVisualContent(options);
 
           // Check if generation succeeded
           if (imageResult.success && imageResult.data?.imageUrl) {
             return {
               placeholder: placeholder.fullMatch,
               imageUrl: imageResult.data.imageUrl,
-              altText: placeholder.description.substring(0, 100)
+              altText: placeholder.chartData
+                ? `${placeholder.chartData.title} chart`
+                : placeholder.description.substring(0, 100)
             };
           } else {
             return null;
           }
         } catch (error) {
-          console.error(`❌ Failed to generate image for placeholder:`, error.message);
+          console.error(`❌ Failed to generate ${placeholder.format} for placeholder:`, error.message);
           return null;
         }
       });
@@ -477,23 +598,35 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
     const imageInstructions = `
 ## IMAGE PLACEMENT INSTRUCTIONS
 
-You MUST insert image placeholders throughout the blog post. Use this exact format:
+You MUST insert image placeholders throughout the blog post. Use these formats:
 
+**For charts/graphs (when presenting data):**
+![CHART:chartType|Chart Title|Label1,Label2,Label3|Value1,Value2,Value3]
+
+Chart types: bar, pie, line
+- Keep titles short (max 40 characters)
+- Use 3-5 data points for clarity
+- Values should reflect the content being discussed
+
+**Examples:**
+![CHART:bar|Treatment Effectiveness|Therapy,Medication,Combined Approach|75,65,92]
+![CHART:pie|Symptom Distribution|Anxiety,Sleep Issues,Mood Changes|45,30,25]
+![CHART:line|Recovery Timeline|Week 1,Week 4,Week 8,Week 12|30,55,75,90]
+
+**For all other images (photos, illustrations, infographics):**
 ![IMAGE:type:description]
 
-Where:
-- type = hero_image | infographic | chart | illustration | diagram
-- description = detailed image generation prompt (50-100 words)
-
-**Required Image Placements:**
-1. Hero image after introduction (before first H2)
-2. Supporting image every 300-400 words
-3. Infographic for complex data or processes
-4. Chart/graph when presenting statistics
-5. Illustration for examples or case studies
+Where type = hero_image | illustration | diagram | infographic
+Description = detailed image generation prompt (50-100 words)
 
 **Example:**
-![IMAGE:infographic:Create an infographic showing the 5-step email marketing funnel. Include icons for: awareness (magnifying glass), interest (lightbulb), consideration (scales), intent (shopping cart), and conversion (checkmark). Use blue and green color scheme with arrows connecting each stage.]`;
+![IMAGE:hero_image:Professional photograph showing a supportive counseling session with a mother and therapist, warm lighting, modern office setting, conveying comfort and hope]
+
+**Required Placements:**
+1. Hero image after introduction
+2. Chart/graph when presenting statistics or data
+3. Supporting image every 300-400 words
+4. Illustration for examples or case studies`;
 
     console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
       promptLength: contextSections.length,
