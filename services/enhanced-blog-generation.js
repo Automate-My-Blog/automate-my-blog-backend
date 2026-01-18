@@ -934,18 +934,22 @@ You MUST insert image placeholders throughout the blog post. Use these formats:
 **For charts/graphs (when presenting data):**
 
 CRITICAL CHART REQUIREMENTS:
-- ONLY create charts for data you ACTUALLY MENTION in the post text
-- NEVER make up statistics or data points
-- The chart data must match what you write in the surrounding paragraphs
-- ALWAYS add explanatory text BEFORE the chart introducing it
-- ALWAYS add source citation AFTER the chart
+- **ONLY create charts for data you ACTUALLY MENTION in the post text**
+- **NEVER make up statistics or create placeholder/generic charts**
+- **NO GENERIC LABELS**: Do NOT use "Phase 1/2/3", "Step 1/2/3", "Category A/B/C", or other meaningless placeholders
+- **NO VAGUE TITLES**: Chart titles MUST be specific and descriptive - NEVER use "chart", "Chart", "data", or "Data" as the title
+- The chart data must match exactly what you write in the surrounding paragraphs
+- ALWAYS add explanatory text (2-3 sentences) BEFORE the chart introducing it
+- ALWAYS add a credible source citation AFTER the chart
+- **If you don't have specific, real data to visualize, skip charts entirely**
 
-Format: ![CHART:chartType|Chart Title|Label1,Label2,Label3|Value1,Value2,Value3]
+Format: ![CHART:chartType|Specific Descriptive Title|Label1,Label2,Label3|Value1,Value2,Value3]
 
 Chart types: bar, pie, line
-- Keep titles short (max 40 characters)
+- Titles must describe the data (e.g., "Treatment Effectiveness Comparison" NOT "chart")
+- Labels must be specific categories from your text (e.g., "CBT Therapy", "Medication", NOT "Phase 1", "Category A")
 - Use 3-5 data points for clarity
-- Values MUST be mentioned in your post text
+- Values MUST represent real data/statistics you discuss in the text
 
 **Complete Example with Context:**
 
@@ -993,20 +997,25 @@ ${realTweetUrls.length > 0
   ? `REAL TWEETS AVAILABLE FOR THIS TOPIC:
 ${realTweetUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}
 
-TWEET EMBED RULES (CRITICAL):
-- **USE ONLY THE REAL TWEETS PROVIDED ABOVE** - These have been verified to exist
-- **PREFERRED:** Include 1-2 of the provided tweets in your blog post
-- Choose tweets that best fit your content flow and add genuine value
-- ALWAYS add context paragraph BEFORE the tweet explaining who they are and why their perspective matters
-- Position strategically: mid-post for expert validation or near conclusion for testimonials
-- If none of the provided tweets fit naturally, you may skip them (better to have ZERO tweets than force an irrelevant one)
+TWEET EMBED RULES (CRITICAL - REQUIRED):
+- **MANDATORY**: You MUST include at least 1 (preferably 2) of the provided real tweets in your blog post
+- **USE ONLY THE REAL TWEETS PROVIDED ABOVE** - These have been verified to exist and are highly relevant
+- Choose the tweet(s) that best fit your content flow and add genuine social proof
+- **REQUIRED**: Add 2-3 sentences of context BEFORE each tweet explaining:
+  * Who the author is (check their credentials/affiliation from the username)
+  * Why their perspective matters (expertise, experience, authority)
+  * How it connects to your current section
+- Position strategically:
+  * Mid-post (after 2-3 sections) for expert validation
+  * Near conclusion for testimonials or real-world perspectives
+- Use the FULL URL format provided above
 
-**Example:**
-Leading researcher shared insights on this topic.
+**Example Format:**
+Dr. Sarah Johnson, a leading reproductive psychiatrist at Johns Hopkins, has spent decades researching evidence-based interventions for postpartum mental health. Her clinical work focuses on personalized treatment approaches that combine therapeutic and pharmacological strategies.
 
 ![TWEET:${realTweetUrls[0]}]
 
-This perspective highlights important considerations about the topic.`
+Dr. Johnson's emphasis on early intervention and comprehensive assessment aligns with current best practices in maternal mental health care.`
   : `TWEET EMBED RULES:
 - **NO REAL TWEETS AVAILABLE** - Do NOT include any tweet embeds in this post
 - Do NOT create fake tweet URLs or made-up usernames/status IDs
