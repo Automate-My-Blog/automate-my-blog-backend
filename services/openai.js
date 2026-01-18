@@ -75,22 +75,12 @@ export class OpenAIService {
         return JSON.parse(response);
       } catch (fallbackError) {
         console.error('❌ Fallback parsing also failed:', fallbackError.message);
-        
-        // Fallback 2: Return structured error response for graceful degradation
-        console.log('🆘 All parsing attempts failed, creating fallback response...');
-        
-        const fallbackResponse = {
-          error: 'JSON_PARSE_FAILED',
-          businessName: 'Analysis Failed',
-          businessType: 'Unable to determine',
-          targetAudience: 'Unable to determine',
-          contentFocus: 'Unable to determine',
-          description: 'Website analysis encountered a parsing error. Please try again.',
-          parseError: parseError.message
-        };
-        
-        console.log('📦 Returning fallback response structure');
-        return fallbackResponse;
+        console.error('📄 Full response that failed to parse:');
+        console.error(response);
+
+        // REMOVED FALLBACK: Instead of returning "Unable to determine", throw error
+        // This allows frontend to show empty state instead of misleading placeholder data
+        throw new Error(`JSON parsing failed: ${parseError.message}. Check logs for full response.`);
       }
     }
   }
@@ -340,7 +330,9 @@ SCENARIO-SPECIFIC REQUIREMENTS:
 
       const response = completion.choices[0].message.content;
       console.log('Response content length:', response?.length || 0);
-      
+      console.log('📄 First 500 chars of response:', response?.substring(0, 500));
+      console.log('📄 Last 500 chars of response:', response?.substring(response.length - 500));
+
       const analysisResult = this.parseOpenAIResponse(response);
       
       // Add web search enhancement status to the response
