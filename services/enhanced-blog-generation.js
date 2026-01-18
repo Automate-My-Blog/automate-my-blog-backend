@@ -410,6 +410,165 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Fetch tweet data from Twitter API
+   * Uses Syndication API (no auth) with fallback to oEmbed
+   */
+  async fetchTweetData(tweetUrl) {
+    try {
+      // Extract tweet ID from URL
+      const tweetIdMatch = tweetUrl.match(/status\/(\d+)/);
+      if (!tweetIdMatch) {
+        console.warn('⚠️ Could not extract tweet ID from URL:', tweetUrl);
+        return null;
+      }
+      const tweetId = tweetIdMatch[1];
+
+      console.log(`🔍 Fetching tweet data for ID: ${tweetId}`);
+
+      // Try Syndication API first (no auth required, free)
+      const syndicationUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}`;
+      const response = await fetch(syndicationUrl);
+
+      if (!response.ok) {
+        console.warn(`⚠️ Syndication API failed (${response.status}), trying oEmbed fallback...`);
+
+        // Fallback to oEmbed API
+        const oEmbedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}`;
+        const oEmbedResponse = await fetch(oEmbedUrl);
+
+        if (!oEmbedResponse.ok) {
+          console.error(`❌ oEmbed API also failed (${oEmbedResponse.status})`);
+          return null;
+        }
+
+        const oEmbedData = await oEmbedResponse.json();
+
+        // Parse oEmbed HTML to extract basic data
+        return {
+          id: tweetId,
+          text: oEmbedData.html.replace(/<[^>]*>/g, '').substring(0, 280), // Strip HTML, truncate
+          author_name: oEmbedData.author_name,
+          author_handle: oEmbedData.author_url?.split('/').pop() || 'unknown',
+          author_avatar: `https://unavatar.io/twitter/${oEmbedData.author_url?.split('/').pop()}`,
+          author_verified: false, // Can't determine from oEmbed
+          created_at: new Date().toISOString(),
+          likes: 0,
+          retweets: 0,
+          url: tweetUrl
+        };
+      }
+
+      const data = await response.json();
+
+      // Transform syndication data to our schema
+      return {
+        id: tweetId,
+        text: data.text,
+        author_name: data.user.name,
+        author_handle: data.user.screen_name,
+        author_avatar: data.user.profile_image_url_https,
+        author_verified: data.user.verified || false,
+        created_at: data.created_at,
+        likes: data.favorite_count || 0,
+        retweets: data.retweet_count || 0,
+        url: tweetUrl
+      };
+
+    } catch (error) {
+      console.error('❌ Error fetching tweet data:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Generate HTML for rich tweet card
+   */
+  generateTweetCardHTML(tweet) {
+    const verifiedBadge = tweet.author_verified
+      ? '<svg style="width: 18px; height: 18px; fill: #1DA1F2; margin-left: 4px;" viewBox="0 0 24 24"><path d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.68-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34zm-11.71 4.2L6.8 12.46l1.41-1.42 2.26 2.26 4.8-5.23 1.47 1.36-6.2 6.77z"/></svg>'
+      : '';
+
+    return `<div class="tweet-card" data-tweet-id="${tweet.id}" style="
+    border: 1px solid #e1e8ed;
+    border-radius: 12px;
+    padding: 16px;
+    margin: 24px 0;
+    background: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  ">
+    <div style="display: flex; align-items: start; margin-bottom: 12px;">
+      <img src="${tweet.author_avatar}" alt="${tweet.author_name}" style="
+        width: 48px; height: 48px; border-radius: 50%; margin-right: 12px;
+      " />
+      <div style="flex: 1; min-width: 0;">
+        <div style="display: flex; align-items: center;">
+          <span style="font-weight: 700; color: #14171a; font-size: 15px;">${this.escapeHtml(tweet.author_name)}</span>
+          ${verifiedBadge}
+        </div>
+        <span style="color: #657786; font-size: 15px;">@${this.escapeHtml(tweet.author_handle)}</span>
+      </div>
+      <a href="${tweet.url}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">
+        <svg style="width: 20px; height: 20px; fill: #1DA1F2;" viewBox="0 0 24 24">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+        </svg>
+      </a>
+    </div>
+    <p style="color: #14171a; font-size: 15px; line-height: 1.5; margin: 0 0 12px 0; white-space: pre-wrap; word-wrap: break-word;">${this.linkifyTweetText(tweet.text)}</p>
+    <div style="display: flex; gap: 16px; color: #657786; font-size: 13px; padding-top: 12px; border-top: 1px solid #e1e8ed;">
+      <span>${this.formatDate(tweet.created_at)}</span>
+      <span>❤️ ${this.formatNumber(tweet.likes)}</span>
+      <span>🔁 ${this.formatNumber(tweet.retweets)}</span>
+    </div>
+  </div>`;
+  }
+
+  /**
+   * Linkify URLs, mentions, and hashtags in tweet text
+   */
+  linkifyTweetText(text) {
+    const escaped = this.escapeHtml(text);
+    return escaped
+      .replace(/https?:\/\/[^\s]+/g, '<a href="$&" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">$&</a>')
+      .replace(/@(\w+)/g, '<a href="https://x.com/$1" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">@$1</a>')
+      .replace(/#(\w+)/g, '<a href="https://x.com/hashtag/$1" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">#$1</a>');
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   */
+  escapeHtml(text) {
+    const map = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+  }
+
+  /**
+   * Format large numbers (1234 -> 1.2K)
+   */
+  formatNumber(num) {
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+    return num.toString();
+  }
+
+  /**
+   * Format date to readable string
+   */
+  formatDate(dateString) {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    });
+  }
+
+  /**
    * Process tweet placeholders and replace with styled embed HTML
    * Format: ![TWEET:https://x.com/username/status/1234567890] or ![TWEET:username/status_id]
    */
@@ -430,8 +589,10 @@ export class EnhancedBlogGenerationService extends OpenAIService {
 
       let processedContent = content;
       let replacedCount = 0;
+      let failedCount = 0;
 
-      matches.forEach((match) => {
+      // Process tweets sequentially with delay to avoid rate limiting
+      for (const match of matches) {
         const placeholder = match[0];
         const tweetReference = match[1];
 
@@ -445,18 +606,33 @@ export class EnhancedBlogGenerationService extends OpenAIService {
           tweetUrl = `https://x.com/${tweetReference}`;
         }
 
-        // Create styled blockquote embed with link
-        const tweetEmbed = `<blockquote class="tweet-embed" style="border-left: 4px solid #1DA1F2; padding: 16px 20px; margin: 24px 0; background: #f8f9fa; border-radius: 8px;">
+        // Fetch tweet data from API
+        const tweetData = await this.fetchTweetData(tweetUrl);
+
+        if (tweetData) {
+          // Generate rich tweet card with fetched data
+          const tweetCard = this.generateTweetCardHTML(tweetData);
+          processedContent = processedContent.replace(placeholder, tweetCard);
+          replacedCount++;
+          console.log(`✅ Generated rich tweet card: ${tweetUrl}`);
+        } else {
+          // Fallback to simple styled link if API fails
+          const fallbackEmbed = `<blockquote class="tweet-embed tweet-fallback" style="border-left: 4px solid #1DA1F2; padding: 16px 20px; margin: 24px 0; background: #f8f9fa; border-radius: 8px;">
   <p style="margin: 0 0 12px 0; font-style: italic; color: #14171a;">View this expert perspective on X (formerly Twitter)</p>
   <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none; font-weight: 600;">→ Read the full tweet</a>
 </blockquote>`;
+          processedContent = processedContent.replace(placeholder, fallbackEmbed);
+          failedCount++;
+          console.log(`⚠️ Using fallback embed for: ${tweetUrl}`);
+        }
 
-        processedContent = processedContent.replace(placeholder, tweetEmbed);
-        replacedCount++;
-        console.log(`✅ Inserted tweet embed: ${tweetUrl}`);
-      });
+        // Rate limit protection: 1 second delay between requests
+        if (matches.indexOf(match) < matches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
 
-      console.log(`✅ Tweet processing complete: ${replacedCount}/${matches.length} tweets embedded`);
+      console.log(`✅ Tweet processing complete: ${replacedCount} rich cards, ${failedCount} fallbacks (${replacedCount + failedCount}/${matches.length} total)`);
       return processedContent;
 
     } catch (error) {
