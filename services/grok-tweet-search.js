@@ -62,7 +62,7 @@ Return your response in this JSON format:
       const response = await axios.post(
         this.endpoint,
         {
-          model: 'grok-beta',
+          model: 'grok-4',  // Updated from 'grok-beta' to current model
           messages: [
             {
               role: 'system',
@@ -74,7 +74,18 @@ Return your response in this JSON format:
             }
           ],
           temperature: 0.3, // Lower temperature for factual searches
-          max_tokens: 1000
+          max_tokens: 1000,
+          // Enable Live Search with X/Twitter access
+          search_parameters: {
+            mode: 'on',  // Force search
+            sources: [
+              {
+                type: 'x'  // Search only X/Twitter
+              }
+            ],
+            max_search_results: 10,
+            return_citations: true
+          }
         },
         {
           headers: {
@@ -103,6 +114,10 @@ Return your response in this JSON format:
 
     } catch (error) {
       console.error('❌ Grok tweet search failed:', error.message);
+      if (error.response) {
+        console.error('Response status:', error.response.status);
+        console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+      }
       // Don't throw - gracefully degrade to no tweets
       return [];
     }
