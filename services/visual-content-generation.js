@@ -255,37 +255,30 @@ export class VisualContentGenerationService {
 
   /**
    * Generate a placeholder graphic using QuickChart for non-chart content
+   * SIMPLIFIED to avoid extremely long URLs
    */
   async generatePlaceholderWithQuickChart(prompt, contentType, options = {}) {
     const startTime = Date.now();
 
     try {
-      console.log(`🎨 Creating placeholder ${contentType} with QuickChart:`, prompt);
+      console.log(`🎨 Creating placeholder ${contentType} with QuickChart:`, prompt.substring(0, 100));
 
-      // Create different placeholder designs based on content type
+      // Create simple placeholder designs to keep URLs short
       let chartConfig;
-      const title = prompt.substring(0, 50) + (prompt.length > 50 ? '...' : '');
+      const shortTitle = prompt.substring(0, 30); // Keep title very short
 
       switch (contentType) {
         case 'hero_image':
           chartConfig = {
-            type: 'radialGauge',
+            type: 'doughnut',
             data: {
               datasets: [{
-                data: [85],
-                backgroundColor: ['#1890ff', '#f0f0f0'],
-                borderWidth: 0
+                data: [85, 15],
+                backgroundColor: ['#1890ff', '#f0f0f0']
               }]
             },
             options: {
-              title: {
-                display: true,
-                text: title,
-                fontSize: 24,
-                fontColor: '#333'
-              },
-              responsive: false,
-              animation: false
+              title: { display: true, text: shortTitle }
             }
           };
           break;
@@ -294,27 +287,13 @@ export class VisualContentGenerationService {
           chartConfig = {
             type: 'doughnut',
             data: {
-              labels: ['Engagement', 'Reach', 'Impact'],
               datasets: [{
                 data: [40, 35, 25],
-                backgroundColor: ['#1890ff', '#52c41a', '#faad14'],
-                borderWidth: 2,
-                borderColor: '#fff'
+                backgroundColor: ['#1890ff', '#52c41a', '#faad14']
               }]
             },
             options: {
-              title: {
-                display: true,
-                text: title,
-                fontSize: 16,
-                fontColor: '#333'
-              },
-              legend: {
-                display: true,
-                position: 'bottom'
-              },
-              responsive: false,
-              animation: false
+              title: { display: true, text: shortTitle }
             }
           };
           break;
@@ -326,16 +305,42 @@ export class VisualContentGenerationService {
 
       const width = options.width || 800;
       const height = options.height || 600;
-      
+
       // Generate URL for QuickChart
       const chartUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(chartConfig))}&w=${width}&h=${height}&format=png`;
+
+      // Check if URL is too long (over 1800 characters to be safe)
+      if (chartUrl.length > 1800) {
+        console.warn(`⚠️ QuickChart URL length is ${chartUrl.length} characters, using simpler fallback`);
+        // Use ultra-simple fallback
+        const fallbackConfig = {
+          type: 'bar',
+          data: {
+            labels: ['A', 'B', 'C'],
+            datasets: [{ data: [7, 8, 9], backgroundColor: '#1890ff' }]
+          }
+        };
+        const fallbackUrl = `https://quickchart.io/chart?c=${encodeURIComponent(JSON.stringify(fallbackConfig))}&w=${width}&h=${height}&format=png`;
+        console.log(`✅ Fallback URL length: ${fallbackUrl.length} characters`);
+
+        return {
+          imageUrl: fallbackUrl,
+          thumbnailUrl: fallbackUrl,
+          altText: `Chart for ${contentType.replace('_', ' ')}`,
+          width,
+          height,
+          generationTime: Date.now() - startTime,
+          cost: this.services.quickchart.costPerImage,
+          serviceResponse: { config: fallbackConfig, type: 'placeholder-fallback' }
+        };
+      }
 
       const generationTime = Date.now() - startTime;
 
       return {
         imageUrl: chartUrl,
         thumbnailUrl: chartUrl,
-        altText: `Generated ${contentType.replace('_', ' ')} placeholder: ${prompt}`,
+        altText: `Chart for ${contentType.replace('_', ' ')}`,
         width,
         height,
         generationTime,
@@ -714,251 +719,156 @@ export class VisualContentGenerationService {
 
   /**
    * Parse prompt to create appropriate QuickChart configuration
+   * SIMPLIFIED to avoid extremely long URLs that exceed browser limits
    */
   parsePromptForQuickChart(prompt, contentType) {
     const lowerPrompt = prompt.toLowerCase();
-    
-    // Extract title from prompt
+
+    // Extract title from prompt - keep it short to reduce URL length
     const titleMatch = prompt.match(/title ['"]([^'"]+)['"]/i);
-    const title = titleMatch ? titleMatch[1] : prompt.substring(0, 50) + '...';
-    
+    const title = titleMatch ? titleMatch[1].substring(0, 40) : 'Chart';
+
     // Pie Chart Detection
-    if (lowerPrompt.includes('pie chart') || lowerPrompt.includes('market share') || 
-        (lowerPrompt.includes('%') && lowerPrompt.includes('mailchimp'))) {
+    if (lowerPrompt.includes('pie chart') || lowerPrompt.includes('market share')) {
       return {
         type: 'pie',
         data: {
-          labels: ['Mailchimp', 'Constant Contact', 'Campaign Monitor', 'GetResponse', 'AWeber', 'Other'],
+          labels: ['A', 'B', 'C', 'D', 'E'],
           datasets: [{
-            data: [35, 22, 18, 12, 8, 5],
-            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'],
-            borderWidth: 2,
-            borderColor: '#fff'
+            data: [35, 25, 20, 12, 8],
+            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF']
           }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
+          title: { display: true, text: title },
           legend: { display: true, position: 'right' },
-          responsive: false,
-          animation: false,
-          plugins: {
-            datalabels: {
-              color: 'white',
-              formatter: (value, context) => value + '%',
-              font: { weight: 'bold' }
-            }
-          }
+          plugins: { datalabels: { formatter: (val) => val + '%' } }
         }
       };
     }
-    
-    // Bar Chart Detection  
+
+    // Bar Chart Detection
     if (lowerPrompt.includes('bar chart') || lowerPrompt.includes('horizontal bar') ||
         (lowerPrompt.includes('weeks') && lowerPrompt.includes('phases'))) {
       return {
         type: 'horizontalBar',
         data: {
-          labels: ['Discovery', 'Planning', 'Development', 'Testing', 'Deployment', 'Training'],
+          labels: ['Phase 1', 'Phase 2', 'Phase 3', 'Phase 4'],
           datasets: [{
-            label: 'Duration (Weeks)',
-            data: [2, 4, 12, 3, 1, 2],
-            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40'],
-            borderWidth: 1
+            data: [2, 4, 12, 3],
+            backgroundColor: '#36A2EB'
           }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          legend: { display: false },
-          responsive: false,
-          animation: false,
-          scales: {
-            x: { beginAtZero: true, title: { display: true, text: 'Duration (Weeks)' } },
-            y: { title: { display: true, text: 'Implementation Phases' } }
-          }
+          title: { display: true, text: title },
+          legend: { display: false }
         }
       };
     }
-    
+
     // Funnel Chart Detection
-    if (lowerPrompt.includes('funnel') || lowerPrompt.includes('conversion') ||
-        (lowerPrompt.includes('visitors') && lowerPrompt.includes('customers'))) {
+    if (lowerPrompt.includes('funnel') || lowerPrompt.includes('conversion')) {
       return {
         type: 'bar',
         data: {
-          labels: ['Website Visitors', 'Email Signups', 'Demo Requests', 'Proposals Sent', 'Customers'],
+          labels: ['Visitors', 'Signups', 'Demos', 'Proposals', 'Customers'],
           datasets: [{
-            label: 'Count',
             data: [10000, 2500, 500, 150, 45],
-            backgroundColor: ['#4285F4', '#34A853', '#FBBC05', '#EA4335', '#9C27B0'],
-            borderWidth: 1
+            backgroundColor: '#4285F4'
           }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          legend: { display: false },
-          responsive: false,
-          animation: false,
-          scales: {
-            y: { beginAtZero: true, title: { display: true, text: 'Count' } }
-          }
+          title: { display: true, text: title },
+          legend: { display: false }
         }
       };
     }
-    
-    // Comparison Matrix Detection
-    if (lowerPrompt.includes('matrix') || lowerPrompt.includes('comparison') ||
-        (lowerPrompt.includes('asana') && lowerPrompt.includes('trello'))) {
+
+    // Comparison Detection
+    if (lowerPrompt.includes('comparison') || lowerPrompt.includes('vs')) {
       return {
-        type: 'radar',
+        type: 'bar',
         data: {
-          labels: ['Task Management', 'Time Tracking', 'Reporting', 'Team Chat', 'File Storage', 'Mobile App'],
-          datasets: [
-            {
-              label: 'Asana',
-              data: [5, 5, 5, 4, 5, 5],
-              backgroundColor: 'rgba(255, 99, 132, 0.2)',
-              borderColor: 'rgba(255, 99, 132, 1)',
-              borderWidth: 2
-            },
-            {
-              label: 'Trello', 
-              data: [4, 3, 3, 3, 4, 5],
-              backgroundColor: 'rgba(54, 162, 235, 0.2)',
-              borderColor: 'rgba(54, 162, 235, 1)',
-              borderWidth: 2
-            },
-            {
-              label: 'Monday.com',
-              data: [5, 4, 5, 5, 4, 4],
-              backgroundColor: 'rgba(255, 206, 86, 0.2)',
-              borderColor: 'rgba(255, 206, 86, 1)', 
-              borderWidth: 2
-            }
-          ]
+          labels: ['Option A', 'Option B', 'Option C'],
+          datasets: [{
+            data: [85, 72, 90],
+            backgroundColor: ['#FF6384', '#36A2EB', '#FFCE56']
+          }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          responsive: false,
-          animation: false,
-          scale: { ticks: { beginAtZero: true, max: 5 } }
+          title: { display: true, text: title },
+          legend: { display: false }
         }
       };
     }
-    
+
     // Performance/Dashboard Detection
     if (lowerPrompt.includes('dashboard') || lowerPrompt.includes('performance') ||
-        lowerPrompt.includes('before/after') || lowerPrompt.includes('improvement')) {
+        lowerPrompt.includes('before') || lowerPrompt.includes('improvement')) {
       return {
         type: 'bar',
         data: {
-          labels: ['Page Load Speed', 'Bounce Rate', 'Conversion Rate', 'Mobile Score'],
-          datasets: [
-            {
-              label: 'Before',
-              data: [4.2, 65, 2.1, 45],
-              backgroundColor: 'rgba(255, 99, 132, 0.6)',
-              borderColor: 'rgba(255, 99, 132, 1)',
-              borderWidth: 1
-            },
-            {
-              label: 'After', 
-              data: [1.8, 38, 4.7, 92],
-              backgroundColor: 'rgba(75, 192, 192, 0.6)',
-              borderColor: 'rgba(75, 192, 192, 1)',
-              borderWidth: 1
-            }
-          ]
+          labels: ['Before', 'After'],
+          datasets: [{
+            data: [45, 92],
+            backgroundColor: ['#FF6384', '#4BC0C0']
+          }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          responsive: false,
-          animation: false,
-          scales: {
-            y: { beginAtZero: true }
-          }
+          title: { display: true, text: title }
         }
       };
     }
-    
+
     // Timeline Detection
-    if (lowerPrompt.includes('timeline') || lowerPrompt.includes('roadmap') ||
-        (lowerPrompt.includes('q1') && lowerPrompt.includes('q2'))) {
+    if (lowerPrompt.includes('timeline') || lowerPrompt.includes('roadmap')) {
       return {
         type: 'line',
         data: {
-          labels: ['Q1 2024', 'Q2 2024', 'Q3 2024', 'Q4 2024', 'Q1 2025'],
+          labels: ['Q1', 'Q2', 'Q3', 'Q4'],
           datasets: [{
-            label: 'Progress',
-            data: [100, 60, 0, 0, 0],
-            backgroundColor: 'rgba(54, 162, 235, 0.2)',
-            borderColor: 'rgba(54, 162, 235, 1)',
-            borderWidth: 3,
-            fill: false,
-            pointBackgroundColor: ['#4CAF50', '#FF9800', '#9E9E9E', '#9E9E9E', '#9E9E9E'],
-            pointBorderColor: ['#4CAF50', '#FF9800', '#9E9E9E', '#9E9E9E', '#9E9E9E'],
-            pointRadius: 8
+            data: [100, 60, 30, 10],
+            borderColor: '#36A2EB',
+            fill: false
           }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          responsive: false,
-          animation: false,
-          scales: {
-            y: { beginAtZero: true, max: 100, title: { display: true, text: 'Completion %' } },
-            x: { title: { display: true, text: 'Timeline' } }
-          }
+          title: { display: true, text: title }
         }
       };
     }
-    
+
     // Flow/Process Detection
-    if (lowerPrompt.includes('process') || lowerPrompt.includes('flow') || 
+    if (lowerPrompt.includes('process') || lowerPrompt.includes('flow') ||
         lowerPrompt.includes('step') || lowerPrompt.includes('journey')) {
       return {
         type: 'line',
         data: {
-          labels: ['Sign Up', 'Email Verification', 'Profile Setup', 'First Login', 'Feature Tour'],
+          labels: ['Step 1', 'Step 2', 'Step 3', 'Step 4'],
           datasets: [{
-            label: 'Conversion Rate (%)',
-            data: [100, 85, 70, 60, 40],
-            backgroundColor: 'rgba(255, 206, 86, 0.2)',
-            borderColor: 'rgba(255, 206, 86, 1)',
-            borderWidth: 3,
-            fill: true,
-            pointBackgroundColor: 'rgba(255, 206, 86, 1)',
-            pointRadius: 6
+            data: [100, 85, 70, 60],
+            borderColor: '#FFCE56',
+            fill: true
           }]
         },
         options: {
-          title: { display: true, text: title, fontSize: 16 },
-          responsive: false,
-          animation: false,
-          scales: {
-            y: { beginAtZero: true, max: 100, title: { display: true, text: 'Conversion Rate (%)' } },
-            x: { title: { display: true, text: 'Customer Journey Steps' } }
-          }
+          title: { display: true, text: title }
         }
       };
     }
-    
-    // Default fallback - simple bar chart
+
+    // Default fallback - minimal bar chart
     return {
       type: 'bar',
       data: {
-        labels: ['Metric 1', 'Metric 2', 'Metric 3'],
+        labels: ['A', 'B', 'C'],
         datasets: [{
-          label: contentType.replace('_', ' ').toUpperCase(),
           data: [8, 9, 7],
-          backgroundColor: '#1890ff',
-          borderColor: '#1890ff',
-          borderWidth: 1
+          backgroundColor: '#1890ff'
         }]
       },
       options: {
-        title: { display: true, text: title, fontSize: 18 },
-        scales: { y: { beginAtZero: true, max: 10 } },
-        responsive: false,
-        animation: false
+        title: { display: true, text: title }
       }
     };
   }
