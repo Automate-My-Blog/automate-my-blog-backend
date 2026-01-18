@@ -686,6 +686,33 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Clean up formatting issues in generated content
+   */
+  cleanupFormatting(content) {
+    if (!content || typeof content !== 'string') {
+      return content;
+    }
+
+    return content
+      // Remove excessive line breaks (3+ consecutive newlines → 2)
+      .replace(/\n{3,}/g, '\n\n')
+
+      // Remove standalone bullet points with no content
+      .replace(/^\s*[-*]\s*$/gm, '')
+
+      // Remove trailing whitespace from lines
+      .replace(/[ \t]+$/gm, '')
+
+      // Normalize list formatting (ensure single space after bullets)
+      .replace(/^(\s*[-*])\s+/gm, '$1 ')
+
+      // Remove excessive spaces between words
+      .replace(/  +/g, ' ')
+
+      .trim();
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    */
   buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = []) {
@@ -727,31 +754,41 @@ INTERNAL LINKING INSTRUCTIONS:
     }
 
     // External references instructions with STRICT citation link requirements
-    const externalRefInstructions = `CRITICAL CITATION LINK REQUIREMENTS:
+    const externalRefInstructions = `CRITICAL CITATION REQUIREMENTS:
 
-EVERY citation, statistic, research claim, or expert opinion MUST include a clickable hyperlink to the actual source.
+**ABSOLUTE RULE: NO UNSOURCED CLAIMS**
+- Do NOT include ANY statistics, research findings, expert quotes, or medical claims unless you can provide a genuine, specific citation
+- Generic homepage links (like nih.gov, mayoclinic.org) are NOT acceptable
+- You MUST link to the actual study, article, or source page
 
-**MANDATORY FORMAT:**
-- Format: [descriptive text](https://actual-url.com)
-- Example CORRECT: "According to [CDC mental health guidelines](https://www.cdc.gov/mentalhealth/), early intervention is crucial..."
-- Example CORRECT: "Research from the [National Institutes of Health](https://www.nih.gov/) indicates that..."
-- Example WRONG: "According to CDC guidelines..." (NO LINK - UNACCEPTABLE)
-- Example WRONG: "A 2024 study found..." (NO LINK - UNACCEPTABLE)
+**ACCEPTABLE CITATION FORMATS:**
+
+✅ GOOD: "A 2023 study published in the Journal of Clinical Psychology found that 73% of patients showed improvement [View study](https://www.journalofclinicalpsych.org/2023/postpartum-study)"
+
+✅ GOOD: "According to [CDC guidelines on postpartum care](https://www.cdc.gov/reproductivehealth/maternalinfanthealth/postpartum-care.html), early intervention is crucial"
+
+❌ BAD: "According to the [National Institutes of Health](https://www.nih.gov/), estrogen levels drop..." (generic homepage link)
+
+❌ BAD: "Research shows 80% of mothers..." (no citation at all)
+
+❌ BAD: "Studies indicate..." (vague, no specific source)
 
 **STRICT RULES:**
-- If you cannot provide a REAL, working hyperlink, DO NOT make the claim
-- Minimum 3-5 authoritative external links per post
-- Only link to well-known sources: .gov sites, .edu sites, Mayo Clinic, NIH, CDC, WHO, academic institutions
-- DO NOT fabricate URLs - only use real, known URLs
-- Link to the homepage or main section if specific article URL is unknown
-- Valid examples: https://www.nih.gov/, https://www.cdc.gov/, https://www.mayoclinic.org/, https://www.who.int/
+1. EVERY statistic MUST have a specific, verifiable source URL
+2. EVERY research claim MUST link to the actual study or article
+3. EVERY expert quote MUST link to where the quote appeared
+4. If you cannot find a specific, genuine URL for a claim - DO NOT include that claim
+5. It is better to write fewer claims with genuine citations than many claims with generic or missing citations
 
-**ACCEPTABLE WITHOUT LINKS (use sparingly):**
-- General industry statements: "Healthcare professionals recommend..."
-- Common medical knowledge: "Proper sleep is essential for health..."
-- Hypothetical examples: "For example, a business owner might..."
+**WHAT TO DO INSTEAD:**
+- Focus on practical advice and guidance that doesn't require citations
+- Use general statements: "Many healthcare professionals recommend..." (no specific claim requiring citation)
+- Describe approaches without quantifying: "Combined therapy approaches often show positive results" vs "Combined therapy has 92% effectiveness"
+- Frame content around patient experiences and clinical approaches rather than statistics
 
-If in doubt, use general language without specific citations rather than citing without links.`;
+**FORMAT:** [descriptive text](https://full-specific-url.com/article-path)
+
+**VERIFICATION:** Before including any claim, ask yourself: "Do I have the actual URL to this specific study/article/source?" If no, remove the claim.`;
     contextSections.push(externalRefInstructions);
 
     // CTA context with real URLs
@@ -859,28 +896,28 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 **8 Highlight Box Types:**
 
 1. **statistic** - For numbers, percentages, data points
-   - Example: <blockquote data-highlight-box="" data-highlight-type="statistic" data-width="100%" data-font-size="xxlarge" data-layout="block" data-align="center" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">73% increase in engagement</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="statistic" data-width="90%" data-font-size="xxlarge" data-layout="block" data-align="center" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">73% increase in engagement</blockquote>
 
 2. **pullquote** - For expert quotes, testimonials, insights
-   - Example: <blockquote data-highlight-box="" data-highlight-type="pullquote" data-width="50%" data-font-size="large" data-layout="float-right" data-align="left" data-custom-bg="#f6ffed" data-custom-border="#52c41a">"Content marketing generates 3x more leads"</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="pullquote" data-width="90%" data-font-size="large" data-layout="block" data-align="center" data-custom-bg="#f6ffed" data-custom-border="#52c41a">"Content marketing generates 3x more leads"</blockquote>
 
 3. **takeaway** - For main points, conclusions
-   - Example: <blockquote data-highlight-box="" data-highlight-type="takeaway" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#fff7e6" data-custom-border="#fa8c16">The bottom line: Email marketing remains the highest ROI channel</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="takeaway" data-width="90%" data-font-size="medium" data-layout="block" data-align="center" data-custom-bg="#fff7e6" data-custom-border="#fa8c16">The bottom line: Email marketing remains the highest ROI channel</blockquote>
 
 4. **warning** - For critical info, alerts
-   - Example: <blockquote data-highlight-box="" data-highlight-type="warning" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#fff1f0" data-custom-border="#ff4d4f">Critical: Never buy email lists!</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="warning" data-width="90%" data-font-size="medium" data-layout="block" data-align="center" data-custom-bg="#fff1f0" data-custom-border="#ff4d4f">Critical: Never buy email lists!</blockquote>
 
 5. **tip** - For pro tips, best practices
-   - Example: <blockquote data-highlight-box="" data-highlight-type="tip" data-width="50%" data-font-size="small" data-layout="float-left" data-align="left" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">Pro tip: Test subject lines with A/B testing</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="tip" data-width="90%" data-font-size="small" data-layout="block" data-align="center" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">Pro tip: Test subject lines with A/B testing</blockquote>
 
 6. **definition** - For glossary terms, acronyms
-   - Example: <blockquote data-highlight-box="" data-highlight-type="definition" data-width="100%" data-font-size="small" data-layout="block" data-align="left" data-custom-bg="#f0f5ff" data-custom-border="#2f54eb"><strong>SEO:</strong> Increasing website visibility in search results</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="definition" data-width="90%" data-font-size="small" data-layout="block" data-align="center" data-custom-bg="#f0f5ff" data-custom-border="#2f54eb"><strong>SEO:</strong> Increasing website visibility in search results</blockquote>
 
 7. **process** - For step-by-step instructions
-   - Example: <blockquote data-highlight-box="" data-highlight-type="process" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#f9f0ff" data-custom-border="#722ed1"><strong>Step 3:</strong> Set up automated sequences</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="process" data-width="90%" data-font-size="medium" data-layout="block" data-align="center" data-custom-bg="#f9f0ff" data-custom-border="#722ed1"><strong>Step 3:</strong> Set up automated sequences</blockquote>
 
 8. **comparison** - For versus, plan differences
-   - Example: <blockquote data-highlight-box="" data-highlight-type="comparison" data-width="100%" data-font-size="medium" data-layout="block" data-align="left" data-custom-bg="#e6fffb" data-custom-border="#13c2c2"><strong>Free vs Pro:</strong> Free includes 1,000 contacts</blockquote>
+   - Example: <blockquote data-highlight-box="" data-highlight-type="comparison" data-width="90%" data-font-size="medium" data-layout="block" data-align="center" data-custom-bg="#e6fffb" data-custom-border="#13c2c2"><strong>Free vs Pro:</strong> Free includes 1,000 contacts</blockquote>
 
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
@@ -914,6 +951,24 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
    → ADDS NEW cited authority
 
 **RULE:** If highlight box doesn't add NEW information beyond what's in text → DON'T include it. Better to have 0 boxes than redundant ones.
+
+**CITATION REQUIREMENT FOR HIGHLIGHT BOXES:**
+- If a highlight box contains a statistic, percentage, or research finding, it MUST include the source
+- Format: Include citation within the box content
+- Example for statistic box:
+
+<blockquote data-highlight-box="" data-highlight-type="statistic" data-width="90%" data-align="center" data-layout="block" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">
+80% of new mothers experience "baby blues" ([Postpartum Support International](https://www.postpartum.net/))
+</blockquote>
+
+- NEVER include unsourced statistics or claims in highlight boxes
+- If you cannot cite the source, don't use a highlight box for that statistic
+
+**MANDATORY HIGHLIGHT BOX STYLING:**
+- ALL highlight boxes MUST use: data-width="90%" data-align="center" data-layout="block"
+- NO variations in width or alignment
+- NO float layouts (no float-left, no float-right)
+- This creates consistent, professional appearance across all boxes
 `;
 
     if (previousBoxTypes.length > 0) {
@@ -921,10 +976,7 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
       highlightBoxInstructions += `- Choose from remaining types: ${availableBoxTypes.join(', ')}\n`;
     }
 
-    highlightBoxInstructions += `- Float layouts (float-left, float-right) for tips and pull quotes (50% width)
-- Block layouts for statistics, takeaways, warnings, definitions, processes, comparisons (100% width)
-- Vary box types for visual diversity
-- Place boxes strategically to break up content`;
+    highlightBoxInstructions += `- Place boxes strategically to break up content and add value`;
 
     const imageInstructions = `
 ## IMAGE PLACEMENT INSTRUCTIONS
@@ -1262,6 +1314,10 @@ CRITICAL REQUIREMENTS:
         console.log('ℹ️ No tweet placeholders in generated content');
         console.log('ℹ️ This is OK - tweets are optional when no real tweets are available');
       }
+
+      // Clean up formatting issues
+      console.log('🧹 Cleaning up content formatting...');
+      blogData.content = this.cleanupFormatting(blogData.content);
 
       // Validate tweet requirement (check if tweet cards exist after processing)
       const tweetCardCount = (blogData.content?.match(/class="tweet-card"/g) || []).length;

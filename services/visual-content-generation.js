@@ -65,7 +65,7 @@ export class VisualContentGenerationService {
   selectService(contentType, budget = 'standard', requirements = {}) {
     const servicePreferences = {
       hero_image: ['dalle', 'grok'], // DALL-E and Grok only
-      infographic: ['quickchart', 'grok', 'dalle'], // QuickChart for data, AI for concepts
+      infographic: ['quickchart'], // ONLY QuickChart for text-heavy graphics (prevents gibberish text)
       chart: ['quickchart'], // QuickChart only for charts
       graph: ['quickchart'], // QuickChart only for graphs
       data_visualization: ['quickchart'], // QuickChart only for data viz
@@ -486,6 +486,12 @@ export class VisualContentGenerationService {
       // Enhance prompt with style and brand guidelines
       const enhancedPrompt = this.enhancePrompt(prompt, contentType, brandGuidelines);
       console.log(`✨ Enhanced prompt: ${enhancedPrompt}`);
+
+      // Warn if infographic requested without structured data
+      if (contentType === 'infographic' && !options.chartConfig) {
+        console.warn('⚠️ Infographic requested without chart data - text may be unreadable');
+        console.warn('💡 Recommend using chart format with structured data instead');
+      }
 
       // Generate content based on selected service with fallback logic
       let result;
