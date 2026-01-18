@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import db from './database.js';
 import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
+import grokTweetSearch from './grok-tweet-search.js';
 
 /**
  * Enhanced Blog Generation Service
@@ -569,6 +570,48 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Search for real tweets using Grok before content generation
+   * @param {Object} topic - Blog topic object
+   * @param {Object} businessInfo - Business information
+   * @returns {Array<string>} Array of real tweet URLs
+   */
+  async searchForRealTweets(topic, businessInfo) {
+    try {
+      console.log('🔍 [TWEET SEARCH] Calling Grok to find real tweets...');
+
+      const tweetUrls = await grokTweetSearch.searchRelevantTweets({
+        topic: topic.title || topic.headline,
+        businessType: businessInfo.businessType || 'Business',
+        targetAudience: businessInfo.targetAudience || 'General audience',
+        maxTweets: 5 // Find 5, OpenAI will choose 1-2 best ones
+      });
+
+      if (tweetUrls.length === 0) {
+        console.log('⚠️ [TWEET SEARCH] No real tweets found - posts will be generated without tweets');
+        return [];
+      }
+
+      // Optional: Validate tweets exist before passing to OpenAI
+      const validatedTweets = [];
+      for (const url of tweetUrls) {
+        const exists = await grokTweetSearch.validateTweetExists(url);
+        if (exists) {
+          validatedTweets.push(url);
+        } else {
+          console.warn(`⚠️ Tweet validation failed: ${url}`);
+        }
+      }
+
+      console.log(`✅ [TWEET SEARCH] Validated ${validatedTweets.length}/${tweetUrls.length} tweets`);
+      return validatedTweets;
+
+    } catch (error) {
+      console.error('❌ [TWEET SEARCH] Error:', error.message);
+      return []; // Gracefully degrade
+    }
+  }
+
+  /**
    * Process tweet placeholders and replace with styled embed HTML
    * Format: ![TWEET:https://x.com/username/status/1234567890] or ![TWEET:username/status_id]
    */
@@ -645,7 +688,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   /**
    * Build enhanced generation prompt with all available data
    */
-  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = []) {
+  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = []) {
     const { availability, settings, manualData, websiteData, completenessScore } = organizationContext;
 
     // Build context sections based on available data
@@ -946,20 +989,29 @@ Description = detailed image generation prompt (50-100 words)
 **For tweet embeds (social proof, expert perspectives, real stories):**
 ![TWEET:username/status_id] or ![TWEET:https://x.com/username/status/1234567890]
 
-TWEET EMBED RULES:
-- **REQUIRED:** Include at least 1 tweet embed per post (minimum 1, maximum 2)
-- Use tweets from verified experts, authorities, or patients for authentic social proof
-- ALWAYS add context paragraph BEFORE the tweet explaining its relevance
-- Use instead of creating fake anecdotes or testimonials
-- Only embed tweets that genuinely add value and authority
+${realTweetUrls.length > 0
+  ? `REAL TWEETS AVAILABLE FOR THIS TOPIC:
+${realTweetUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}
+
+TWEET EMBED RULES (CRITICAL):
+- **USE ONLY THE REAL TWEETS PROVIDED ABOVE** - These have been verified to exist
+- **PREFERRED:** Include 1-2 of the provided tweets in your blog post
+- Choose tweets that best fit your content flow and add genuine value
+- ALWAYS add context paragraph BEFORE the tweet explaining who they are and why their perspective matters
 - Position strategically: mid-post for expert validation or near conclusion for testimonials
+- If none of the provided tweets fit naturally, you may skip them (better to have ZERO tweets than force an irrelevant one)
 
 **Example:**
-Dr. Sarah Chen, a reproductive psychiatrist at Johns Hopkins, recently shared insights on the importance of early intervention for postpartum mental health.
+Leading researcher shared insights on this topic.
 
-![TWEET:DrSarahChen/1234567890123456789]
+![TWEET:${realTweetUrls[0]}]
 
-This perspective from a leading researcher highlights the critical window for effective treatment.`;
+This perspective highlights important considerations about the topic.`
+  : `TWEET EMBED RULES:
+- **NO REAL TWEETS AVAILABLE** - Do NOT include any tweet embeds in this post
+- Do NOT create fake tweet URLs or made-up usernames/status IDs
+- Skip tweets entirely for this post
+- Use other forms of social proof (statistics, studies, quotes from publications)`}`;
 
     console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
       promptLength: contextSections.length,
@@ -1082,8 +1134,13 @@ Return JSON format:
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       console.log(`📊 Previous post used ${previousBoxTypes.length} highlight box types:`, previousBoxTypes);
 
-      // Build enhanced prompt with all available data
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes);
+      // Search for real tweets using Grok BEFORE building prompt
+      console.log('🔍 Step: Searching for real tweets with Grok...');
+      const realTweetUrls = await this.searchForRealTweets(topic, businessInfo);
+      console.log(`🐦 Found ${realTweetUrls.length} real tweets for prompt`);
+
+      // Build enhanced prompt with all available data (including real tweets)
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, realTweetUrls);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -1173,8 +1230,8 @@ CRITICAL REQUIREMENTS:
         console.log('🐦 Detected tweet placeholders in content - processing...');
         blogData.content = await this.processTweetPlaceholders(blogData.content);
       } else {
-        console.warn('⚠️ WARNING: No tweet placeholders detected in generated content');
-        console.warn('⚠️ REQUIREMENT: At least 1 tweet embed per post is required for validation/social proof');
+        console.log('ℹ️ No tweet placeholders in generated content');
+        console.log('ℹ️ This is OK - tweets are optional when no real tweets are available');
       }
 
       // Validate tweet requirement (check if tweet cards exist after processing)
@@ -1183,11 +1240,12 @@ CRITICAL REQUIREMENTS:
       console.log('🐦 [TWEET VALIDATION]:', {
         tweetCardsGenerated: tweetCardCount,
         tweetPlaceholdersRemaining: tweetPlaceholderCount,
-        meetsRequirement: tweetCardCount >= 1 || tweetPlaceholderCount >= 1
+        status: tweetCardCount > 0 ? 'Has tweets' : 'No tweets (OK if none available)'
       });
 
+      // Tweets are now optional - no error if missing
       if (tweetCardCount === 0 && tweetPlaceholderCount === 0) {
-        console.error('❌ VALIDATION FAILED: Post contains no tweet embeds (minimum 1 required)');
+        console.log('ℹ️ Blog post generated without tweet embeds (no real tweets were available)');
       }
 
       // Enhance blog data with organization context
