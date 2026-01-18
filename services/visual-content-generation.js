@@ -10,10 +10,10 @@ export class VisualContentGenerationService {
     this.services = {
       stable_diffusion: {
         name: 'Stable Diffusion (Replicate)',
-        available: !!process.env.REPLICATE_API_TOKEN,
-        costPerImage: 0.01, // Your paid account
+        available: false, // DISABLED - using DALL-E and Grok instead
+        costPerImage: 0.01,
         endpoint: 'https://api.replicate.com/v1/predictions',
-        priority: 1, // Highest priority
+        priority: 99, // Deprioritized
         bestFor: ['hero_image', 'illustration', 'artistic', 'abstract']
       },
       quickchart: {
@@ -21,7 +21,7 @@ export class VisualContentGenerationService {
         available: true, // No account needed!
         costPerImage: 0.00, // Free tier
         endpoint: 'https://quickchart.io/chart',
-        priority: 2, // Second priority - free!
+        priority: 3, // Third priority - for charts only
         bestFor: ['chart', 'graph', 'infographic', 'data_visualization']
       },
       dalle: {
@@ -29,8 +29,16 @@ export class VisualContentGenerationService {
         available: !!process.env.OPENAI_API_KEY,
         costPerImage: 0.02,
         endpoint: 'https://api.openai.com/v1/images/generations',
-        priority: 3, // Third - costs money
+        priority: 1, // HIGHEST PRIORITY (changed from 3)
         bestFor: ['realistic', 'professional', 'detailed']
+      },
+      grok: {
+        name: 'Grok (xAI)',
+        available: !!process.env.XAI_API_KEY,
+        costPerImage: 0.07,
+        endpoint: 'https://api.x.ai/v1/images/generations',
+        priority: 2, // SECOND PRIORITY
+        bestFor: ['hero_image', 'illustration', 'realistic', 'professional', 'artistic']
       },
       canva: {
         name: 'Canva API',
@@ -43,9 +51,10 @@ export class VisualContentGenerationService {
     };
 
     console.log('🎨 Visual Content Service initialized:', {
-      replicate: this.services.stable_diffusion.available ? '✅ Ready' : '❌ No API token',
+      replicate: '❌ Disabled (using DALL-E + Grok)',
       quickchart: '✅ Ready (Free)',
-      dalle: this.services.dalle.available ? '✅ Ready' : '❌ No OpenAI key',
+      dalle: this.services.dalle.available ? '✅ Ready (Priority 1)' : '❌ No OpenAI key',
+      grok: this.services.grok.available ? '✅ Ready (Priority 2)' : '❌ No xAI key',
       canva: '❌ Disabled ($120/year)'
     });
   }
@@ -55,20 +64,20 @@ export class VisualContentGenerationService {
    */
   selectService(contentType, budget = 'standard', requirements = {}) {
     const servicePreferences = {
-      hero_image: ['stable_diffusion', 'dalle'], // Photos need AI generators, remove QuickChart
-      infographic: ['quickchart', 'stable_diffusion'], // Test both chart and AI approaches
-      chart: ['quickchart'],
-      graph: ['quickchart'],
-      data_visualization: ['quickchart'],
-      diagram: ['stable_diffusion', 'quickchart'],
-      illustration: ['stable_diffusion', 'dalle'],
-      social_media: ['stable_diffusion', 'dalle'], // Remove QuickChart, focus on engaging visuals
-      thumbnail: ['stable_diffusion', 'dalle'],
-      banner: ['stable_diffusion', 'dalle'],
-      icon: ['stable_diffusion', 'dalle']
+      hero_image: ['dalle', 'grok'], // DALL-E and Grok only
+      infographic: ['quickchart', 'grok', 'dalle'], // QuickChart for data, AI for concepts
+      chart: ['quickchart'], // QuickChart only for charts
+      graph: ['quickchart'], // QuickChart only for graphs
+      data_visualization: ['quickchart'], // QuickChart only for data viz
+      diagram: ['quickchart', 'grok', 'dalle'], // QuickChart first, then AI
+      illustration: ['dalle', 'grok'], // DALL-E and Grok only
+      social_media: ['dalle', 'grok'], // DALL-E and Grok for engaging visuals
+      thumbnail: ['dalle', 'grok'], // DALL-E and Grok only
+      banner: ['dalle', 'grok'], // DALL-E and Grok only
+      icon: ['dalle', 'grok'] // DALL-E and Grok only
     };
 
-    const preferred = servicePreferences[contentType] || ['stable_diffusion', 'dalle'];
+    const preferred = servicePreferences[contentType] || ['dalle', 'grok'];
     
     // Filter to available services and sort by priority
     const availableServices = preferred
@@ -203,6 +212,54 @@ export class VisualContentGenerationService {
     } catch (error) {
       console.error('DALL-E generation error:', error);
       throw new Error(`DALL-E generation failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate image using Grok via xAI API
+   */
+  async generateWithGrok(prompt, options = {}) {
+    if (!process.env.XAI_API_KEY) {
+      throw new Error('xAI API key not configured');
+    }
+
+    const startTime = Date.now();
+
+    try {
+      console.log('🎨 Generating image with Grok (xAI):', prompt);
+
+      const response = await axios.post(
+        this.services.grok.endpoint,
+        {
+          model: "grok-2-image",
+          prompt: prompt,
+          n: 1,
+          response_format: options.response_format || "url"
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${process.env.XAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      const generationTime = Date.now() - startTime;
+
+      return {
+        imageUrl: response.data.data[0].url,
+        thumbnailUrl: response.data.data[0].url,
+        altText: response.data.data[0].revised_prompt || prompt,
+        width: 1024,
+        height: 1024,
+        generationTime,
+        cost: this.services.grok.costPerImage,
+        serviceResponse: response.data.data[0]
+      };
+
+    } catch (error) {
+      console.error('Grok generation error:', error.response?.data || error);
+      throw new Error(`Grok generation failed: ${error.message}`);
     }
   }
 
@@ -441,6 +498,9 @@ export class VisualContentGenerationService {
             break;
           case 'dalle':
             result = await this.generateWithDALLE(enhancedPrompt, options);
+            break;
+          case 'grok':
+            result = await this.generateWithGrok(enhancedPrompt, options);
             break;
           case 'quickchart':
             if (options.chartConfig) {

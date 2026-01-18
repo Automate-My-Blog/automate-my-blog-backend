@@ -410,6 +410,63 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Process tweet placeholders and replace with styled embed HTML
+   * Format: ![TWEET:https://x.com/username/status/1234567890] or ![TWEET:username/status_id]
+   */
+  async processTweetPlaceholders(content) {
+    try {
+      console.log('🐦 Processing tweet placeholders in content...');
+
+      // Match both full URLs and shorthand username/status_id format
+      const tweetRegex = /!\[TWEET:((?:https?:\/\/)?(?:twitter\.com|x\.com)?\/?\S+?\/status\/\d+|[\w]+\/\d+)\]/g;
+      const matches = [...content.matchAll(tweetRegex)];
+
+      if (matches.length === 0) {
+        console.log('📊 No tweet placeholders found in content');
+        return content;
+      }
+
+      console.log(`🐦 Found ${matches.length} tweet placeholders to process`);
+
+      let processedContent = content;
+      let replacedCount = 0;
+
+      matches.forEach((match) => {
+        const placeholder = match[0];
+        const tweetReference = match[1];
+
+        // Build full tweet URL
+        let tweetUrl;
+        if (tweetReference.startsWith('http')) {
+          // Already a full URL
+          tweetUrl = tweetReference;
+        } else {
+          // Convert username/status_id to full URL
+          tweetUrl = `https://x.com/${tweetReference}`;
+        }
+
+        // Create styled blockquote embed with link
+        const tweetEmbed = `<blockquote class="tweet-embed" style="border-left: 4px solid #1DA1F2; padding: 16px 20px; margin: 24px 0; background: #f8f9fa; border-radius: 8px;">
+  <p style="margin: 0 0 12px 0; font-style: italic; color: #14171a;">View this expert perspective on X (formerly Twitter)</p>
+  <a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none; font-weight: 600;">→ Read the full tweet</a>
+</blockquote>`;
+
+        processedContent = processedContent.replace(placeholder, tweetEmbed);
+        replacedCount++;
+        console.log(`✅ Inserted tweet embed: ${tweetUrl}`);
+      });
+
+      console.log(`✅ Tweet processing complete: ${replacedCount}/${matches.length} tweets embedded`);
+      return processedContent;
+
+    } catch (error) {
+      console.error('❌ Error processing tweet placeholders:', error);
+      // Return original content if tweet processing fails
+      return content;
+    }
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    */
   buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = []) {
@@ -450,16 +507,32 @@ INTERNAL LINKING INSTRUCTIONS:
       contextSections.push(linkContext);
     }
 
-    // External references instructions
-    const externalRefInstructions = `EXTERNAL REFERENCES (for citations and credibility):
-When citing medical information, research, statistics, or expert opinions:
-- You may reference well-known, authoritative sources (e.g., NIH, CDC, Mayo Clinic, academic institutions)
-- Use general knowledge about these sources - do NOT fabricate specific studies or statistics
-- Reference the type of information available from these sources (e.g., "According to medical research..." rather than "A 2024 study found...")
-- Prefer .gov sites, .edu sites, established medical institutions, and professional organizations
-- Only reference information that is widely known and established in the field
-- DO NOT create fake URLs or specific article titles
-- If you're not certain about a source or statistic, omit it rather than fabricate it`;
+    // External references instructions with STRICT citation link requirements
+    const externalRefInstructions = `CRITICAL CITATION LINK REQUIREMENTS:
+
+EVERY citation, statistic, research claim, or expert opinion MUST include a clickable hyperlink to the actual source.
+
+**MANDATORY FORMAT:**
+- Format: [descriptive text](https://actual-url.com)
+- Example CORRECT: "According to [CDC mental health guidelines](https://www.cdc.gov/mentalhealth/), early intervention is crucial..."
+- Example CORRECT: "Research from the [National Institutes of Health](https://www.nih.gov/) indicates that..."
+- Example WRONG: "According to CDC guidelines..." (NO LINK - UNACCEPTABLE)
+- Example WRONG: "A 2024 study found..." (NO LINK - UNACCEPTABLE)
+
+**STRICT RULES:**
+- If you cannot provide a REAL, working hyperlink, DO NOT make the claim
+- Minimum 3-5 authoritative external links per post
+- Only link to well-known sources: .gov sites, .edu sites, Mayo Clinic, NIH, CDC, WHO, academic institutions
+- DO NOT fabricate URLs - only use real, known URLs
+- Link to the homepage or main section if specific article URL is unknown
+- Valid examples: https://www.nih.gov/, https://www.cdc.gov/, https://www.mayoclinic.org/, https://www.who.int/
+
+**ACCEPTABLE WITHOUT LINKS (use sparingly):**
+- General industry statements: "Healthcare professionals recommend..."
+- Common medical knowledge: "Proper sleep is essential for health..."
+- Hypothetical examples: "For example, a business owner might..."
+
+If in doubt, use general language without specific citations rather than citing without links.`;
     contextSections.push(externalRefInstructions);
 
     // CTA context with real URLs
@@ -494,7 +567,16 @@ CRITICAL CTA INSTRUCTIONS:
 - Integrate CTAs naturally where they fit the content flow
 - If a CTA doesn't fit naturally, skip it (don't force it)
 - NEVER create placeholder URLs like "https://www.yourwebsite.com/..."
-- If no CTAs fit, it's okay to have none`;
+- If no CTAs fit, it's okay to have none
+
+CTA SPACING RULES (CRITICAL - NEVER VIOLATE):
+- MINIMUM 200-300 words between ANY two CTAs (NEVER back-to-back or in consecutive paragraphs)
+- First CTA: After 300-400 words of content (NOT in introduction)
+- Middle CTA(s): Space out every 400-500 words throughout the body
+- Final CTA: Place 100-200 words BEFORE the conclusion section
+- NEVER place CTAs in the first 200 words (introduction zone)
+- Distribute strategically throughout the post - avoid clustering 3+ CTAs in one section
+- If you cannot maintain proper spacing, use fewer CTAs (2 well-spaced CTAs > 3 clustered CTAs)`;
       contextSections.push(ctaContext);
     } else if (manualData.cta_preferences) {
       console.log('⚠️ [CTA DEBUG] Prompt Building: Using manual CTA preferences (no real CTAs):', {
@@ -583,6 +665,36 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
+
+**CRITICAL ANTI-REDUNDANCY RULES:**
+- Highlight boxes MUST NOT duplicate text from surrounding paragraphs
+- DO NOT copy-paste sentences word-for-word into highlight boxes
+- DO NOT restate the exact same information in slightly different words
+- Each highlight box must add NEW information, insight, or perspective not already stated in adjacent text
+
+**WRONG EXAMPLES (Redundant - NEVER DO THIS):**
+❌ Paragraph: "Reproductive psychiatry focuses on mental health during pregnancy."
+   Box: "Reproductive Psychiatry: Focuses on mental health during pregnancy."
+   → REDUNDANT - verbatim copy!
+
+❌ Paragraph: "Studies show 73% effectiveness for combined therapy."
+   Box: "73% effectiveness when combining therapy"
+   → REDUNDANT - just rephrasing!
+
+**CORRECT EXAMPLES (Adds Value):**
+✅ Paragraph discusses therapy benefits in general
+   Box: "Industry data: 40% faster recovery with weekly sessions"
+   → ADDS NEW specific data
+
+✅ Paragraph explains treatment approach
+   Box: "Pro tip: Schedule during second trimester for best results"
+   → ADDS NEW actionable advice
+
+✅ Paragraph about medication options
+   Box: "According to [NIH research](https://www.nih.gov/), SSRIs are first-line treatment"
+   → ADDS NEW cited authority
+
+**RULE:** If highlight box doesn't add NEW information beyond what's in text → DON'T include it. Better to have 0 boxes than redundant ones.
 `;
 
     if (previousBoxTypes.length > 0) {
@@ -645,7 +757,32 @@ Description = detailed image generation prompt (50-100 words)
 1. Hero image after introduction
 2. Chart/graph ONLY when you present statistics in the text (with context and source)
 3. Supporting image every 300-400 words
-4. Illustration for examples or case studies`;
+4. Illustration for examples or case studies
+
+**CRITICAL IMAGE PLACEMENT RESTRICTIONS:**
+- ALL images (IMAGE, CHART) must appear BEFORE the final call-to-action
+- NEVER place images in the conclusion section
+- NEVER place images after the last CTA
+- Proper sequence: [Introduction + Hero] → [Content + Images] → [Final CTA] → [Conclusion - NO IMAGES]
+- Last image should appear at least 100-200 words BEFORE the final CTA
+- After final CTA: Only text content allowed (conclusion, summary, closing thoughts)
+
+**For tweet embeds (social proof, expert perspectives, real stories):**
+![TWEET:username/status_id] or ![TWEET:https://x.com/username/status/1234567890]
+
+TWEET EMBED RULES:
+- Use tweets from verified experts, authorities, or patients for authentic social proof
+- Maximum 2 tweet embeds per post
+- ALWAYS add context paragraph BEFORE the tweet explaining its relevance
+- Use instead of creating fake anecdotes or testimonials
+- Only embed tweets that genuinely add value and authority
+
+**Example:**
+Dr. Sarah Chen, a reproductive psychiatrist at Johns Hopkins, recently shared insights on the importance of early intervention for postpartum mental health.
+
+![TWEET:DrSarahChen/1234567890123456789]
+
+This perspective from a leading researcher highlights the critical window for effective treatment.`;
 
     console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
       promptLength: contextSections.length,
@@ -680,6 +817,23 @@ CONTENT REQUIREMENTS:
 5. CTA INTEGRATION: Include 2-3 contextual calls-to-action that feel natural
 6. MOBILE OPTIMIZATION: Use scannable formatting with clear headings
 7. VALUE-FOCUSED: Every paragraph should provide genuine value to readers
+
+ABSOLUTE PROHIBITIONS - NEVER DO THESE:
+❌ DO NOT create fake expert names (e.g., "Dr. Sarah Johnson", "Dr. Emily Chen", "Dr. Michael Roberts")
+❌ DO NOT fabricate case studies with specific named people or companies
+❌ DO NOT invent patient stories or testimonials with character names
+❌ DO NOT make up "recent studies" with specific years, institutions, or researchers
+❌ DO NOT create fictitious scenarios with named individuals (e.g., "Consider the journey of Dr. Emily...")
+❌ DO NOT write phrases like "Sarah, a 35-year-old patient..." or "John, a business owner..."
+
+ACCEPTABLE ALTERNATIVES FOR STORYTELLING:
+✅ General statements: "Healthcare professionals often observe..." or "Patients typically report..."
+✅ Hypothetical examples: "For example, a business owner might..." or "Consider a scenario where..."
+✅ Industry patterns: "Many practitioners find that..." or "Research consistently shows..."
+✅ TWEET EMBEDS for real stories: Use ![TWEET:username/status_id] to share authentic expert perspectives, patient testimonials, or case studies from verified sources
+✅ Statistical evidence with links: "According to [CDC data](https://www.cdc.gov/), X% of patients..."
+
+RULE: If you want to include an anecdote, expert story, or testimonial → Use a tweet embed instead of creating a fake one.
 
 ADDITIONAL INSTRUCTIONS: ${additionalInstructions}
 
@@ -830,11 +984,19 @@ CRITICAL REQUIREMENTS:
       });
 
       // Process image placeholders and replace with generated images
-      if (blogData.content && blogData.content.includes('![IMAGE:')) {
-        console.log('🎨 Detected image placeholders in content - processing...');
+      if (blogData.content && (blogData.content.includes('![IMAGE:') || blogData.content.includes('![CHART:'))) {
+        console.log('🎨 Detected image/chart placeholders in content - processing...');
         blogData.content = await this.processImagePlaceholders(blogData.content, topic, organizationId);
       } else {
-        console.log('📊 No image placeholders detected in generated content');
+        console.log('📊 No image/chart placeholders detected in generated content');
+      }
+
+      // Process tweet placeholders and replace with styled embeds
+      if (blogData.content && blogData.content.includes('![TWEET:')) {
+        console.log('🐦 Detected tweet placeholders in content - processing...');
+        blogData.content = await this.processTweetPlaceholders(blogData.content);
+      } else {
+        console.log('📊 No tweet placeholders detected in generated content');
       }
 
       // Enhance blog data with organization context
