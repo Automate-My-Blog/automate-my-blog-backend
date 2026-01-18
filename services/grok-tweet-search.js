@@ -6,7 +6,8 @@ import axios from 'axios';
  */
 export class GrokTweetSearchService {
   constructor() {
-    this.apiKey = process.env.XAI_API_KEY;
+    // Trim and remove surrounding quotes if present
+    this.apiKey = process.env.XAI_API_KEY?.trim().replace(/^["']|["']$/g, '');
     this.endpoint = 'https://api.x.ai/v1/chat/completions';
 
     if (!this.apiKey) {
