@@ -308,12 +308,36 @@ SCENARIO-SPECIFIC REQUIREMENTS:
           }
         ],
         temperature: 0.3,
-        max_tokens: 3000
+        max_tokens: 4000  // Increased from 3000 to accommodate complex JSON structure
       });
 
       console.log('OpenAI request completed successfully');
       console.log('Response choices:', completion.choices?.length || 0);
-      
+
+      // CRITICAL: Check for response truncation
+      const finishReason = completion.choices[0].finish_reason;
+      console.log('🔍 Website Analysis completion details:', {
+        finish_reason: finishReason,
+        prompt_tokens: completion.usage?.prompt_tokens,
+        completion_tokens: completion.usage?.completion_tokens,
+        total_tokens: completion.usage?.total_tokens,
+        max_tokens_limit: 4000
+      });
+
+      if (finishReason === 'length') {
+        console.error('❌ TRUNCATION ERROR: Website analysis response was cut off due to max_tokens limit');
+        console.error('📊 Token usage:', {
+          used: completion.usage?.completion_tokens,
+          limit: 4000,
+          overflow: completion.usage?.completion_tokens - 4000
+        });
+        throw new Error('Website analysis response truncated - increase max_tokens to at least ' + (completion.usage?.completion_tokens + 1000));
+      }
+
+      if (finishReason !== 'stop') {
+        console.warn('⚠️ Unusual finish_reason:', finishReason);
+      }
+
       const response = completion.choices[0].message.content;
       console.log('Response content length:', response?.length || 0);
       

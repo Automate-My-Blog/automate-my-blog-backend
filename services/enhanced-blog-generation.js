@@ -1180,18 +1180,38 @@ CRITICAL REQUIREMENTS:
           }
         ],
         temperature: 0.3, // Lower temperature for more consistent quality
-        max_tokens: 5000 // Increased to accommodate images and highlight boxes
+        max_tokens: 7000 // Increased to accommodate full blog with all visual elements
       });
 
       const endTime = Date.now();
       const duration = endTime - startTime;
 
-      console.log('✅ Enhanced blog generation completed:', {
+      // CRITICAL: Check for response truncation
+      const finishReason = completion.choices[0].finish_reason;
+      console.log('🔍 Blog Generation completion details:', {
+        finish_reason: finishReason,
+        prompt_tokens: completion.usage?.prompt_tokens,
+        completion_tokens: completion.usage?.completion_tokens,
+        total_tokens: completion.usage?.total_tokens,
+        max_tokens_limit: 7000,
         duration: `${duration}ms`,
-        tokensUsed: completion.usage?.total_tokens,
         model: model,
         organizationDataScore: organizationContext.completenessScore
       });
+
+      if (finishReason === 'length') {
+        console.error('❌ TRUNCATION ERROR: Blog generation response was cut off due to max_tokens limit');
+        console.error('📊 Token usage:', {
+          used: completion.usage?.completion_tokens,
+          limit: 7000,
+          overflow: completion.usage?.completion_tokens - 7000
+        });
+        throw new Error('Blog response truncated - increase max_tokens to at least ' + (completion.usage?.completion_tokens + 1000));
+      }
+
+      if (finishReason !== 'stop') {
+        console.warn('⚠️ Unusual finish_reason:', finishReason);
+      }
 
       const response = completion.choices[0].message.content;
       const blogData = this.parseOpenAIResponse(response);
