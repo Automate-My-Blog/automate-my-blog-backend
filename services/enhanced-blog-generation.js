@@ -754,41 +754,37 @@ INTERNAL LINKING INSTRUCTIONS:
     }
 
     // External references instructions with STRICT citation link requirements
-    const externalRefInstructions = `CRITICAL CITATION REQUIREMENTS:
+    const externalRefInstructions = `CITATION BEST PRACTICES:
 
-**ABSOLUTE RULE: NO UNSOURCED CLAIMS**
-- Do NOT include ANY statistics, research findings, expert quotes, or medical claims unless you can provide a genuine, specific citation
-- Generic homepage links (like nih.gov, mayoclinic.org) are NOT acceptable
-- You MUST link to the actual study, article, or source page
+When including specific statistics, research findings, or expert quotes, provide source links when available.
 
-**ACCEPTABLE CITATION FORMATS:**
+**PREFERRED CITATION FORMATS:**
 
-✅ GOOD: "A 2023 study published in the Journal of Clinical Psychology found that 73% of patients showed improvement [View study](https://www.journalofclinicalpsych.org/2023/postpartum-study)"
+✅ BEST: "A 2023 study published in the Journal of Clinical Psychology found that 73% of patients showed improvement [View study](https://www.journalofclinicalpsych.org/2023/postpartum-study)"
 
 ✅ GOOD: "According to [CDC guidelines on postpartum care](https://www.cdc.gov/reproductivehealth/maternalinfanthealth/postpartum-care.html), early intervention is crucial"
 
-❌ BAD: "According to the [National Institutes of Health](https://www.nih.gov/), estrogen levels drop..." (generic homepage link)
+💡 ACCEPTABLE: "Many healthcare professionals recommend early intervention for postpartum mental health" (General statement without specific citation)
 
-❌ BAD: "Research shows 80% of mothers..." (no citation at all)
+**GUIDELINES:**
+1. Include source links for specific research studies and novel findings
+2. General industry statistics and common medical knowledge don't require citations
+3. When you have the actual URL to a source, use it
+4. Homepage links are acceptable when specific article URLs aren't available
+5. Focus on providing helpful, accurate content with appropriate sourcing
 
-❌ BAD: "Studies indicate..." (vague, no specific source)
+**CONTENT ACCEPTABLE WITHOUT CITATIONS:**
+- General medical/health guidance: "Regular exercise supports mental health"
+- Industry best practices: "Healthcare providers typically recommend..."
+- Clinical approaches: "Treatment often includes a combination of therapy and medication"
+- Patient experience descriptions: "Many new mothers report feeling overwhelmed"
 
-**STRICT RULES:**
-1. EVERY statistic MUST have a specific, verifiable source URL
-2. EVERY research claim MUST link to the actual study or article
-3. EVERY expert quote MUST link to where the quote appeared
-4. If you cannot find a specific, genuine URL for a claim - DO NOT include that claim
-5. It is better to write fewer claims with genuine citations than many claims with generic or missing citations
+**VISUAL CONTENT & DATA:**
+- Charts, infographics, and highlight boxes can contain statistics and data visualizations
+- These visual elements enhance comprehension and don't all require individual citations
+- Include 2-4 highlight boxes, 1-2 charts/images throughout the post for engagement
 
-**WHAT TO DO INSTEAD:**
-- Focus on practical advice and guidance that doesn't require citations
-- Use general statements: "Many healthcare professionals recommend..." (no specific claim requiring citation)
-- Describe approaches without quantifying: "Combined therapy approaches often show positive results" vs "Combined therapy has 92% effectiveness"
-- Frame content around patient experiences and clinical approaches rather than statistics
-
-**FORMAT:** [descriptive text](https://full-specific-url.com/article-path)
-
-**VERIFICATION:** Before including any claim, ask yourself: "Do I have the actual URL to this specific study/article/source?" If no, remove the claim.`;
+**FORMAT:** [descriptive text](https://full-url.com)`;
     contextSections.push(externalRefInstructions);
 
     // CTA context with real URLs
@@ -952,23 +948,21 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 
 **RULE:** If highlight box doesn't add NEW information beyond what's in text → DON'T include it. Better to have 0 boxes than redundant ones.
 
-**CITATION REQUIREMENT FOR HIGHLIGHT BOXES:**
-- If a highlight box contains a statistic, percentage, or research finding, it MUST include the source
-- Format: Include citation within the box content
-- Example for statistic box:
+**CITATIONS IN HIGHLIGHT BOXES:**
+- Include citations for novel research findings when you have the source
+- General industry knowledge and common statistics can be used without citations
+- Example WITH citation:
+  <blockquote data-highlight-box="" data-highlight-type="statistic" data-width="90%" data-align="center" data-layout="block" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">
+  80% of new mothers experience baby blues ([Source](https://www.postpartum.net/))
+  </blockquote>
+- Example WITHOUT citation (perfectly acceptable):
+  <blockquote data-highlight-box="" data-highlight-type="tip" data-width="90%" data-align="center" data-layout="block" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">
+  Pro tip: Schedule therapy sessions during the second trimester for best results
+  </blockquote>
 
-<blockquote data-highlight-box="" data-highlight-type="statistic" data-width="90%" data-align="center" data-layout="block" data-custom-bg="#e6f7ff" data-custom-border="#1890ff">
-80% of new mothers experience "baby blues" ([Postpartum Support International](https://www.postpartum.net/))
-</blockquote>
-
-- NEVER include unsourced statistics or claims in highlight boxes
-- If you cannot cite the source, don't use a highlight box for that statistic
-
-**MANDATORY HIGHLIGHT BOX STYLING:**
-- ALL highlight boxes MUST use: data-width="90%" data-align="center" data-layout="block"
-- NO variations in width or alignment
-- NO float layouts (no float-left, no float-right)
-- This creates consistent, professional appearance across all boxes
+**HIGHLIGHT BOX STYLING:**
+- Use consistent styling: data-width="90%" data-align="center" data-layout="block"
+- This creates a professional, centered appearance
 `;
 
     if (previousBoxTypes.length > 0) {
