@@ -771,11 +771,12 @@ Description = detailed image generation prompt (50-100 words)
 ![TWEET:username/status_id] or ![TWEET:https://x.com/username/status/1234567890]
 
 TWEET EMBED RULES:
+- **REQUIRED:** Include at least 1 tweet embed per post (minimum 1, maximum 2)
 - Use tweets from verified experts, authorities, or patients for authentic social proof
-- Maximum 2 tweet embeds per post
 - ALWAYS add context paragraph BEFORE the tweet explaining its relevance
 - Use instead of creating fake anecdotes or testimonials
 - Only embed tweets that genuinely add value and authority
+- Position strategically: mid-post for expert validation or near conclusion for testimonials
 
 **Example:**
 Dr. Sarah Chen, a reproductive psychiatrist at Johns Hopkins, recently shared insights on the importance of early intervention for postpartum mental health.
@@ -996,7 +997,21 @@ CRITICAL REQUIREMENTS:
         console.log('🐦 Detected tweet placeholders in content - processing...');
         blogData.content = await this.processTweetPlaceholders(blogData.content);
       } else {
-        console.log('📊 No tweet placeholders detected in generated content');
+        console.warn('⚠️ WARNING: No tweet placeholders detected in generated content');
+        console.warn('⚠️ REQUIREMENT: At least 1 tweet embed per post is required for validation/social proof');
+      }
+
+      // Validate tweet requirement (check if tweet cards exist after processing)
+      const tweetCardCount = (blogData.content?.match(/class="tweet-card"/g) || []).length;
+      const tweetPlaceholderCount = (blogData.content?.match(/!\[TWEET:/g) || []).length;
+      console.log('🐦 [TWEET VALIDATION]:', {
+        tweetCardsGenerated: tweetCardCount,
+        tweetPlaceholdersRemaining: tweetPlaceholderCount,
+        meetsRequirement: tweetCardCount >= 1 || tweetPlaceholderCount >= 1
+      });
+
+      if (tweetCardCount === 0 && tweetPlaceholderCount === 0) {
+        console.error('❌ VALIDATION FAILED: Post contains no tweet embeds (minimum 1 required)');
       }
 
       // Enhance blog data with organization context
