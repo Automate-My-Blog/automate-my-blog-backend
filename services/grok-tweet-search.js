@@ -104,17 +104,39 @@ Return your response in this JSON format:
         }
       );
 
-      // NEW: Agent Tools API response format
-      const content = response.data.content || response.data.choices?.[0]?.message?.content;
+      // NEW: Agent Tools API response format - debug full response
+      console.log('🔍 [GROK DEBUG] Full response structure:', {
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : [],
+        dataPreview: JSON.stringify(response.data).substring(0, 500)
+      });
+
+      // Try multiple possible response formats
+      const content = response.data.content
+                   || response.data.choices?.[0]?.message?.content
+                   || response.data.message?.content
+                   || response.data;
+
       const toolCalls = response.data.tool_calls || [];
       const citations = response.data.citations || [];
 
       console.log(`🔧 Grok used ${toolCalls.length} tool calls, found ${citations.length} citations`);
 
+      // Check if content is valid
+      if (!content || typeof content !== 'string') {
+        console.error('❌ No valid content in Grok response:', {
+          contentType: typeof content,
+          contentValue: content,
+          responseKeys: Object.keys(response.data)
+        });
+        return [];
+      }
+
       // Parse JSON response from content
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.warn('⚠️ Could not parse Grok response as JSON');
+        console.warn('📄 Content received:', content.substring(0, 500));
         return [];
       }
 
