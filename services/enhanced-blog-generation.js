@@ -502,42 +502,23 @@ export class EnhancedBlogGenerationService extends OpenAIService {
    * Generate HTML for rich tweet card
    */
   generateTweetCardHTML(tweet) {
+    // Safely escape text content (not URLs)
+    const tweetId = tweet.id || '0';
+    const authorName = this.escapeHtml(tweet.author_name || 'Unknown');
+    const authorHandle = this.escapeHtml(tweet.author_handle || 'unknown');
+    const authorAvatar = tweet.author_avatar || `https://unavatar.io/twitter/${tweet.author_handle}`;
+    const tweetUrl = tweet.url || '#';
+    const tweetText = this.linkifyTweetText(tweet.text || '');
+    const createdAt = this.formatDate(tweet.created_at);
+    const likes = this.formatNumber(tweet.likes || 0);
+    const retweets = this.formatNumber(tweet.retweets || 0);
+
     const verifiedBadge = tweet.author_verified
       ? '<svg style="width: 18px; height: 18px; fill: #1DA1F2; margin-left: 4px;" viewBox="0 0 24 24"><path d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.68-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34zm-11.71 4.2L6.8 12.46l1.41-1.42 2.26 2.26 4.8-5.23 1.47 1.36-6.2 6.77z"/></svg>'
       : '';
 
-    return `<div class="tweet-card" data-tweet-id="${tweet.id}" style="
-    border: 1px solid #e1e8ed;
-    border-radius: 12px;
-    padding: 16px;
-    margin: 24px 0;
-    background: #fff;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  ">
-    <div style="display: flex; align-items: start; margin-bottom: 12px;">
-      <img src="${tweet.author_avatar}" alt="${tweet.author_name}" style="
-        width: 48px; height: 48px; border-radius: 50%; margin-right: 12px;
-      " />
-      <div style="flex: 1; min-width: 0;">
-        <div style="display: flex; align-items: center;">
-          <span style="font-weight: 700; color: #14171a; font-size: 15px;">${this.escapeHtml(tweet.author_name)}</span>
-          ${verifiedBadge}
-        </div>
-        <span style="color: #657786; font-size: 15px;">@${this.escapeHtml(tweet.author_handle)}</span>
-      </div>
-      <a href="${tweet.url}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">
-        <svg style="width: 20px; height: 20px; fill: #1DA1F2;" viewBox="0 0 24 24">
-          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-        </svg>
-      </a>
-    </div>
-    <p style="color: #14171a; font-size: 15px; line-height: 1.5; margin: 0 0 12px 0; white-space: pre-wrap; word-wrap: break-word;">${this.linkifyTweetText(tweet.text)}</p>
-    <div style="display: flex; gap: 16px; color: #657786; font-size: 13px; padding-top: 12px; border-top: 1px solid #e1e8ed;">
-      <span>${this.formatDate(tweet.created_at)}</span>
-      <span>❤️ ${this.formatNumber(tweet.likes)}</span>
-      <span>🔁 ${this.formatNumber(tweet.retweets)}</span>
-    </div>
-  </div>`;
+    // Generate compact HTML (single line to avoid whitespace issues)
+    return `<div class="tweet-card" data-tweet-id="${tweetId}" style="border: 1px solid #e1e8ed; border-radius: 12px; padding: 16px; margin: 24px 0; background: #fff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;"><div style="display: flex; align-items: start; margin-bottom: 12px;"><img src="${authorAvatar}" alt="${authorName}" style="width: 48px; height: 48px; border-radius: 50%; margin-right: 12px;" /><div style="flex: 1; min-width: 0;"><div style="display: flex; align-items: center;"><span style="font-weight: 700; color: #14171a; font-size: 15px;">${authorName}</span>${verifiedBadge}</div><span style="color: #657786; font-size: 15px;">@${authorHandle}</span></div><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;"><svg style="width: 20px; height: 20px; fill: #1DA1F2;" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a></div><p style="color: #14171a; font-size: 15px; line-height: 1.5; margin: 0 0 12px 0; white-space: pre-wrap; word-wrap: break-word;">${tweetText}</p><div style="display: flex; gap: 16px; color: #657786; font-size: 13px; padding-top: 12px; border-top: 1px solid #e1e8ed;"><span>${createdAt}</span><span>❤️ ${likes}</span><span>🔁 ${retweets}</span></div></div>`;
   }
 
   /**
@@ -552,9 +533,33 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Decode HTML entities to prevent double-escaping
+   */
+  decodeHtmlEntities(text) {
+    if (!text) return text;
+
+    const entities = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&#039;': "'",
+      '&#x27;': "'",
+      '&apos;': "'"
+    };
+
+    return text.replace(/&(?:amp|lt|gt|quot|#039|#x27|apos);/g, m => entities[m] || m);
+  }
+
+  /**
    * Escape HTML to prevent XSS
    */
   escapeHtml(text) {
+    if (!text) return text;
+
+    // First decode any existing HTML entities to prevent double-escaping
+    const decoded = this.decodeHtmlEntities(text);
+
     const map = {
       '&': '&amp;',
       '<': '&lt;',
@@ -562,7 +567,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
       '"': '&quot;',
       "'": '&#039;'
     };
-    return text.replace(/[&<>"']/g, m => map[m]);
+    return decoded.replace(/[&<>"']/g, m => map[m]);
   }
 
   /**
