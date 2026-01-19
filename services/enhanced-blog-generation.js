@@ -1568,31 +1568,14 @@ CRITICAL REQUIREMENTS:
         contentPreview: blogData.content?.substring(0, 200) + '...'
       });
 
-      // POST-GENERATION TWEET ENRICHMENT
-      // Generate content first, then find tweets that support the narrative
-      try {
-        console.log('🔍 [TWEET ENRICHMENT] Starting post-generation tweet enrichment...');
+      // SKIP synchronous tweet enrichment to avoid timeout
+      // Tweets will be enriched ASYNC after blog is saved (like images)
+      console.log('🐦 [TWEET ENRICHMENT] Skipping synchronous tweet enrichment - will process async after save');
 
-        // Step 1: Extract search queries from generated content
-        const searchQueries = await this.extractTweetSearchQueries(blogData.content, topic, businessInfo);
-
-        // Step 2: Search for tweets using all queries
-        const tweetUrls = await this.searchForTweetsWithMultipleQueries(searchQueries);
-
-        // Step 3: Select tweets that support the narrative
-        const selectedTweets = await this.selectNarrativeSupportingTweets(blogData.content, tweetUrls, businessInfo);
-
-        // Step 4: Enrich content with selected tweets
-        if (selectedTweets.length > 0) {
-          blogData.content = await this.enrichContentWithTweets(blogData.content, selectedTweets);
-        } else {
-          console.log('ℹ️ [TWEET ENRICHMENT] No tweets selected for enrichment');
-        }
-      } catch (error) {
-        console.error('❌ [TWEET ENRICHMENT] Tweet enrichment failed:', error.message);
-        console.log('ℹ️ [TWEET ENRICHMENT] Continuing without tweets - content already generated');
-        // Continue with blog generation even if tweet enrichment fails
-      }
+      // Mark that tweets need enrichment (processed in background)
+      blogData._needsTweetEnrichment = true;
+      blogData._topicForTweets = topic;
+      blogData._businessInfoForTweets = businessInfo;
 
       // Debug: Check if highlight boxes were generated and if they have content
       const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
@@ -1733,14 +1716,14 @@ CRITICAL REQUIREMENTS:
 
   /**
    * Update blog post content in database
-   * Used by async image generation to update post with generated images
+   * Used by async image/tweet generation to update post with generated content
    * @param {string} blogPostId - The ID of the blog post to update
-   * @param {string} content - Updated content with images
+   * @param {string} content - Updated content with images/tweets
    */
   async updateBlogPostContent(blogPostId, content) {
     const client = await db.connect();
     try {
-      console.log(`📝 Updating blog post ${blogPostId} with generated images...`);
+      console.log(`📝 Updating blog post ${blogPostId} with generated content...`);
 
       await client.query(
         `UPDATE blog_posts
@@ -1756,6 +1739,53 @@ CRITICAL REQUIREMENTS:
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  /**
+   * Enrich blog post with tweets asynchronously (background processing)
+   * @param {string} blogPostId - The ID of the blog post to enrich
+   * @param {string} content - Original blog post content
+   * @param {Object} topic - Blog post topic
+   * @param {Object} businessInfo - Business information
+   * @returns {Object} Result with success status and enriched content
+   */
+  async enrichTweetsAsync(blogPostId, content, topic, businessInfo) {
+    try {
+      console.log(`🐦 [ASYNC TWEET] Starting async tweet enrichment for blog: ${blogPostId}`);
+
+      // Step 1: Extract search queries from generated content
+      const searchQueries = await this.extractTweetSearchQueries(content, topic, businessInfo);
+
+      // Step 2: Search for tweets using all queries
+      const tweets = await this.searchForTweetsWithMultipleQueries(searchQueries);
+
+      // Step 3: Select tweets that support the narrative
+      const selectedTweets = await this.selectNarrativeSupportingTweets(content, tweets, businessInfo);
+
+      // Step 4: Enrich content with selected tweets
+      let enrichedContent = content;
+      if (selectedTweets.length > 0) {
+        enrichedContent = await this.enrichContentWithTweets(content, selectedTweets);
+        console.log(`✅ [ASYNC TWEET] Enriched content with ${selectedTweets.length} tweets for blog: ${blogPostId}`);
+      } else {
+        console.log(`ℹ️ [ASYNC TWEET] No tweets selected for blog: ${blogPostId}`);
+      }
+
+      return {
+        success: true,
+        content: enrichedContent,
+        blogPostId,
+        tweetsAdded: selectedTweets.length
+      };
+    } catch (error) {
+      console.error(`❌ [ASYNC TWEET] Failed for blog ${blogPostId}:`, error.message);
+      return {
+        success: false,
+        error: error.message,
+        blogPostId,
+        content // Return original content
+      };
     }
   }
 
