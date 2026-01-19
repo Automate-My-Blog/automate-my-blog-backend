@@ -631,19 +631,19 @@ BLOG TOPIC: ${topic.title}
 BUSINESS: ${businessInfo.businessType}
 TARGET AUDIENCE: ${businessInfo.targetAudience}
 
-Based on the key claims, statistics, and narrative points in this blog post, suggest 3-5 search queries that would find authoritative tweets to support the narrative.
+Based on the key claims, statistics, and narrative points in this blog post, suggest THE SINGLE MOST IMPACTFUL search query that would find authoritative tweets to support the narrative.
+
+CRITICAL: Due to Vercel 60-second timeout, return ONLY 1 query. Choose the most important one.
 
 Focus on:
-- Specific medical/health conditions mentioned
-- Key treatment approaches discussed
-- Statistics or research findings cited
-- Expert perspectives that would add credibility
+- The PRIMARY medical/health condition AND treatment approach combined
+- The most important expert perspective needed
 
-Return ONLY a JSON array of search queries:
-["query 1", "query 2", "query 3", "query 4", "query 5"]
+Return ONLY a JSON array with 1 search query:
+["single most important query"]
 
 Example for a post about postpartum depression:
-["postpartum depression treatment", "perinatal mental health screening", "maternal mental health outcomes", "reproductive psychiatry", "postpartum therapy"]
+["postpartum depression treatment and support"]
 
 Be specific and concrete. Avoid abstract phrasing.`;
 
@@ -688,12 +688,19 @@ Be specific and concrete. Avoid abstract phrasing.`;
    * @returns {Array<string>} Array of unique tweet URLs
    */
   async searchForTweetsWithMultipleQueries(searchQueries) {
-    console.log(`🔍 [TWEET SEARCH] Searching with ${searchQueries.length} queries...`);
+    // CRITICAL: Limit to 1 query max to avoid Vercel timeout (60s limit)
+    const limitedQueries = searchQueries.slice(0, 1);
+
+    if (searchQueries.length > 1) {
+      console.warn(`⚠️ [TWEET SEARCH] Limiting from ${searchQueries.length} to 1 query to avoid timeout`);
+    }
+
+    console.log(`🔍 [TWEET SEARCH] Searching with ${limitedQueries.length} query...`);
 
     const allTweets = [];
     const seenUrls = new Set();
 
-    for (const query of searchQueries) {
+    for (const query of limitedQueries) {
       try {
         console.log(`🔍 [TWEET SEARCH] Searching: "${query}"`);
 
@@ -701,7 +708,7 @@ Be specific and concrete. Avoid abstract phrasing.`;
           topic: query,
           businessType: 'Healthcare', // Generic since we have specific query
           targetAudience: 'General',
-          maxTweets: 3 // Get 3 per query
+          maxTweets: 3 // Get 3 tweets from the single query
         });
 
         // Dedupe tweets
