@@ -70,8 +70,8 @@ class ContentService {
     const blogPostResult = await db.query(`
       INSERT INTO blog_posts (
         id, user_id, title, content, topic_data,
-        status, word_count, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        status, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
       RETURNING id, title, status, created_at, updated_at
     `, [
       blogPostId,
@@ -79,8 +79,7 @@ class ContentService {
       title,
       content,
       JSON.stringify(topic),
-      status,
-      content ? content.split(' ').length : 0
+      status
     ]);
 
     const savedPost = blogPostResult.rows[0];
