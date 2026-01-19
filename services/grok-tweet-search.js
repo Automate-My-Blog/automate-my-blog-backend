@@ -114,20 +114,27 @@ Return your response in this JSON format:
       });
 
       // Extract content from Agent Tools API response
-      // The text is in the output array as a text-type item
+      // Structure: output[] contains a 'message' type with content[].text
       let content = null;
 
       if (response.data.output && Array.isArray(response.data.output)) {
-        // Find the text output in the array
-        const textOutput = response.data.output.find(item => item.type === 'text' || item.text);
-        if (textOutput) {
-          content = textOutput.text || textOutput.content;
+        // Find the message item in the output array
+        const messageItem = response.data.output.find(item => item.type === 'message');
+
+        if (messageItem && messageItem.content && Array.isArray(messageItem.content)) {
+          // Find the output_text item in the content array
+          const outputText = messageItem.content.find(c => c.type === 'output_text');
+          if (outputText && outputText.text) {
+            content = outputText.text;
+            console.log('✅ [GROK] Extracted text from message.content[].text');
+          }
         }
       }
 
-      // Fallback: try text field directly
+      // Fallback: try text field directly (older format)
       if (!content && response.data.text) {
         content = response.data.text.content || response.data.text;
+        console.log('✅ [GROK] Extracted text from response.data.text (fallback)');
       }
 
       const toolCalls = response.data.output?.filter(o => o.type === 'custom_tool_call') || [];
