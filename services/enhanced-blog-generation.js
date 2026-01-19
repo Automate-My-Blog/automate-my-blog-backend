@@ -631,21 +631,29 @@ BLOG TOPIC: ${topic.title}
 BUSINESS: ${businessInfo.businessType}
 TARGET AUDIENCE: ${businessInfo.targetAudience}
 
-Based on the key claims, statistics, and narrative points in this blog post, suggest THE SINGLE MOST IMPACTFUL search query that would find authoritative tweets to support the narrative.
+Extract THE SINGLE MOST SEARCHABLE query (2-4 words MAX) to find authoritative tweets.
 
-CRITICAL: Due to Vercel 60-second timeout, return ONLY 1 query. Choose the most important one.
+CRITICAL RULES:
+1. MAXIMUM 4 words, preferably 2-3 words
+2. Use ONLY concrete, specific terms
+3. NO abstract concepts (avoid: impact, hidden, paradox, transformation, revolution, etc.)
+4. Focus on the core topic + action/solution
 
-Focus on:
-- The PRIMARY medical/health condition AND treatment approach combined
-- The most important expert perspective needed
+Return ONLY a JSON array with 1 query:
+["query"]
 
-Return ONLY a JSON array with 1 search query:
-["single most important query"]
+GOOD examples (across industries):
+- "remote work productivity"
+- "cloud security best practices"
+- "customer retention strategies"
+- "sustainable manufacturing"
 
-Example for a post about postpartum depression:
-["postpartum depression treatment and support"]
+BAD examples (TOO LONG/ABSTRACT):
+- "hidden impact of remote work transformation" ❌
+- "revolutionary approach to security" ❌
+- "paradox of customer engagement" ❌
 
-Be specific and concrete. Avoid abstract phrasing.`;
+Keep it simple, specific, and searchable.`;
 
     try {
       const response = await this.openai.chat.completions.create({
