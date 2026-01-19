@@ -104,31 +104,46 @@ Return your response in this JSON format:
         }
       );
 
-      // NEW: Agent Tools API response format - debug full response
-      console.log('🔍 [GROK DEBUG] Full response structure:', {
-        hasData: !!response.data,
-        dataKeys: response.data ? Object.keys(response.data) : [],
-        dataPreview: JSON.stringify(response.data).substring(0, 500)
+      // NEW: Agent Tools API response format (/v1/responses)
+      console.log('🔍 [GROK DEBUG] Response structure:', {
+        hasOutput: !!response.data.output,
+        outputLength: response.data.output?.length,
+        hasText: !!response.data.text,
+        textKeys: response.data.text ? Object.keys(response.data.text) : [],
+        outputTypes: response.data.output?.map(o => o.type)
       });
 
-      // Try multiple possible response formats
-      const content = response.data.content
-                   || response.data.choices?.[0]?.message?.content
-                   || response.data.message?.content
-                   || response.data;
+      // Extract content from Agent Tools API response
+      // The text is in the output array as a text-type item
+      let content = null;
 
-      const toolCalls = response.data.tool_calls || [];
+      if (response.data.output && Array.isArray(response.data.output)) {
+        // Find the text output in the array
+        const textOutput = response.data.output.find(item => item.type === 'text' || item.text);
+        if (textOutput) {
+          content = textOutput.text || textOutput.content;
+        }
+      }
+
+      // Fallback: try text field directly
+      if (!content && response.data.text) {
+        content = response.data.text.content || response.data.text;
+      }
+
+      const toolCalls = response.data.output?.filter(o => o.type === 'custom_tool_call') || [];
       const citations = response.data.citations || [];
 
-      console.log(`🔧 Grok used ${toolCalls.length} tool calls, found ${citations.length} citations`);
+      console.log(`🔧 Grok used ${toolCalls.length} tool calls, status: ${response.data.status}`);
 
       // Check if content is valid
       if (!content || typeof content !== 'string') {
-        console.error('❌ No valid content in Grok response:', {
-          contentType: typeof content,
-          contentValue: content,
-          responseKeys: Object.keys(response.data)
-        });
+        console.error('❌ No valid text content in Grok response');
+        console.error('📄 Output array contents:', response.data.output?.map(o => ({
+          type: o.type,
+          name: o.name,
+          hasText: !!o.text,
+          hasContent: !!o.content
+        })));
         return [];
       }
 
