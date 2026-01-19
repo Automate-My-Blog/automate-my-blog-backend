@@ -1226,8 +1226,8 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
     const generationTime = Date.now() - startTime;
     let savedPost = null;
 
-    // Save to user account if authenticated and requested
-    if (req.user && (saveToAccount === true || saveToAccount === 'true')) {
+    // Save to user account if authenticated (default: true, unless explicitly disabled)
+    if (req.user && (saveToAccount !== false && saveToAccount !== 'false')) {
       try {
         savedPost = await contentService.saveBlogPost(req.user.userId, {
           title: blogPost.title,
