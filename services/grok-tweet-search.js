@@ -93,7 +93,7 @@ Return your response in this JSON format:
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000
+          timeout: 45000  // Increased from 30s to accommodate multiple searches
         }
       );
 

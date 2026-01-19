@@ -612,6 +612,253 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
+   * Analyze generated blog post and extract 3-5 search queries
+   * that would find tweets supporting the narrative
+   * @param {string} content - Generated blog post content
+   * @param {Object} topic - Blog topic information
+   * @param {Object} businessInfo - Business information
+   * @returns {Array<string>} Array of search queries
+   */
+  async extractTweetSearchQueries(content, topic, businessInfo) {
+    console.log('🔍 [TWEET SEARCH] Analyzing post to extract search queries...');
+
+    const prompt = `You are analyzing a blog post to find tweets that would support its narrative.
+
+BLOG POST CONTENT:
+${content.substring(0, 3000)}
+
+BLOG TOPIC: ${topic.title}
+BUSINESS: ${businessInfo.businessType}
+TARGET AUDIENCE: ${businessInfo.targetAudience}
+
+Based on the key claims, statistics, and narrative points in this blog post, suggest 3-5 search queries that would find authoritative tweets to support the narrative.
+
+Focus on:
+- Specific medical/health conditions mentioned
+- Key treatment approaches discussed
+- Statistics or research findings cited
+- Expert perspectives that would add credibility
+
+Return ONLY a JSON array of search queries:
+["query 1", "query 2", "query 3", "query 4", "query 5"]
+
+Example for a post about postpartum depression:
+["postpartum depression treatment", "perinatal mental health screening", "maternal mental health outcomes", "reproductive psychiatry", "postpartum therapy"]
+
+Be specific and concrete. Avoid abstract phrasing.`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini', // Use faster/cheaper model for analysis
+        messages: [
+          {
+            role: 'system',
+            content: 'You extract search queries from blog posts. Return only valid JSON arrays.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 200
+      });
+
+      const queriesText = response.choices[0].message.content;
+      const jsonMatch = queriesText.match(/\[[\s\S]*\]/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ Could not parse search queries, using fallback');
+        return [topic.title]; // Fallback to title
+      }
+
+      const queries = JSON.parse(jsonMatch[0]);
+      console.log(`✅ [TWEET SEARCH] Extracted ${queries.length} search queries:`, queries);
+
+      return queries;
+    } catch (error) {
+      console.error('❌ [TWEET SEARCH] Query extraction failed:', error.message);
+      return [topic.title]; // Fallback to title
+    }
+  }
+
+  /**
+   * Search Grok with multiple queries and combine results
+   * @param {Array<string>} searchQueries - Array of search queries
+   * @returns {Array<string>} Array of unique tweet URLs
+   */
+  async searchForTweetsWithMultipleQueries(searchQueries) {
+    console.log(`🔍 [TWEET SEARCH] Searching with ${searchQueries.length} queries...`);
+
+    const allTweets = [];
+    const seenUrls = new Set();
+
+    for (const query of searchQueries) {
+      try {
+        console.log(`🔍 [TWEET SEARCH] Searching: "${query}"`);
+
+        const tweetUrls = await grokTweetSearch.searchRelevantTweets({
+          topic: query,
+          businessType: 'Healthcare', // Generic since we have specific query
+          targetAudience: 'General',
+          maxTweets: 3 // Get 3 per query
+        });
+
+        // Dedupe tweets
+        for (const url of tweetUrls) {
+          if (!seenUrls.has(url)) {
+            seenUrls.add(url);
+            allTweets.push(url);
+          }
+        }
+
+        console.log(`✅ Found ${tweetUrls.length} tweets (${allTweets.length} total unique)`);
+
+      } catch (error) {
+        console.warn(`⚠️ Search failed for "${query}":`, error.message);
+        // Continue with other queries
+      }
+    }
+
+    console.log(`🐦 [TWEET SEARCH] Total unique tweets found: ${allTweets.length}`);
+    return allTweets;
+  }
+
+  /**
+   * Use OpenAI to select which tweets best support the blog narrative
+   * @param {string} content - Generated blog post content
+   * @param {Array<string>} tweetUrls - Array of available tweet URLs
+   * @param {Object} businessInfo - Business information
+   * @returns {Array<string>} Array of selected tweet URLs
+   */
+  async selectNarrativeSupportingTweets(content, tweetUrls, businessInfo) {
+    if (tweetUrls.length === 0) {
+      console.log('⚠️ [TWEET SEARCH] No tweets to select from');
+      return [];
+    }
+
+    console.log(`🎯 [TWEET SEARCH] Selecting best tweets from ${tweetUrls.length} candidates...`);
+
+    const prompt = `You are selecting tweets to support a blog post's narrative.
+
+BLOG POST EXCERPT (key points):
+${content.substring(0, 2000)}
+
+AVAILABLE TWEETS:
+${tweetUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}
+
+BUSINESS CONTEXT:
+- Type: ${businessInfo.businessType}
+- Target Audience: ${businessInfo.targetAudience}
+- Brand Voice: ${businessInfo.brandVoice || 'Professional and authoritative'}
+
+Select 2-4 tweets that:
+1. Are authoritative (from experts, researchers, healthcare professionals)
+2. Directly support specific claims or points made in the blog post
+3. Add credibility to the narrative
+4. Match the brand's voice and target audience
+
+Return ONLY a JSON array of the selected tweet URLs:
+["https://x.com/...", "https://x.com/..."]
+
+If none of the tweets are suitable, return an empty array: []`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You select authoritative tweets that support blog narratives. Return only valid JSON arrays of URLs.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 300
+      });
+
+      const selectedText = response.choices[0].message.content;
+      const jsonMatch = selectedText.match(/\[[\s\S]*\]/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ Could not parse selected tweets');
+        return [];
+      }
+
+      const selectedTweets = JSON.parse(jsonMatch[0]);
+      console.log(`✅ [TWEET SEARCH] Selected ${selectedTweets.length} tweets to include`);
+
+      return selectedTweets;
+    } catch (error) {
+      console.error('❌ [TWEET SEARCH] Tweet selection failed:', error.message);
+      return [];
+    }
+  }
+
+  /**
+   * Insert selected tweets into the content at appropriate positions
+   * Uses OpenAI to determine WHERE to place each tweet
+   * @param {string} content - Generated blog post content
+   * @param {Array<string>} selectedTweets - Array of selected tweet URLs
+   * @returns {string} Enriched content with tweet placeholders
+   */
+  async enrichContentWithTweets(content, selectedTweets) {
+    if (selectedTweets.length === 0) {
+      console.log('ℹ️ [TWEET SEARCH] No tweets to insert');
+      return content;
+    }
+
+    console.log(`📝 [TWEET ENRICHMENT] Inserting ${selectedTweets.length} tweets into content...`);
+
+    // Convert tweet URLs to placeholders
+    const tweetPlaceholders = selectedTweets.map(url => `![TWEET:${url}]`);
+
+    const prompt = `You are enriching a blog post by inserting tweet references at strategic points.
+
+BLOG POST:
+${content}
+
+TWEETS TO INSERT (as placeholders):
+${tweetPlaceholders.map((p, i) => `${i + 1}. ${p} (from ${selectedTweets[i]})`).join('\n')}
+
+Insert each tweet placeholder at the point in the post where it would best support the narrative:
+- After a claim that needs expert backing
+- After introducing a statistic or research finding
+- Before or after a key recommendation
+- In a section discussing the specific topic the tweet addresses
+
+Return the FULL blog post with tweet placeholders inserted. Keep ALL original content, just add the placeholders in the right spots.`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o', // Use main model for content editing
+        messages: [
+          {
+            role: 'system',
+            content: 'You insert tweet placeholders into blog posts at strategic narrative points. Preserve all original content.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3
+      });
+
+      const enrichedContent = response.choices[0].message.content;
+      console.log(`✅ [TWEET ENRICHMENT] Content enriched with ${selectedTweets.length} tweets`);
+
+      return enrichedContent;
+    } catch (error) {
+      console.error('❌ [TWEET ENRICHMENT] Enrichment failed:', error.message);
+      return content; // Return original content if enrichment fails
+    }
+  }
+
+  /**
    * Process tweet placeholders and replace with styled embed HTML
    * Format: ![TWEET:https://x.com/username/status/1234567890] or ![TWEET:username/status_id]
    */
@@ -1189,13 +1436,8 @@ Return JSON format:
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       console.log(`📊 Previous post used ${previousBoxTypes.length} highlight box types:`, previousBoxTypes);
 
-      // Search for real tweets using Grok BEFORE building prompt
-      console.log('🔍 Step: Searching for real tweets with Grok...');
-      const realTweetUrls = await this.searchForRealTweets(topic, businessInfo);
-      console.log(`🐦 Found ${realTweetUrls.length} real tweets for prompt`);
-
-      // Build enhanced prompt with all available data (including real tweets)
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, realTweetUrls);
+      // Build enhanced prompt WITHOUT tweets (will be added post-generation)
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, []);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -1268,6 +1510,32 @@ CRITICAL REQUIREMENTS:
         hasContent: !!blogData.content,
         contentPreview: blogData.content?.substring(0, 200) + '...'
       });
+
+      // POST-GENERATION TWEET ENRICHMENT
+      // Generate content first, then find tweets that support the narrative
+      try {
+        console.log('🔍 [TWEET ENRICHMENT] Starting post-generation tweet enrichment...');
+
+        // Step 1: Extract search queries from generated content
+        const searchQueries = await this.extractTweetSearchQueries(blogData.content, topic, businessInfo);
+
+        // Step 2: Search for tweets using all queries
+        const tweetUrls = await this.searchForTweetsWithMultipleQueries(searchQueries);
+
+        // Step 3: Select tweets that support the narrative
+        const selectedTweets = await this.selectNarrativeSupportingTweets(blogData.content, tweetUrls, businessInfo);
+
+        // Step 4: Enrich content with selected tweets
+        if (selectedTweets.length > 0) {
+          blogData.content = await this.enrichContentWithTweets(blogData.content, selectedTweets);
+        } else {
+          console.log('ℹ️ [TWEET ENRICHMENT] No tweets selected for enrichment');
+        }
+      } catch (error) {
+        console.error('❌ [TWEET ENRICHMENT] Tweet enrichment failed:', error.message);
+        console.log('ℹ️ [TWEET ENRICHMENT] Continuing without tweets - content already generated');
+        // Continue with blog generation even if tweet enrichment fails
+      }
 
       // Debug: Check if highlight boxes were generated and if they have content
       const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
