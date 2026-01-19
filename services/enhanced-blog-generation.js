@@ -1568,14 +1568,48 @@ CRITICAL REQUIREMENTS:
         contentPreview: blogData.content?.substring(0, 200) + '...'
       });
 
-      // SKIP synchronous tweet enrichment to avoid timeout
-      // Tweets will be enriched ASYNC after blog is saved (like images)
-      console.log('🐦 [TWEET ENRICHMENT] Skipping synchronous tweet enrichment - will process async after save');
+      // Check if topic has pre-loaded tweets
+      const hasPreloadedTweets = topic.preloadedTweets && topic.preloadedTweets.length > 0;
 
-      // Mark that tweets need enrichment (processed in background)
-      blogData._needsTweetEnrichment = true;
-      blogData._topicForTweets = topic;
-      blogData._businessInfoForTweets = businessInfo;
+      if (hasPreloadedTweets) {
+        console.log(`🐦 [TWEET] Using ${topic.preloadedTweets.length} pre-loaded tweets from topic`);
+
+        try {
+          // Select best tweets that support the narrative
+          const selectedTweets = await this.selectNarrativeSupportingTweets(
+            blogData.content,
+            topic.preloadedTweets,
+            businessInfo
+          );
+
+          if (selectedTweets.length > 0) {
+            // Enrich content with pre-loaded tweets (synchronously!)
+            blogData.content = await this.enrichContentWithTweets(
+              blogData.content,
+              selectedTweets
+            );
+
+            // Process tweet placeholders to generate rich cards
+            blogData.content = await this.processTweetPlaceholders(blogData.content);
+
+            console.log(`✅ [TWEET] Enriched content with ${selectedTweets.length} pre-loaded tweets`);
+
+            // Mark that tweets are already included (no async needed)
+            blogData._needsTweetEnrichment = false;
+          } else {
+            console.log('ℹ️ [TWEET] No suitable tweets selected from pre-loaded options');
+            blogData._needsTweetEnrichment = false;
+          }
+        } catch (error) {
+          console.error(`❌ [TWEET] Failed to use pre-loaded tweets:`, error.message);
+          // Don't fail generation, just skip tweets
+          blogData._needsTweetEnrichment = false;
+        }
+      } else {
+        // No pre-loaded tweets available - skip tweet enrichment entirely
+        console.log('ℹ️ [TWEET] No pre-loaded tweets available - skipping tweet enrichment');
+        blogData._needsTweetEnrichment = false;
+      }
 
       // Debug: Check if highlight boxes were generated and if they have content
       const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];

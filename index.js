@@ -1277,38 +1277,6 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
           console.log(`✅ Blog saved with placeholders, images generating in background`);
         }
 
-        // Trigger ASYNC tweet enrichment if needed
-        if (blogPost._needsTweetEnrichment && savedPost.id) {
-          console.log(`🐦 [ASYNC] Triggering background tweet enrichment for blog: ${savedPost.id}`);
-
-          waitUntil(
-            enhancedBlogGenerationService.enrichTweetsAsync(
-              savedPost.id,
-              blogPost.content,
-              blogPost._topicForTweets,
-              blogPost._businessInfoForTweets
-            ).then(async (tweetResult) => {
-              if (tweetResult.success) {
-                console.log(`✅ [BACKGROUND] Tweets enriched for blog: ${savedPost.id} (${tweetResult.tweetsAdded} tweets), updating post...`);
-                try {
-                  await enhancedBlogGenerationService.updateBlogPostContent(
-                    savedPost.id,
-                    tweetResult.content
-                  );
-                  console.log(`✅ [BACKGROUND] Blog post ${savedPost.id} updated with tweets`);
-                } catch (updateError) {
-                  console.error(`❌ [BACKGROUND] Failed to update blog ${savedPost.id}:`, updateError.message);
-                }
-              } else {
-                console.error(`❌ [BACKGROUND] Tweet enrichment failed for blog: ${savedPost.id}`);
-              }
-            }).catch(err => {
-              console.error(`❌ [BACKGROUND] Tweet enrichment error for blog ${savedPost.id}:`, err.message);
-            })
-          );
-
-          console.log(`✅ Blog saved, tweets will be enriched in background`);
-        }
       } catch (saveError) {
         console.warn('Failed to save blog post:', saveError.message);
         // Don't fail the whole request if saving fails
