@@ -1363,37 +1363,12 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
 
         console.log(`✅ Blog post saved for user ${req.user.userId}: ${savedPost.id}`);
 
-        // Trigger ASYNC image generation if there are image placeholders
+        // ✨ REMOVED: Async image generation moved to dedicated endpoint
+        // Images are now generated via /api/images/generate-for-blog
+        // This prevents timeout issues by giving image generation its own 60s window
+        // Frontend will call the image endpoint after receiving the blog response
         if (blogPost._hasImagePlaceholders && savedPost.id) {
-          console.log(`🎨 [ASYNC] Triggering background image generation for blog: ${savedPost.id}`);
-
-          waitUntil(
-            enhancedBlogGenerationService.generateImagesAsync(
-              savedPost.id,
-              blogPost.content,
-              blogPost._topicForImages,
-              blogPost._organizationIdForImages
-            ).then(async (imageResult) => {
-              if (imageResult.success) {
-                console.log(`✅ [BACKGROUND] Images generated for blog: ${savedPost.id}, updating post...`);
-                try {
-                  await enhancedBlogGenerationService.updateBlogPostContent(
-                    savedPost.id,
-                    imageResult.content
-                  );
-                  console.log(`✅ [BACKGROUND] Blog post ${savedPost.id} updated with images`);
-                } catch (updateError) {
-                  console.error(`❌ [BACKGROUND] Failed to update blog ${savedPost.id}:`, updateError.message);
-                }
-              } else {
-                console.error(`❌ [BACKGROUND] Image generation failed for blog: ${savedPost.id}`);
-              }
-            }).catch(err => {
-              console.error(`❌ [BACKGROUND] Image generation error for blog ${savedPost.id}:`, err.message);
-            })
-          );
-
-          console.log(`✅ Blog saved with placeholders, images generating in background`);
+          console.log(`🎨 Blog has image placeholders - frontend should call /api/images/generate-for-blog`);
         }
 
       } catch (saveError) {
@@ -1480,6 +1455,15 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       response.savedPost = savedPost;
       response.message = 'Blog post generated and saved to your account';
     }
+
+    // NEW: Add image generation metadata for frontend
+    response.imageGeneration = {
+      hasPlaceholders: blogPost._hasImagePlaceholders || false,
+      needsImageGeneration: (blogPost._hasImagePlaceholders && savedPost?.id) || false,
+      blogPostId: savedPost?.id || null,
+      topic: blogPost._topicForImages || topic,
+      organizationId: blogPost._organizationIdForImages || organizationId
+    };
 
     res.json(response);
 
