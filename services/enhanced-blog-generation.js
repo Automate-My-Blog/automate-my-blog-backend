@@ -1721,11 +1721,10 @@ CRITICAL REQUIREMENTS:
    * @param {string} content - Updated content with images/tweets
    */
   async updateBlogPostContent(blogPostId, content) {
-    const client = await db.connect();
     try {
       console.log(`📝 Updating blog post ${blogPostId} with generated content...`);
 
-      await client.query(
+      await db.query(
         `UPDATE blog_posts
          SET content = $1,
              updated_at = NOW()
@@ -1737,8 +1736,6 @@ CRITICAL REQUIREMENTS:
     } catch (error) {
       console.error(`❌ Failed to update blog post ${blogPostId}:`, error);
       throw error;
-    } finally {
-      client.release();
     }
   }
 
