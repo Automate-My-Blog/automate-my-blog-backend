@@ -138,12 +138,32 @@ Return your response in this JSON format:
       // Check if content is valid
       if (!content || typeof content !== 'string') {
         console.error('❌ No valid text content in Grok response');
-        console.error('📄 Output array contents:', response.data.output?.map(o => ({
+        console.error('📄 Output array detailed:', response.data.output?.map((o, i) => ({
+          index: i,
           type: o.type,
           name: o.name,
+          allKeys: Object.keys(o),
           hasText: !!o.text,
-          hasContent: !!o.content
+          hasContent: !!o.content,
+          sample: JSON.stringify(o).substring(0, 200)
         })));
+        console.error('📄 Text field structure:', {
+          textType: typeof response.data.text,
+          textKeys: response.data.text ? Object.keys(response.data.text) : [],
+          textSample: JSON.stringify(response.data.text).substring(0, 300)
+        });
+        console.error('💡 Trying to extract from output results...');
+
+        // LAST RESORT: Maybe the results are in the tool call outputs
+        const toolResults = response.data.output
+          ?.filter(o => o.type === 'custom_tool_call' && o.status === 'completed')
+          ?.map(o => o.output || o.result);
+
+        if (toolResults && toolResults.length > 0) {
+          console.log('🔍 Found tool results, attempting to use those:', toolResults.length);
+          // For now, return empty - we'll see what's in the tool outputs
+        }
+
         return [];
       }
 
