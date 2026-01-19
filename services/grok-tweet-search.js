@@ -100,7 +100,7 @@ Return your response in this JSON format:
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 25000  // Reduced from 45s - Agent Tools is much faster
+          timeout: 60000  // 60s max - allow thorough search even if slow
         }
       );
 
@@ -127,12 +127,16 @@ Return your response in this JSON format:
       return tweets;
 
     } catch (error) {
-      console.error('❌ Grok tweet search failed:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        console.warn('⏱️ Grok tweet search timed out (60s) - continuing without tweets');
+      } else {
+        console.error('❌ Grok tweet search failed:', error.message);
+        if (error.response) {
+          console.error('Response status:', error.response.status);
+          console.error('Response data:', JSON.stringify(error.response.data, null, 2));
+        }
       }
-      // Don't throw - gracefully degrade to no tweets
+      // Don't throw - gracefully degrade to no tweets (tweets are optional)
       return [];
     }
   }

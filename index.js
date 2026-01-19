@@ -1465,6 +1465,13 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       organizationId: blogPost._organizationIdForImages || organizationId
     };
 
+    console.log('🔍 [IMAGE GEN DEBUG] Setting imageGeneration metadata:', {
+      hasPlaceholders: blogPost._hasImagePlaceholders,
+      hasSavedPost: !!savedPost,
+      savedPostId: savedPost?.id,
+      needsImageGeneration: response.imageGeneration.needsImageGeneration
+    });
+
     res.json(response);
 
   } catch (error) {
