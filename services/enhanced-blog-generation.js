@@ -1862,11 +1862,20 @@ CRITICAL REQUIREMENTS:
       // Load organization context for quality recommendations
       const organizationContext = await this.getOrganizationContext(organizationId);
 
+      // If tweets were provided in options, attach them to topic for downstream use
+      if (options.preloadedTweets && options.preloadedTweets.length > 0) {
+        topic = {
+          ...topic,
+          preloadedTweets: options.preloadedTweets
+        };
+        console.log(`🐦 [TWEET] Attached ${options.preloadedTweets.length} pre-fetched tweets to topic`);
+      }
+
       // Generate the blog post content
       const blogData = await this.generateEnhancedBlogPost(
-        topic, 
-        businessInfo, 
-        organizationId, 
+        topic,
+        businessInfo,
+        organizationId,
         options.additionalInstructions || ''
       );
 

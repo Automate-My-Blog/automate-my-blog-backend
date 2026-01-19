@@ -1,6 +1,5 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
-import grokTweetSearch from './grok-tweet-search.js';
 
 dotenv.config();
 
@@ -442,39 +441,7 @@ Return an array of 2 strategic topics that promise genuinely valuable, insight-d
       
       // All topics now have DALL-E images
 
-      // NEW: Pre-load tweets for each topic
-      console.log('🐦 Pre-loading tweets for topics...');
-      const topicsWithTweets = await Promise.all(
-        topics.map(async (topic) => {
-          try {
-            console.log(`🔍 Searching tweets for: "${topic.title}"`);
-
-            // Search for tweets related to this specific topic
-            const tweets = await grokTweetSearch.searchRelevantTweets({
-              topic: topic.title,  // Use topic title as search query
-              businessType: businessType,
-              targetAudience: targetAudience,
-              maxTweets: 3  // Pre-load 3 tweets per topic
-            });
-
-            console.log(`✅ Found ${tweets.length} tweets for topic: "${topic.title}"`);
-
-            return {
-              ...topic,
-              preloadedTweets: tweets || []
-            };
-          } catch (error) {
-            console.error(`❌ Tweet pre-loading failed for topic "${topic.title}":`, error.message);
-            // Don't fail topic generation if tweet search fails
-            return {
-              ...topic,
-              preloadedTweets: []  // Empty array if search fails
-            };
-          }
-        })
-      );
-
-      return topicsWithTweets;
+      return topics;
     } catch (error) {
       console.error('OpenAI trending topics error:', error);
       throw new Error('Failed to generate trending topics with AI');

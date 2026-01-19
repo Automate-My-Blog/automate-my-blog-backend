@@ -1122,16 +1122,73 @@ app.post('/api/trending-topics', async (req, res) => {
   }
 });
 
+// Search for tweets for a selected topic
+app.post('/api/tweets/search-for-topic', async (req, res) => {
+  try {
+    const { topic, businessInfo, maxTweets = 3 } = req.body;
+
+    if (!topic || !businessInfo) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters',
+        message: 'topic and businessInfo are required',
+        tweets: []
+      });
+    }
+
+    console.log('🐦 [TWEET SEARCH] Searching tweets for topic:', topic.title);
+
+    // Step 1: Use OpenAI to extract simplified search terms from topic
+    // We'll create a minimal "blog content" from the topic fields
+    const topicDescription = `
+      Title: ${topic.title}
+      Subheader: ${topic.subheader || ''}
+      Focus: ${topic.trend || ''}
+      SEO: ${topic.seoBenefit || ''}
+    `.trim();
+
+    const searchQueries = await enhancedBlogGenerationService.extractTweetSearchQueries(
+      topicDescription,
+      topic,
+      businessInfo
+    );
+
+    console.log('✅ [TWEET SEARCH] Extracted search queries:', searchQueries);
+
+    // Step 2: Search for tweets using simplified queries
+    const tweets = await enhancedBlogGenerationService.searchForTweetsWithMultipleQueries(
+      searchQueries
+    );
+
+    console.log(`✅ [TWEET SEARCH] Found ${tweets.length} tweets`);
+
+    res.json({
+      success: true,
+      tweets,
+      searchTermsUsed: searchQueries
+    });
+
+  } catch (error) {
+    console.error('❌ [TWEET SEARCH] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      tweets: []
+    });
+  }
+});
+
 // Generate content endpoint (with optional auth for saving) - Enhanced with Phase 3 features
 app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   const startTime = Date.now();
   
   try {
-    const { 
-      topic, 
-      businessInfo, 
-      additionalInstructions, 
+    const {
+      topic,
+      businessInfo,
+      additionalInstructions,
       saveToAccount,
+      tweets,  // Pre-fetched tweets for the topic
       // Enhanced Phase 3 parameters (backward compatible)
       organizationId,
       useEnhancedGeneration = false,
@@ -1177,7 +1234,7 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
           businessInfo,
           organizationId,
           targetSEOScore,
-          { additionalInstructions: additionalInstructions || '', includeVisuals }
+          { additionalInstructions: additionalInstructions || '', includeVisuals, preloadedTweets: tweets }
         );
         blogPost = optimizationResult.bestResult;
         qualityPrediction = optimizationResult.finalScore;
@@ -1189,9 +1246,10 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
             topic,
             businessInfo,
             organizationId,
-            { 
-              additionalInstructions: additionalInstructions || '', 
-              includeVisuals 
+            {
+              additionalInstructions: additionalInstructions || '',
+              includeVisuals,
+              preloadedTweets: tweets  // Pass pre-fetched tweets
             }
           );
           console.log(`✅ Enhanced generation completed successfully`);
