@@ -685,7 +685,7 @@ Be specific and concrete. Avoid abstract phrasing.`;
   /**
    * Search Grok with multiple queries and combine results
    * @param {Array<string>} searchQueries - Array of search queries
-   * @returns {Array<string>} Array of unique tweet URLs
+   * @returns {Array<Object>} Array of unique tweet objects with full data
    */
   async searchForTweetsWithMultipleQueries(searchQueries) {
     // CRITICAL: Limit to 1 query max to avoid Vercel timeout (60s limit)
@@ -704,22 +704,22 @@ Be specific and concrete. Avoid abstract phrasing.`;
       try {
         console.log(`🔍 [TWEET SEARCH] Searching: "${query}"`);
 
-        const tweetUrls = await grokTweetSearch.searchRelevantTweets({
+        const tweets = await grokTweetSearch.searchRelevantTweets({
           topic: query,
           businessType: 'Healthcare', // Generic since we have specific query
           targetAudience: 'General',
           maxTweets: 3 // Get 3 tweets from the single query
         });
 
-        // Dedupe tweets
-        for (const url of tweetUrls) {
-          if (!seenUrls.has(url)) {
-            seenUrls.add(url);
-            allTweets.push(url);
+        // Dedupe tweets by URL
+        for (const tweet of tweets) {
+          if (!seenUrls.has(tweet.url)) {
+            seenUrls.add(tweet.url);
+            allTweets.push(tweet);
           }
         }
 
-        console.log(`✅ Found ${tweetUrls.length} tweets (${allTweets.length} total unique)`);
+        console.log(`✅ Found ${tweets.length} tweets (${allTweets.length} total unique)`);
 
       } catch (error) {
         console.warn(`⚠️ Search failed for "${query}":`, error.message);
@@ -734,17 +734,17 @@ Be specific and concrete. Avoid abstract phrasing.`;
   /**
    * Use OpenAI to select which tweets best support the blog narrative
    * @param {string} content - Generated blog post content
-   * @param {Array<string>} tweetUrls - Array of available tweet URLs
+   * @param {Array<Object>} tweets - Array of available tweet objects with full data
    * @param {Object} businessInfo - Business information
-   * @returns {Array<string>} Array of selected tweet URLs
+   * @returns {Array<Object>} Array of selected tweet objects
    */
-  async selectNarrativeSupportingTweets(content, tweetUrls, businessInfo) {
-    if (tweetUrls.length === 0) {
+  async selectNarrativeSupportingTweets(content, tweets, businessInfo) {
+    if (tweets.length === 0) {
       console.log('⚠️ [TWEET SEARCH] No tweets to select from');
       return [];
     }
 
-    console.log(`🎯 [TWEET SEARCH] Selecting best tweets from ${tweetUrls.length} candidates...`);
+    console.log(`🎯 [TWEET SEARCH] Selecting best tweets from ${tweets.length} candidates...`);
 
     const prompt = `You are selecting tweets to support a blog post's narrative.
 
@@ -752,7 +752,10 @@ BLOG POST EXCERPT (key points):
 ${content.substring(0, 2000)}
 
 AVAILABLE TWEETS:
-${tweetUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}
+${tweets.map((t, i) => `${i + 1}. ${t.url}
+   Author: ${t.author} (@${t.handle}) - ${t.credentials || 'No credentials listed'}
+   Text: "${t.text || 'No text available'}"
+   Engagement: ${t.likes || 0} likes, ${t.retweets || 0} retweets`).join('\n\n')}
 
 BUSINESS CONTEXT:
 - Type: ${businessInfo.businessType}
@@ -795,7 +798,13 @@ If none of the tweets are suitable, return an empty array: []`;
         return [];
       }
 
-      const selectedTweets = JSON.parse(jsonMatch[0]);
+      const selectedUrls = JSON.parse(jsonMatch[0]);
+
+      // Map URLs back to full tweet objects
+      const selectedTweets = selectedUrls
+        .map(url => tweets.find(t => t.url === url))
+        .filter(t => t); // Remove any nulls
+
       console.log(`✅ [TWEET SEARCH] Selected ${selectedTweets.length} tweets to include`);
 
       return selectedTweets;
@@ -809,8 +818,8 @@ If none of the tweets are suitable, return an empty array: []`;
    * Insert selected tweets into the content at appropriate positions
    * Uses OpenAI to determine WHERE to place each tweet
    * @param {string} content - Generated blog post content
-   * @param {Array<string>} selectedTweets - Array of selected tweet URLs
-   * @returns {string} Enriched content with tweet placeholders
+   * @param {Array<Object>} selectedTweets - Array of selected tweet objects with full data
+   * @returns {string} Enriched content with tweet placeholders (with embedded data)
    */
   async enrichContentWithTweets(content, selectedTweets) {
     if (selectedTweets.length === 0) {
@@ -820,24 +829,41 @@ If none of the tweets are suitable, return an empty array: []`;
 
     console.log(`📝 [TWEET ENRICHMENT] Inserting ${selectedTweets.length} tweets into content...`);
 
-    // Convert tweet URLs to placeholders
-    const tweetPlaceholders = selectedTweets.map(url => `![TWEET:${url}]`);
+    // Create placeholders with embedded tweet data (base64 encoded)
+    const tweetPlaceholders = selectedTweets.map(tweet => {
+      const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
+      return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
+    });
 
-    const prompt = `You are enriching a blog post by inserting tweet references at strategic points.
+    const prompt = `You are enriching a blog post by inserting tweets with explanatory context.
 
 BLOG POST:
 ${content}
 
-TWEETS TO INSERT (as placeholders):
-${tweetPlaceholders.map((p, i) => `${i + 1}. ${p} (from ${selectedTweets[i]})`).join('\n')}
+TWEETS TO INSERT:
+${selectedTweets.map((tweet, i) => `${i + 1}. From ${tweet.author} (@${tweet.handle}) - ${tweet.credentials || 'Healthcare professional'}
+   Tweet: "${tweet.text}"
+   Placeholder: ${tweetPlaceholders[i]}`).join('\n\n')}
 
-Insert each tweet placeholder at the point in the post where it would best support the narrative:
-- After a claim that needs expert backing
-- After introducing a statistic or research finding
-- Before or after a key recommendation
-- In a section discussing the specific topic the tweet addresses
+INSTRUCTIONS:
+For EACH tweet, you must:
+1. Write 2-3 sentences BEFORE the placeholder explaining:
+   - Why this expert's perspective matters
+   - How it supports the preceding claim or statistic
+   - Their credentials and authority
 
-Return the FULL blog post with tweet placeholders inserted. Keep ALL original content, just add the placeholders in the right spots.`;
+2. Insert the exact placeholder: ${tweetPlaceholders[0]} (use the provided placeholder exactly)
+
+3. Optionally add 1 sentence AFTER connecting to the next section
+
+EXAMPLE:
+"This approach is supported by leading experts in the field. Dr. Jane Smith, a reproductive psychiatrist at Johns Hopkins, has extensively researched early intervention strategies and their impact on maternal mental health outcomes.
+
+![TWEET:https://x.com/DrJane/status/123::DATA::abc123...]
+
+Her research aligns with the clinical guidelines we'll explore next..."
+
+Return the FULL blog post with explanatory text and tweet placeholders inserted. Keep ALL original content.`;
 
     try {
       const response = await this.openai.chat.completions.create({
@@ -845,7 +871,7 @@ Return the FULL blog post with tweet placeholders inserted. Keep ALL original co
         messages: [
           {
             role: 'system',
-            content: 'You insert tweet placeholders into blog posts at strategic narrative points. Preserve all original content.'
+            content: 'You insert tweets with explanatory context into blog posts. Preserve all original content and use exact placeholders provided.'
           },
           {
             role: 'user',
@@ -856,7 +882,7 @@ Return the FULL blog post with tweet placeholders inserted. Keep ALL original co
       });
 
       const enrichedContent = response.choices[0].message.content;
-      console.log(`✅ [TWEET ENRICHMENT] Content enriched with ${selectedTweets.length} tweets`);
+      console.log(`✅ [TWEET ENRICHMENT] Content enriched with ${selectedTweets.length} tweets and explanatory context`);
 
       return enrichedContent;
     } catch (error) {
@@ -867,14 +893,14 @@ Return the FULL blog post with tweet placeholders inserted. Keep ALL original co
 
   /**
    * Process tweet placeholders and replace with styled embed HTML
-   * Format: ![TWEET:https://x.com/username/status/1234567890] or ![TWEET:username/status_id]
+   * Format: ![TWEET:url] or ![TWEET:url::DATA::base64data]
    */
   async processTweetPlaceholders(content) {
     try {
       console.log('🐦 Processing tweet placeholders in content...');
 
-      // Match both full URLs and shorthand username/status_id format
-      const tweetRegex = /!\[TWEET:((?:https?:\/\/)?(?:twitter\.com|x\.com)?\/?\S+?\/status\/\d+|[\w]+\/\d+)\]/g;
+      // Match both old format (just URL) and new format (URL::DATA::base64)
+      const tweetRegex = /!\[TWEET:(https?:\/\/[^\]]+?)(?:::DATA::([^\]]+))?\]/g;
       const matches = [...content.matchAll(tweetRegex)];
 
       if (matches.length === 0) {
@@ -887,24 +913,48 @@ Return the FULL blog post with tweet placeholders inserted. Keep ALL original co
       let processedContent = content;
       let replacedCount = 0;
       let failedCount = 0;
+      let embeddedCount = 0;
 
       // Process tweets sequentially with delay to avoid rate limiting
       for (const match of matches) {
         const placeholder = match[0];
-        const tweetReference = match[1];
+        const tweetUrl = match[1];
+        const base64Data = match[2]; // May be undefined for old format
 
-        // Build full tweet URL
-        let tweetUrl;
-        if (tweetReference.startsWith('http')) {
-          // Already a full URL
-          tweetUrl = tweetReference;
-        } else {
-          // Convert username/status_id to full URL
-          tweetUrl = `https://x.com/${tweetReference}`;
+        let tweetData = null;
+
+        // Try to extract embedded data first
+        if (base64Data) {
+          try {
+            tweetData = JSON.parse(Buffer.from(base64Data, 'base64').toString());
+            console.log(`✅ Using embedded tweet data: ${tweetUrl}`);
+            embeddedCount++;
+
+            // Transform Grok data format to match expected format
+            if (!tweetData.author_name) {
+              tweetData = {
+                id: tweetUrl.match(/status\/(\d+)/)?.[1] || '0',
+                text: tweetData.text || '',
+                author_name: tweetData.author || 'Unknown',
+                author_handle: tweetData.handle || 'unknown',
+                author_avatar: `https://unavatar.io/twitter/${tweetData.handle}`,
+                author_verified: tweetData.verified || false,
+                created_at: new Date().toISOString(),
+                likes: tweetData.likes || 0,
+                retweets: tweetData.retweets || 0,
+                url: tweetUrl
+              };
+            }
+          } catch (e) {
+            console.warn(`⚠️ Failed to decode embedded data, fetching from API...`);
+            tweetData = null;
+          }
         }
 
-        // Fetch tweet data from API
-        const tweetData = await this.fetchTweetData(tweetUrl);
+        // Fallback to fetching if no embedded data or decode failed
+        if (!tweetData) {
+          tweetData = await this.fetchTweetData(tweetUrl);
+        }
 
         if (tweetData) {
           // Generate rich tweet card with fetched data
@@ -923,13 +973,13 @@ Return the FULL blog post with tweet placeholders inserted. Keep ALL original co
           console.log(`⚠️ Using fallback embed for: ${tweetUrl}`);
         }
 
-        // Rate limit protection: 1 second delay between requests
-        if (matches.indexOf(match) < matches.length - 1) {
+        // Rate limit protection: 1 second delay between requests (only if fetching)
+        if (!base64Data && matches.indexOf(match) < matches.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 1000));
         }
       }
 
-      console.log(`✅ Tweet processing complete: ${replacedCount} rich cards, ${failedCount} fallbacks (${replacedCount + failedCount}/${matches.length} total)`);
+      console.log(`✅ Tweet processing complete: ${replacedCount} rich cards (${embeddedCount} from embedded data), ${failedCount} fallbacks (${replacedCount + failedCount}/${matches.length} total)`);
       return processedContent;
 
     } catch (error) {

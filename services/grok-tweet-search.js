@@ -43,8 +43,10 @@ Search X/Twitter and find ${maxTweets} REAL tweets that would provide authentic 
 
 For each tweet you find, provide:
 1. The full X.com URL (e.g., https://x.com/username/status/1234567890)
-2. Author's name and credentials
-3. Why this tweet is relevant
+2. Author's name, username/handle, and credentials
+3. The FULL TWEET TEXT (exact content)
+4. Engagement stats (likes, retweets) if available
+5. Why this tweet is relevant
 
 CRITICAL: Only return tweets that ACTUALLY EXIST on X/Twitter. Do not invent or hallucinate tweets. If you cannot find enough real, relevant tweets, return fewer tweets rather than making them up.
 
@@ -54,7 +56,12 @@ Return your response in this JSON format:
     {
       "url": "https://x.com/username/status/1234567890",
       "author": "Dr. Jane Smith",
+      "handle": "DrJaneSmith",
       "credentials": "Reproductive Psychiatrist at Johns Hopkins",
+      "text": "Full exact text of the tweet here...",
+      "likes": 1234,
+      "retweets": 567,
+      "verified": true,
       "relevance": "Discusses early intervention for postpartum mental health"
     }
   ]
@@ -107,11 +114,12 @@ Return your response in this JSON format:
       }
 
       const result = JSON.parse(jsonMatch[0]);
-      const tweetUrls = result.tweets?.map(t => t.url) || [];
+      const tweets = result.tweets || [];
 
-      console.log(`✅ Found ${tweetUrls.length} real tweets from Grok:`, tweetUrls);
+      console.log(`✅ Found ${tweets.length} real tweets from Grok with full data`);
 
-      return tweetUrls;
+      // Return full tweet objects with all data
+      return tweets;
 
     } catch (error) {
       console.error('❌ Grok tweet search failed:', error.message);

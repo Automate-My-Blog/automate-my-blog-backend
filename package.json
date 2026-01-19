@@ -24,6 +24,7 @@
   "description": "Backend API for AutoBlog - AI-powered blog content generation platform",
   "dependencies": {
     "@sparticuz/chromium": "^143.0.4",
+    "@vercel/functions": "^3.3.6",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cheerio": "^1.1.2",

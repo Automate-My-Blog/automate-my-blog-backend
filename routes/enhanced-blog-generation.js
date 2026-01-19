@@ -1,5 +1,6 @@
 import express from 'express';
 import enhancedBlogGenerationService from '../services/enhanced-blog-generation.js';
+import { waitUntil } from '@vercel/functions';
 
 // Mock SEO analysis service for now
 const seoAnalysisService = {
@@ -98,32 +99,34 @@ router.post('/generate', async (req, res) => {
         if (result._hasImagePlaceholders && savedPost.id) {
           console.log(`🎨 [ASYNC] Triggering background image generation for blog: ${savedPost.id}`);
 
-          // Fire-and-forget async image generation (don't await)
-          enhancedBlogGenerationService.generateImagesAsync(
-            savedPost.id,
-            result.content,
-            result._topicForImages,
-            result._organizationIdForImages
-          ).then(async (imageResult) => {
-            if (imageResult.success) {
-              console.log(`✅ [ASYNC] Images generated for blog: ${savedPost.id}, updating post...`);
+          // Use Vercel's waitUntil to keep function alive for background processing
+          waitUntil(
+            enhancedBlogGenerationService.generateImagesAsync(
+              savedPost.id,
+              result.content,
+              result._topicForImages,
+              result._organizationIdForImages
+            ).then(async (imageResult) => {
+              if (imageResult.success) {
+                console.log(`✅ [BACKGROUND] Images generated for blog: ${savedPost.id}, updating post...`);
 
-              // Update the blog post with generated images
-              try {
-                await enhancedBlogGenerationService.updateBlogPostContent(
-                  savedPost.id,
-                  imageResult.content
-                );
-                console.log(`✅ [ASYNC] Blog post ${savedPost.id} updated with images`);
-              } catch (updateError) {
-                console.error(`❌ [ASYNC] Failed to update blog ${savedPost.id}:`, updateError.message);
+                // Update the blog post with generated images
+                try {
+                  await enhancedBlogGenerationService.updateBlogPostContent(
+                    savedPost.id,
+                    imageResult.content
+                  );
+                  console.log(`✅ [BACKGROUND] Blog post ${savedPost.id} updated with images`);
+                } catch (updateError) {
+                  console.error(`❌ [BACKGROUND] Failed to update blog ${savedPost.id}:`, updateError.message);
+                }
+              } else {
+                console.error(`❌ [BACKGROUND] Image generation failed for blog: ${savedPost.id}`);
               }
-            } else {
-              console.error(`❌ [ASYNC] Image generation failed for blog: ${savedPost.id}`);
-            }
-          }).catch(err => {
-            console.error(`❌ [ASYNC] Image generation error for blog ${savedPost.id}:`, err.message);
-          });
+            }).catch(err => {
+              console.error(`❌ [BACKGROUND] Image generation error for blog ${savedPost.id}:`, err.message);
+            })
+          );
 
           console.log(`✅ Blog saved with placeholders, images generating in background`);
         }
