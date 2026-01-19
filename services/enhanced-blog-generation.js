@@ -1567,15 +1567,19 @@ CRITICAL REQUIREMENTS:
         ctaLinks: ctaLinkMatches.slice(0, 5) // Show first 5
       });
 
-      // Process image placeholders and replace with generated images
+      // SKIP synchronous image processing - will be done async after save
       if (blogData.content && (blogData.content.includes('![IMAGE:') || blogData.content.includes('![CHART:'))) {
-        console.log('🎨 Detected image/chart placeholders in content - processing...');
-        blogData.content = await this.processImagePlaceholders(blogData.content, topic, organizationId);
+        console.log('🎨 Detected image/chart placeholders - will process ASYNC after save');
+        // Store metadata for async processing
+        blogData._hasImagePlaceholders = true;
+        blogData._topicForImages = topic;
+        blogData._organizationIdForImages = organizationId;
       } else {
         console.log('📊 No image/chart placeholders detected in generated content');
+        blogData._hasImagePlaceholders = false;
       }
 
-      // Process tweet placeholders and replace with styled embeds
+      // Process tweet placeholders synchronously (fast - just HTML conversion)
       if (blogData.content && blogData.content.includes('![TWEET:')) {
         console.log('🐦 Detected tweet placeholders in content - processing...');
         blogData.content = await this.processTweetPlaceholders(blogData.content);
@@ -1640,6 +1644,68 @@ CRITICAL REQUIREMENTS:
     } catch (error) {
       console.error('Enhanced blog generation error:', error);
       throw new Error(`Enhanced blog generation failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Async image generation - processes image placeholders after blog is saved
+   * Call this AFTER saving the blog post to database
+   * @param {string} blogPostId - The ID of the saved blog post
+   * @param {string} content - Content with image placeholders
+   * @param {Object} topic - Blog topic information
+   * @param {string} organizationId - Organization ID
+   * @returns {Object} Updated content with generated images
+   */
+  async generateImagesAsync(blogPostId, content, topic, organizationId) {
+    try {
+      console.log(`🎨 [ASYNC IMAGE GEN] Starting async image generation for blog: ${blogPostId}`);
+
+      // Process image placeholders
+      const updatedContent = await this.processImagePlaceholders(content, topic, organizationId);
+
+      console.log(`✅ [ASYNC IMAGE GEN] Images generated successfully for blog: ${blogPostId}`);
+
+      return {
+        success: true,
+        content: updatedContent,
+        blogPostId
+      };
+    } catch (error) {
+      console.error(`❌ [ASYNC IMAGE GEN] Failed for blog ${blogPostId}:`, error.message);
+      return {
+        success: false,
+        error: error.message,
+        blogPostId,
+        content // Return original content with placeholders
+      };
+    }
+  }
+
+  /**
+   * Update blog post content in database
+   * Used by async image generation to update post with generated images
+   * @param {string} blogPostId - The ID of the blog post to update
+   * @param {string} content - Updated content with images
+   */
+  async updateBlogPostContent(blogPostId, content) {
+    const client = await db.connect();
+    try {
+      console.log(`📝 Updating blog post ${blogPostId} with generated images...`);
+
+      await client.query(
+        `UPDATE blog_posts
+         SET content = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [content, blogPostId]
+      );
+
+      console.log(`✅ Blog post ${blogPostId} content updated successfully`);
+    } catch (error) {
+      console.error(`❌ Failed to update blog post ${blogPostId}:`, error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

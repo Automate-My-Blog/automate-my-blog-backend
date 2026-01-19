@@ -93,6 +93,40 @@ router.post('/generate', async (req, res) => {
           { status: options.status || 'draft' }
         );
         console.log(`💾 Blog post auto-saved: ${savedPost.id}`);
+
+        // Trigger ASYNC image generation if there are image placeholders
+        if (result._hasImagePlaceholders && savedPost.id) {
+          console.log(`🎨 [ASYNC] Triggering background image generation for blog: ${savedPost.id}`);
+
+          // Fire-and-forget async image generation (don't await)
+          enhancedBlogGenerationService.generateImagesAsync(
+            savedPost.id,
+            result.content,
+            result._topicForImages,
+            result._organizationIdForImages
+          ).then(async (imageResult) => {
+            if (imageResult.success) {
+              console.log(`✅ [ASYNC] Images generated for blog: ${savedPost.id}, updating post...`);
+
+              // Update the blog post with generated images
+              try {
+                await enhancedBlogGenerationService.updateBlogPostContent(
+                  savedPost.id,
+                  imageResult.content
+                );
+                console.log(`✅ [ASYNC] Blog post ${savedPost.id} updated with images`);
+              } catch (updateError) {
+                console.error(`❌ [ASYNC] Failed to update blog ${savedPost.id}:`, updateError.message);
+              }
+            } else {
+              console.error(`❌ [ASYNC] Image generation failed for blog: ${savedPost.id}`);
+            }
+          }).catch(err => {
+            console.error(`❌ [ASYNC] Image generation error for blog ${savedPost.id}:`, err.message);
+          });
+
+          console.log(`✅ Blog saved with placeholders, images generating in background`);
+        }
       } catch (saveError) {
         console.warn('Auto-save failed, continuing without saving:', saveError.message);
       }
