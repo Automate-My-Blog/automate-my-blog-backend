@@ -2,13 +2,17 @@ import axios from 'axios';
 
 /**
  * Grok Tweet Search Service
- * Uses xAI's Grok API to search X/Twitter for real, relevant tweets
+ * Uses xAI's Agent Tools API with grok-4-1-fast for FAST X/Twitter searches
+ *
+ * Updated Jan 2026: Migrated from deprecated Live Search API to Agent Tools
+ * Benefits: Server-side orchestration, parallel execution, FREE (no cost), faster
  */
 export class GrokTweetSearchService {
   constructor() {
     // Trim and remove surrounding quotes if present
     this.apiKey = process.env.XAI_API_KEY?.trim().replace(/^["']|["']$/g, '');
-    this.endpoint = 'https://api.x.ai/v1/chat/completions';
+    // NEW: Agent Tools API endpoint (faster, free, server-side orchestration)
+    this.endpoint = 'https://api.x.ai/v1/responses';
 
     if (!this.apiKey) {
       console.warn('⚠️ XAI_API_KEY not configured - Grok tweet search disabled');
@@ -70,43 +74,44 @@ Return your response in this JSON format:
       const response = await axios.post(
         this.endpoint,
         {
-          model: 'grok-4',  // Updated from 'grok-beta' to current model
-          messages: [
+          model: 'grok-4-1-fast',  // Optimized for fast agentic search
+          input: [
             {
               role: 'system',
-              content: 'You are a research assistant with real-time access to X/Twitter. You can search for and verify tweets. Only return real tweets that actually exist.'
+              content: 'You are a research assistant with real-time access to X/Twitter. Search for and return ONLY real tweets that actually exist. Use the x_search tool to find relevant tweets.'
             },
             {
               role: 'user',
               content: prompt
             }
           ],
-          temperature: 0.3, // Lower temperature for factual searches
-          max_tokens: 1000,
-          // Enable Live Search with X/Twitter access
-          search_parameters: {
-            mode: 'on',  // Force search
-            sources: [
-              {
-                type: 'x'  // Search only X/Twitter
-              }
-            ],
-            max_search_results: 10,
-            return_citations: true
-          }
+          temperature: 0.3,
+          max_tokens: 1500,
+          // NEW: Agent Tools API (server-side orchestration, parallel execution)
+          tools: [
+            {
+              type: 'x_search'  // Let Grok autonomously search X/Twitter
+            }
+          ],
+          max_turns: 2  // Limit reasoning iterations for speed
         },
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 45000  // Increased from 30s to accommodate multiple searches
+          timeout: 25000  // Reduced from 45s - Agent Tools is much faster
         }
       );
 
-      const content = response.data.choices[0].message.content;
+      // NEW: Agent Tools API response format
+      const content = response.data.content || response.data.choices?.[0]?.message?.content;
+      const toolCalls = response.data.tool_calls || [];
+      const citations = response.data.citations || [];
 
-      // Parse JSON response
+      console.log(`🔧 Grok used ${toolCalls.length} tool calls, found ${citations.length} citations`);
+
+      // Parse JSON response from content
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
         console.warn('⚠️ Could not parse Grok response as JSON');
@@ -116,7 +121,7 @@ Return your response in this JSON format:
       const result = JSON.parse(jsonMatch[0]);
       const tweets = result.tweets || [];
 
-      console.log(`✅ Found ${tweets.length} real tweets from Grok with full data`);
+      console.log(`✅ Found ${tweets.length} real tweets from Grok Agent Tools (fast mode)`);
 
       // Return full tweet objects with all data
       return tweets;
