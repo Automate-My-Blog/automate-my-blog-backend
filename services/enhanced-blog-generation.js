@@ -326,6 +326,17 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         chartCount: placeholders.filter(p => p.format === 'CHART').length
       });
 
+      // For async generation, prioritize critical images to avoid timeout
+      // Only generate hero_image and charts, skip other images
+      const criticalTypes = ['hero_image', 'chart'];
+      const filteredPlaceholders = placeholders.filter(p =>
+        p.format === 'CHART' || criticalTypes.includes(p.type)
+      );
+
+      if (filteredPlaceholders.length < placeholders.length) {
+        console.log(`⚡ Optimizing for async: generating ${filteredPlaceholders.length}/${placeholders.length} critical images (hero + charts only)`);
+      }
+
       // Get brand guidelines if available
       const brandResult = await db.query(
         'SELECT input_data FROM user_manual_inputs WHERE organization_id = $1 AND input_type = $2 AND validated = TRUE',
@@ -337,8 +348,8 @@ export class EnhancedBlogGenerationService extends OpenAIService {
         brandGuidelines = JSON.parse(brandResult.rows[0].input_data);
       }
 
-      // Generate images for each placeholder in parallel
-      const imagePromises = placeholders.map(async (placeholder, index) => {
+      // Generate images for critical placeholders only (to avoid timeout)
+      const imagePromises = filteredPlaceholders.map(async (placeholder, index) => {
         try {
           console.log(`🎨 Generating ${placeholder.format} ${index + 1}/${placeholders.length}: ${placeholder.type}`);
 
@@ -357,7 +368,13 @@ export class EnhancedBlogGenerationService extends OpenAIService {
             options.servicePreference = 'quickchart'; // Force QuickChart for charts
           }
 
-          const imageResult = await this.visualContentService.generateVisualContent(options);
+          // Add timeout to prevent hanging - 30 seconds per image max
+          const imageResult = await Promise.race([
+            this.visualContentService.generateVisualContent(options),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Image generation timeout (30s)')), 30000)
+            )
+          ]);
 
           // Check if generation succeeded
           if (imageResult.success && imageResult.data?.imageUrl) {
@@ -1735,8 +1752,13 @@ CRITICAL REQUIREMENTS:
     try {
       console.log(`🎨 [ASYNC IMAGE GEN] Starting async image generation for blog: ${blogPostId}`);
 
-      // Process image placeholders
-      const updatedContent = await this.processImagePlaceholders(content, topic, organizationId);
+      // Add overall timeout of 45 seconds for all image generation (within Vercel's 60s limit)
+      const updatedContent = await Promise.race([
+        this.processImagePlaceholders(content, topic, organizationId),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Async image generation timeout (45s total)')), 45000)
+        )
+      ]);
 
       console.log(`✅ [ASYNC IMAGE GEN] Images generated successfully for blog: ${blogPostId}`);
 

@@ -1178,6 +1178,67 @@ app.post('/api/tweets/search-for-topic', async (req, res) => {
   }
 });
 
+/**
+ * Generate images for a saved blog post
+ * This endpoint is called AFTER blog generation to avoid timeout issues
+ * Similar pattern to tweet search - separate endpoint with own 60s window
+ */
+app.post('/api/images/generate-for-blog', async (req, res) => {
+  try {
+    const { blogPostId, content, topic, organizationId } = req.body;
+
+    if (!blogPostId || !content) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters',
+        message: 'blogPostId and content are required'
+      });
+    }
+
+    console.log(`🎨 [IMAGE GEN] Generating images for blog: ${blogPostId}`);
+
+    // Generate images for all placeholders in content
+    const imageResult = await enhancedBlogGenerationService.generateImagesAsync(
+      blogPostId,
+      content,
+      topic,
+      organizationId
+    );
+
+    if (imageResult.success) {
+      // Update the blog post in database with generated images
+      await enhancedBlogGenerationService.updateBlogPostContent(
+        blogPostId,
+        imageResult.content
+      );
+
+      console.log(`✅ [IMAGE GEN] Successfully generated and saved images for blog: ${blogPostId}`);
+
+      res.json({
+        success: true,
+        content: imageResult.content,
+        blogPostId
+      });
+    } else {
+      console.warn(`⚠️ [IMAGE GEN] Image generation failed for blog: ${blogPostId}`);
+
+      res.json({
+        success: false,
+        error: imageResult.error,
+        content: imageResult.content, // Return original content with placeholders
+        blogPostId
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ [IMAGE GEN] Error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Generate content endpoint (with optional auth for saving) - Enhanced with Phase 3 features
 app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   const startTime = Date.now();

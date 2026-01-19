@@ -95,40 +95,13 @@ router.post('/generate', async (req, res) => {
         );
         console.log(`💾 Blog post auto-saved: ${savedPost.id}`);
 
-        // Trigger ASYNC image generation if there are image placeholders
+        // ✨ REMOVED: Async image generation moved to dedicated endpoint
+        // Images are now generated via /api/images/generate-for-blog
+        // This prevents timeout issues by giving image generation its own 60s window
+        // Frontend will call the image endpoint after receiving the blog response
         if (result._hasImagePlaceholders && savedPost.id) {
-          console.log(`🎨 [ASYNC] Triggering background image generation for blog: ${savedPost.id}`);
-
-          // Use Vercel's waitUntil to keep function alive for background processing
-          waitUntil(
-            enhancedBlogGenerationService.generateImagesAsync(
-              savedPost.id,
-              result.content,
-              result._topicForImages,
-              result._organizationIdForImages
-            ).then(async (imageResult) => {
-              if (imageResult.success) {
-                console.log(`✅ [BACKGROUND] Images generated for blog: ${savedPost.id}, updating post...`);
-
-                // Update the blog post with generated images
-                try {
-                  await enhancedBlogGenerationService.updateBlogPostContent(
-                    savedPost.id,
-                    imageResult.content
-                  );
-                  console.log(`✅ [BACKGROUND] Blog post ${savedPost.id} updated with images`);
-                } catch (updateError) {
-                  console.error(`❌ [BACKGROUND] Failed to update blog ${savedPost.id}:`, updateError.message);
-                }
-              } else {
-                console.error(`❌ [BACKGROUND] Image generation failed for blog: ${savedPost.id}`);
-              }
-            }).catch(err => {
-              console.error(`❌ [BACKGROUND] Image generation error for blog ${savedPost.id}:`, err.message);
-            })
-          );
-
-          console.log(`✅ Blog saved with placeholders, images generating in background`);
+          console.log(`🎨 Blog has ${result._hasImagePlaceholders} image placeholders`);
+          console.log(`💡 Frontend should call /api/images/generate-for-blog to generate images`);
         }
 
         // Trigger ASYNC tweet enrichment if needed
@@ -182,6 +155,14 @@ router.post('/generate', async (req, res) => {
         qualityPrediction: result.qualityPrediction,
         dataCompleteness: result.organizationContext?.dataCompleteness,
         visualSuggestions: result.visualContentSuggestions?.length || 0
+      },
+      // NEW: Image generation metadata for frontend
+      imageGeneration: {
+        hasPlaceholders: result._hasImagePlaceholders || false,
+        needsImageGeneration: (result._hasImagePlaceholders && savedPost?.id) || false,
+        blogPostId: savedPost?.id || null,
+        topic: result._topicForImages || null,
+        organizationId: result._organizationIdForImages || null
       }
     });
 
