@@ -92,7 +92,7 @@ Return ONLY this JSON (no explanations):
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 30000  // 30s max - optimized for fast single-turn search
+          timeout: 60000  // 60s max - give xAI API more time (Vercel limit)
         }
       );
 
@@ -191,7 +191,7 @@ Return ONLY this JSON (no explanations):
 
     } catch (error) {
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        console.warn('⏱️ Grok tweet search timed out (30s) - continuing without tweets');
+        console.warn('⏱️ Grok tweet search timed out (60s) - continuing without tweets');
       } else {
         console.error('❌ Grok tweet search failed:', error.message);
         if (error.response) {
