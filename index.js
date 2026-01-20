@@ -1528,7 +1528,7 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
     // NEW: Add image generation metadata for frontend
     response.imageGeneration = {
       hasPlaceholders: blogPost._hasImagePlaceholders || false,
-      needsImageGeneration: (blogPost._hasImagePlaceholders && savedPost?.id) || false,
+      needsImageGeneration: !!(blogPost._hasImagePlaceholders && savedPost?.id),  // Force boolean
       blogPostId: savedPost?.id || null,
       topic: blogPost._topicForImages || topic,
       organizationId: blogPost._organizationIdForImages || organizationId
