@@ -1163,6 +1163,39 @@ app.post('/api/generate-pitches', async (req, res) => {
   }
 });
 
+// Generate audience images endpoint (Step 4 of 4-step analysis)
+app.post('/api/generate-audience-images', async (req, res) => {
+  console.log('=== Generate Audience Images Request ===');
+
+  try {
+    const { scenarios } = req.body;
+
+    if (!scenarios || !Array.isArray(scenarios)) {
+      return res.status(400).json({
+        error: 'Scenarios array is required',
+        message: 'Please provide audience scenarios'
+      });
+    }
+
+    console.log(`Generating images for ${scenarios.length} scenarios`);
+
+    const scenariosWithImages = await openaiService.generateAudienceImages(scenarios);
+
+    res.json({
+      success: true,
+      scenarios: scenariosWithImages,
+      count: scenariosWithImages.length
+    });
+
+  } catch (error) {
+    console.error('Generate audience images error:', error);
+    res.status(500).json({
+      error: 'Failed to generate audience images',
+      message: error.message
+    });
+  }
+});
+
 // Trending topics endpoint
 app.post('/api/trending-topics', async (req, res) => {
   try {

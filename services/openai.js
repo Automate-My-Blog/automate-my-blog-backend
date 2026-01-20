@@ -703,6 +703,77 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
   }
 
   /**
+   * Generate DALL-E image for a single audience scenario
+   */
+  async generateAudienceImage(scenario) {
+    try {
+      console.log('Generating DALL-E image for audience:', scenario.targetSegment.demographics);
+
+      // Create problem-focused prompt based on customer problem and search behavior
+      const prompt = `Create a high-quality, realistic image representing this customer scenario:
+      Problem: ${scenario.customerProblem}
+      Demographics: ${scenario.targetSegment.demographics}
+      Search Behavior: ${scenario.targetSegment.searchBehavior}
+
+      Style: Professional photography, sharp focus, excellent lighting
+      Focus: Visual representation of the PROBLEM they're searching for help with
+      Quality: Magazine quality, commercial photography
+      Composition: Clean, modern, empathetic
+      Colors: Warm, approachable color palette
+      Requirements: No text, no people's faces, realistic style only
+
+      The image should visually communicate the problem or need this audience is experiencing.`;
+
+      const response = await openai.images.generate({
+        model: "dall-e-3",
+        prompt: prompt,
+        size: "1024x1024",
+        quality: "standard",
+        n: 1,
+      });
+
+      console.log('DALL-E audience image generated successfully');
+      return response.data[0].url;
+
+    } catch (error) {
+      console.error('DALL-E audience image generation error:', error);
+
+      // Fallback to a placeholder image
+      const fallbackUrl = `https://via.placeholder.com/400x250/1890ff/FFFFFF?text=${encodeURIComponent(scenario.customerProblem.substring(0, 30))}`;
+      console.log('Using fallback image:', fallbackUrl);
+      return fallbackUrl;
+    }
+  }
+
+  /**
+   * Generate DALL-E images for multiple audience scenarios in parallel
+   */
+  async generateAudienceImages(scenarios) {
+    try {
+      console.log(`🎨 Generating DALL-E images for ${scenarios.length} audiences...`);
+
+      // Generate images in parallel to minimize total time
+      const imagePromises = scenarios.map(async (scenario, index) => {
+        console.log(`Generating image ${index + 1}/${scenarios.length} for: ${scenario.targetSegment.demographics}`);
+        const imageUrl = await this.generateAudienceImage(scenario);
+        return {
+          ...scenario,
+          imageUrl
+        };
+      });
+
+      const scenariosWithImages = await Promise.all(imagePromises);
+      console.log('✅ All audience images generated');
+
+      return scenariosWithImages;
+
+    } catch (error) {
+      console.error('❌ Failed to generate audience images:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Perform web search-enhanced business research
    */
   async performBusinessResearch(businessName, businessType, websiteUrl) {

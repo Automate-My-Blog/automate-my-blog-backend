@@ -365,7 +365,8 @@ router.post('/', async (req, res) => {
       conversion_path,
       business_value,
       priority = 1,
-      pitch
+      pitch,
+      image_url
     } = req.body;
 
     // Validate input data to prevent corruption
@@ -463,15 +464,16 @@ router.post('/', async (req, res) => {
       conversion_path,
       business_value: safeStringify(business_value, 'business_value'),
       priority,
-      pitch
+      pitch,
+      image_url: image_url || null
     };
 
     const result = await db.query(`
       INSERT INTO audiences (
         user_id, session_id, project_id, organization_intelligence_id,
         target_segment, customer_problem, customer_language,
-        conversion_path, business_value, priority, pitch
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        conversion_path, business_value, priority, pitch, image_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       RETURNING *
     `, [
       audienceData.user_id,
@@ -484,7 +486,8 @@ router.post('/', async (req, res) => {
       audienceData.conversion_path,
       audienceData.business_value,
       audienceData.priority,
-      audienceData.pitch
+      audienceData.pitch,
+      audienceData.image_url
     ]);
 
     const audience = result.rows[0];
