@@ -242,7 +242,7 @@ JSON RESPONSE (follow EXACTLY):
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
-      "pitch": "REQUIRED: Write 2-3 sentences explaining to the BUSINESS OWNER why this audience is valuable to target. Use third-person language ABOUT the audience (e.g., 'Women aged 30-40 represent...' NOT 'Empathetically address women...'). Include specific data (search volume, conversion potential, market size). Sound like an agency strategist presenting market opportunity, NOT marketing copy to customers. Natural prose, vary structure. Max 250 chars.",
+      "pitch": "REQUIRED: Professional business case in 2-3 sentences explaining why this audience is strategically valuable. MUST include: (1) specific demographics, (2) search volume data, (3) conversion potential level, (4) competition level, (5) their urgent need/emotional state. Write in third person ABOUT the audience (e.g., 'High-income women aged 30-40 experiencing infertility generate 1,500 monthly searches with low competition...'). Sound like an agency presenting ROI opportunity. Natural prose. Max 280 chars.",
       "targetSegment": {
         "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Specific age range, life stage, education, income, family status that differentiates this segment from others",
         "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
