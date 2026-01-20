@@ -242,7 +242,7 @@ JSON RESPONSE (follow EXACTLY):
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
-      "pitch": "REQUIRED: 2-3 sentence OpenAI-generated natural language pitch that synthesizes all the scenario data (demographics, psychographics, search behavior, business value) into a compelling narrative. Write as if you're a content strategist convincing a client why this audience is worth targeting. Demonstrate expertise, quantify the opportunity when possible, show emotional intelligence, and compel the user to select this audience. Use natural, persuasive prose (NOT a template or structured format). Vary structure for each pitch. Max 250 chars.",
+      "pitch": "REQUIRED: Write 2-3 sentences explaining to the BUSINESS OWNER why this audience is valuable to target. Use third-person language ABOUT the audience (e.g., 'Women aged 30-40 represent...' NOT 'Empathetically address women...'). Include specific data (search volume, conversion potential, market size). Sound like an agency strategist presenting market opportunity, NOT marketing copy to customers. Natural prose, vary structure. Max 250 chars.",
       "targetSegment": {
         "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Specific age range, life stage, education, income, family status that differentiates this segment from others",
         "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
