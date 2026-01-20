@@ -239,67 +239,22 @@ JSON RESPONSE (follow EXACTLY):
   "websiteGoals": "Primary conversion objectives inferred from CTAs, forms, user flows (max 150 chars)",
   "blogStrategy": "How blog content should support business conversion goals (max 200 chars)",
   "searchBehavior": "When/how customers search (max 150 chars) - urgency, emotional state, timing patterns",
-  "scenarios": [
-    {
-      "customerProblem": "Specific problem that drives search behavior (use emotional language)",
-      "pitch": "CRITICAL: Show numbered step-by-step funnel with reasoning for EACH rate. FORMAT using line breaks: 'Step 1: [X] people search monthly for [seoKeywords]. Step 2: Your blog posts rank and capture [A-B%] ([C-D clicks]) - realistic with SEO built over 6-12 months. Step 3: [E-F%] engage and read ([G-H visitors]) rather than bouncing - [WHY based on psychographics, e.g., because they desperately need clinical guidance]. Step 4: [I-J%] click CTA to book ([K-L bookings]) - [WHY based on searchBehavior urgency]. Step 5: Revenue of $[M]-$[N] monthly assuming $[P]/consultation.' Example: 'Step 1: 3,500 people search monthly for safe anxiety medication during pregnancy. Step 2: Your posts capture 2-5% (70-175 clicks) once SEO authority builds. Step 3: 60-80% engage (42-140 readers) vs bouncing because they're desperately seeking expert answers, not generic advice. Step 4: 15-25% book (6-35 consultations) due to crisis-driven urgency and fear. Step 5: $3,000-$17,500/month at $500/consultation.' Each step explains WHY. Max 600 chars.",
-      "targetSegment": {
-        "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Write as natural language sentence or phrase, NOT comma-separated list. Include age range, life stage, key characteristics. Example: 'First-time mothers aged 25-35 who are pregnant and experiencing high anxiety about mental health' NOT 'Pregnant women 25-35, first-time mothers, high anxiety'. Natural flowing description.",
-        "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
-        "searchBehavior": "MUST VARY BY SCENARIO: When and how this specific segment searches (crisis-driven vs planned, reactive vs proactive) - different from other scenarios"
-      },
-      "businessValue": {
-        "searchVolume": "Estimated monthly searches (e.g., 'High - 5,400/month' or 'Medium - 1,200/month')",
-        "competition": "Competition level (Low/Medium/High) and competitive gaps",
-        "conversionPotential": "Conversion likelihood based on urgency, payment ability, and intent (High/Medium/Low)",
-        "priority": "Overall business priority ranking (1=highest value, 2=secondary, etc.)"
-      },
-      "customerLanguage": ["2-3 phrases customers actually type into Google for this problem", "use keyword research data if available, otherwise infer from emotional context"],
-      "seoKeywords": ["3-4 SEO-focused keywords for this problem", "prioritize keyword research findings if available", "balance search volume with specificity"],
-      "conversionPath": "How this content scenario supports business goals (max 150 chars)",
-      "contentIdeas": [
-        {
-          "title": "Blog post title addressing this specific problem",
-          "searchIntent": "What motivates this customer segment to search for this topic",
-          "businessAlignment": "How this content drives toward conversion goals"
-        }
-      ]
-    },
-    "// Generate 4-5 scenarios based on different customer problems, each with distinct target segments and ranked by business value"
-  ],
   "connectionMessage": "2-3 sentences explaining how this business connects with customers through content, specific to their situation and customer psychology (max 300 chars)"
 }
 
 VALIDATION RULES:
-- PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of customer language, SEO keywords, and business context
+- PRIORITIZE WEB SEARCH DATA: When web search research is available, use it to enhance accuracy of business context
 - NO placeholder text like "Target Audience" or "Business Type"
 - NO generic terms like "customers" or "users" - be specific
-- NO business jargon - use customer language in customerLanguage fields (prioritize keyword research findings)
 - ALL arrays must have specified number of items
 - ALL text must be under character limits
 - businessModel, websiteGoals, blogStrategy must be inferred from actual website content and web search intelligence
-
-SCENARIO-SPECIFIC REQUIREMENTS:
-- scenarios must have 4-5 items, each addressing a different customer problem with business alignment
-- CRITICAL: EACH SCENARIO MUST HAVE COMPLETELY DIFFERENT TARGET DEMOGRAPHICS - NO IDENTICAL OR SIMILAR DESCRIPTIONS ALLOWED
-- targetSegment.demographics MUST be specific and unique for each scenario: include DIFFERENT age ranges, life stages, income levels, education, family status
-- targetSegment.psychographics MUST describe DIFFERENT emotional states, urgency levels, healthcare-seeking behaviors, and decision-making contexts
-- If targeting the same broad category (e.g., reproductive health), EACH scenario must target a DISTINCT SUBSET with different characteristics
-- Example: "Pregnant women 25-35, first-time mothers, high anxiety about medication" vs "New mothers 0-12 months postpartum, overwhelmed, seeking immediate relief"
-- businessValue.priority must rank scenarios by total opportunity (1=highest, 2=secondary, etc.)
-- businessValue fields must include realistic search volume estimates and conversion assessments
-- scenarios must be ordered by priority (highest business value first)
-- conversionPath must show clear connection from content to business goals
-- seoKeywords should be optimization-focused, incorporating keyword research data when available
-- customerLanguage should be emotional phrases customers actually type (use web search customer insights)
-- brandColors should reflect actual brand guidelines found through web search when available
-- contentIdeas must include businessAlignment showing conversion strategy
 - connectionMessage must be specific to this business, not generic template text
 - JSON must be valid and parseable`
           }
         ],
         temperature: 0.3,
-        max_tokens: 4000  // Increased from 3000 to accommodate complex JSON structure
+        max_tokens: 2000  // Basic business analysis only (scenarios generated separately)
       });
 
       console.log('OpenAI request completed successfully');
@@ -312,17 +267,17 @@ SCENARIO-SPECIFIC REQUIREMENTS:
         prompt_tokens: completion.usage?.prompt_tokens,
         completion_tokens: completion.usage?.completion_tokens,
         total_tokens: completion.usage?.total_tokens,
-        max_tokens_limit: 4000
+        max_tokens_limit: 2000
       });
 
       if (finishReason === 'length') {
         console.error('❌ TRUNCATION ERROR: Website analysis response was cut off due to max_tokens limit');
         console.error('📊 Token usage:', {
           used: completion.usage?.completion_tokens,
-          limit: 4000,
-          overflow: completion.usage?.completion_tokens - 4000
+          limit: 2000,
+          overflow: completion.usage?.completion_tokens - 2000
         });
-        throw new Error('Website analysis response truncated - increase max_tokens to at least ' + (completion.usage?.completion_tokens + 1000));
+        throw new Error('Website analysis response truncated - increase max_tokens to at least ' + (completion.usage?.completion_tokens + 500));
       }
 
       if (finishReason !== 'stop') {
