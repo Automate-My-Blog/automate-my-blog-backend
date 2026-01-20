@@ -1369,34 +1369,33 @@ Description = detailed image generation prompt (50-100 words)
 - After final CTA: Only text content allowed (conclusion, summary, closing thoughts)
 
 **For tweet embeds (social proof, expert perspectives, real stories):**
-![TWEET:username/status_id] or ![TWEET:https://x.com/username/status/1234567890]
 
 ${realTweetUrls.length > 0
-  ? `REAL TWEETS AVAILABLE FOR THIS TOPIC:
-${realTweetUrls.map((url, i) => `${i + 1}. ${url}`).join('\n')}
+  ? `REAL TWEET PLACEHOLDERS AVAILABLE FOR THIS TOPIC:
+${realTweetUrls.map((placeholder, i) => `${i + 1}. ${placeholder}`).join('\n')}
 
 TWEET EMBED RULES (CRITICAL - REQUIRED):
-- **MANDATORY**: You MUST include at least 1 (preferably 2) of the provided real tweets in your blog post
-- **USE ONLY THE REAL TWEETS PROVIDED ABOVE** - These have been verified to exist and are highly relevant
+- **MANDATORY**: You MUST include at least 1 (preferably 2) of the provided tweet placeholders in your blog post
+- **USE THE EXACT PLACEHOLDERS PROVIDED ABOVE** - Do not modify them, copy them exactly as shown
 - Choose the tweet(s) that best fit your content flow and add genuine social proof
-- **REQUIRED**: Add 2-3 sentences of context BEFORE each tweet explaining:
-  * Who the author is (check their credentials/affiliation from the username)
-  * Why their perspective matters (expertise, experience, authority)
+- **REQUIRED**: Add 2-3 sentences of context BEFORE each tweet placeholder explaining:
+  * Why this expert's perspective matters
   * How it connects to your current section
+  * Their expertise or authority
 - Position strategically:
   * Mid-post (after 2-3 sections) for expert validation
   * Near conclusion for testimonials or real-world perspectives
-- Use the FULL URL format provided above
+- Copy the EXACT placeholder format provided above (including all the data encoding)
 
 **Example Format:**
-Dr. Sarah Johnson, a leading reproductive psychiatrist at Johns Hopkins, has spent decades researching evidence-based interventions for postpartum mental health. Her clinical work focuses on personalized treatment approaches that combine therapeutic and pharmacological strategies.
+Leading experts in reproductive psychiatry emphasize the importance of evidence-based interventions. Dr. Smith's research focuses on personalized treatment approaches that combine therapeutic and pharmacological strategies.
 
-![TWEET:${realTweetUrls[0]}]
+${realTweetUrls[0]}
 
-Dr. Johnson's emphasis on early intervention and comprehensive assessment aligns with current best practices in maternal mental health care.`
+This evidence-based approach aligns with current best practices in maternal mental health care.`
   : `TWEET EMBED RULES:
 - **NO REAL TWEETS AVAILABLE** - Do NOT include any tweet embeds in this post
-- Do NOT create fake tweet URLs or made-up usernames/status IDs
+- Do NOT create fake tweet placeholders or URLs
 - Skip tweets entirely for this post
 - Use other forms of social proof (statistics, studies, quotes from publications)`}`;
 
@@ -1521,8 +1520,15 @@ Return JSON format:
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       console.log(`📊 Previous post used ${previousBoxTypes.length} highlight box types:`, previousBoxTypes);
 
-      // Build enhanced prompt WITHOUT tweets (will be added post-generation)
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, []);
+      // Get preloaded tweets and create placeholders with embedded data
+      const tweetPlaceholders = (topic.preloadedTweets || []).map(tweet => {
+        const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
+        return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
+      });
+      console.log(`🐦 [TWEET] Building prompt with ${tweetPlaceholders.length} pre-loaded tweets (with embedded data)`);
+
+      // Build enhanced prompt WITH tweet placeholders (OpenAI will insert them during generation)
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -1596,48 +1602,17 @@ CRITICAL REQUIREMENTS:
         contentPreview: blogData.content?.substring(0, 200) + '...'
       });
 
-      // Check if topic has pre-loaded tweets
-      const hasPreloadedTweets = topic.preloadedTweets && topic.preloadedTweets.length > 0;
-
-      if (hasPreloadedTweets) {
-        console.log(`🐦 [TWEET] Using ${topic.preloadedTweets.length} pre-loaded tweets from topic`);
-
-        try {
-          // Select best tweets that support the narrative
-          const selectedTweets = await this.selectNarrativeSupportingTweets(
-            blogData.content,
-            topic.preloadedTweets,
-            businessInfo
-          );
-
-          if (selectedTweets.length > 0) {
-            // Enrich content with pre-loaded tweets (synchronously!)
-            blogData.content = await this.enrichContentWithTweets(
-              blogData.content,
-              selectedTweets
-            );
-
-            // Process tweet placeholders to generate rich cards
-            blogData.content = await this.processTweetPlaceholders(blogData.content);
-
-            console.log(`✅ [TWEET] Enriched content with ${selectedTweets.length} pre-loaded tweets`);
-
-            // Mark that tweets are already included (no async needed)
-            blogData._needsTweetEnrichment = false;
-          } else {
-            console.log('ℹ️ [TWEET] No suitable tweets selected from pre-loaded options');
-            blogData._needsTweetEnrichment = false;
-          }
-        } catch (error) {
-          console.error(`❌ [TWEET] Failed to use pre-loaded tweets:`, error.message);
-          // Don't fail generation, just skip tweets
-          blogData._needsTweetEnrichment = false;
-        }
+      // Tweets were already included during generation (passed in prompt)
+      // Just process any tweet placeholders that OpenAI inserted
+      if (blogData.content && blogData.content.includes('![TWEET:')) {
+        console.log('🐦 Processing tweet placeholders inserted by OpenAI during generation...');
+        blogData.content = await this.processTweetPlaceholders(blogData.content);
+        console.log(`✅ [TWEET] Processed tweet placeholders into rich cards`);
       } else {
-        // No pre-loaded tweets available - skip tweet enrichment entirely
-        console.log('ℹ️ [TWEET] No pre-loaded tweets available - skipping tweet enrichment');
-        blogData._needsTweetEnrichment = false;
+        console.log('ℹ️ [TWEET] No tweet placeholders found in generated content');
       }
+
+      blogData._needsTweetEnrichment = false;
 
       // Debug: Check if highlight boxes were generated and if they have content
       const highlightBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
