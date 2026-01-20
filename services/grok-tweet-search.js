@@ -37,36 +37,27 @@ export class GrokTweetSearchService {
     try {
       console.log(`🔍 Searching for real tweets about: ${topic}`);
 
-      const prompt = `You are helping create a blog post about "${topic}" for ${businessType} targeting ${targetAudience}.
+      // Calculate date 6 months ago for recent tweets filter
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+      const fromDate = sixMonthsAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-Search X/Twitter and find ${maxTweets} REAL tweets that would provide authentic social proof for this blog post. Look for:
-- Verified experts, doctors, researchers, or professors in this field
-- Real patient testimonials from known advocates
-- Industry authorities with significant followings
-- Recent tweets (within last 6 months if possible)
+      // Simplified prompt - let Grok's agentic search handle the strategy
+      const prompt = `Find ${maxTweets} popular, high-engagement tweets about: ${topic}
 
-For each tweet you find, provide:
-1. The full X.com URL (e.g., https://x.com/username/status/1234567890)
-2. Author's name, username/handle, and credentials
-3. The FULL TWEET TEXT (exact content)
-4. Engagement stats (likes, retweets) if available
-5. Why this tweet is relevant
+Look for tweets from experts, professionals, or advocates with verified accounts or significant followings.
 
-CRITICAL: Only return tweets that ACTUALLY EXIST on X/Twitter. Do not invent or hallucinate tweets. If you cannot find enough real, relevant tweets, return fewer tweets rather than making them up.
-
-Return your response in this JSON format:
+Return ONLY this JSON (no explanations):
 {
   "tweets": [
     {
       "url": "https://x.com/username/status/1234567890",
-      "author": "Dr. Jane Smith",
-      "handle": "DrJaneSmith",
-      "credentials": "Reproductive Psychiatrist at Johns Hopkins",
-      "text": "Full exact text of the tweet here...",
+      "author": "Full Name",
+      "handle": "username",
+      "text": "Full tweet text...",
       "likes": 1234,
       "retweets": 567,
-      "verified": true,
-      "relevance": "Discusses early intervention for postpartum mental health"
+      "verified": true
     }
   ]
 }`;
@@ -78,29 +69,30 @@ Return your response in this JSON format:
           input: [
             {
               role: 'system',
-              content: 'You are a research assistant with real-time access to X/Twitter. Search for and return ONLY real tweets that actually exist. Use the x_search tool to find relevant tweets.'
+              content: 'You are an X/Twitter search assistant. Use x_search to find real, popular tweets. Return only JSON.'
             },
             {
               role: 'user',
               content: prompt
             }
           ],
-          temperature: 0.3,
-          max_tokens: 1500,
-          // NEW: Agent Tools API (server-side orchestration, parallel execution)
+          temperature: 0.2,  // Lower for more focused results
+          max_tokens: 800,   // Reduced - we just need JSON
+          // Agent Tools API with date filter for recent tweets
           tools: [
             {
-              type: 'x_search'  // Let Grok autonomously search X/Twitter
+              type: 'x_search',
+              from_date: fromDate  // Last 6 months only
             }
           ],
-          max_turns: 2  // Limit reasoning iterations for speed
+          max_turns: 1  // Single search iteration for speed
         },
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 60000  // 60s max - allow thorough search even if slow
+          timeout: 30000  // 30s max - optimized for fast single-turn search
         }
       );
 
@@ -192,7 +184,7 @@ Return your response in this JSON format:
 
     } catch (error) {
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        console.warn('⏱️ Grok tweet search timed out (60s) - continuing without tweets');
+        console.warn('⏱️ Grok tweet search timed out (30s) - continuing without tweets');
       } else {
         console.error('❌ Grok tweet search failed:', error.message);
         if (error.response) {
