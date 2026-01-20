@@ -402,18 +402,27 @@ export class EnhancedBlogGenerationService extends OpenAIService {
       let removedCount = 0;
 
       generatedImages.forEach((image, index) => {
-        const placeholderType = placeholders[index].type;
+        const placeholder = filteredPlaceholders[index];
+        const placeholderType = placeholder.type;
+
         if (image && image.imageUrl) {
           const markdownImage = `![${image.altText}](${image.imageUrl})`;
           processedContent = processedContent.replace(image.placeholder, markdownImage);
           replacedCount++;
           console.log(`✅ Inserted ${placeholderType} image: ${image.imageUrl.substring(0, 60)}...`);
         } else {
-          // Remove failed placeholder to avoid showing raw markdown
-          const failedPlaceholder = placeholders[index].fullMatch;
-          processedContent = processedContent.replace(failedPlaceholder, '');
-          removedCount++;
-          console.log(`⚠️ Removed failed ${placeholderType} placeholder (generation failed)`);
+          // For hero_image: use topic preview image as fallback
+          if (placeholderType === 'hero_image' && topic.image) {
+            const fallbackImage = `![${topic.title || 'Hero image'}](${topic.image})`;
+            processedContent = processedContent.replace(placeholder.fullMatch, fallbackImage);
+            replacedCount++;
+            console.log(`♻️ Used topic preview image as hero_image fallback`);
+          } else {
+            // For other types: remove failed placeholder to avoid showing raw markdown
+            processedContent = processedContent.replace(placeholder.fullMatch, '');
+            removedCount++;
+            console.log(`⚠️ Removed failed ${placeholderType} placeholder (generation failed)`);
+          }
         }
       });
 
@@ -1249,6 +1258,8 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
+- NEVER place highlight boxes in the conclusion section or after the last CTA
+- All highlight boxes must appear BEFORE the final call-to-action
 
 **CRITICAL ANTI-REDUNDANCY RULES:**
 - Highlight boxes MUST NOT duplicate text from surrounding paragraphs
@@ -1309,6 +1320,8 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 
 You MUST insert image placeholders throughout the blog post. Use these formats:
 
+// CHARTS TEMPORARILY DISABLED - Uncomment for next iteration
+/*
 **For charts/graphs (when presenting data):**
 
 CRITICAL CHART REQUIREMENTS:
@@ -1344,29 +1357,22 @@ The distribution of postpartum anxiety symptoms varies significantly. Our clinic
 ![CHART:pie|Symptom Distribution|Anxiety,Sleep Issues,Mood Changes|45,30,25]
 
 *Source: Clinical observations from reproductive psychiatry practice, 2024*
+*/
 
-**For all other images (photos, illustrations, infographics):**
-![IMAGE:type:description]
+**For hero image:**
+![IMAGE:hero_image:description]
 
-Where type = hero_image | illustration | diagram | infographic
-Description = detailed image generation prompt (50-100 words)
+Description = detailed image generation prompt (50-100 words) describing a professional, realistic photograph
 
 **Example:**
 ![IMAGE:hero_image:Professional photograph showing a supportive counseling session with a mother and therapist, warm lighting, modern office setting, conveying comfort and hope]
 
-**Required Placements:**
-1. Hero image after introduction
-2. Chart/graph ONLY when you present statistics in the text (with context and source)
-3. Supporting image every 300-400 words
-4. Illustration for examples or case studies
-
-**CRITICAL IMAGE PLACEMENT RESTRICTIONS:**
-- ALL images (IMAGE, CHART) must appear BEFORE the final call-to-action
-- NEVER place images in the conclusion section
-- NEVER place images after the last CTA
-- Proper sequence: [Introduction + Hero] → [Content + Images] → [Final CTA] → [Conclusion - NO IMAGES]
-- Last image should appear at least 100-200 words BEFORE the final CTA
-- After final CTA: Only text content allowed (conclusion, summary, closing thoughts)
+**CRITICAL IMAGE RULES:**
+- Include exactly ONE hero_image placeholder after the introduction
+- ONLY use type "hero_image" (do NOT use chart, illustration, infographic, or diagram types)
+- Hero image must appear BEFORE the final call-to-action
+- NEVER place images in the conclusion section or after the last CTA
+- Proper sequence: [Introduction + Hero Image] → [Content] → [Final CTA] → [Conclusion - NO IMAGES]
 
 **For tweet embeds (social proof, expert perspectives, real stories):**
 
@@ -1385,6 +1391,8 @@ TWEET EMBED RULES (CRITICAL - REQUIRED):
 - Position strategically:
   * Mid-post (after 2-3 sections) for expert validation
   * Near conclusion for testimonials or real-world perspectives
+- NEVER place tweets in the conclusion section or after the last CTA
+- All tweets must appear BEFORE the final call-to-action
 - Copy the EXACT placeholder format provided above (including all the data encoding)
 
 **Example Format:**

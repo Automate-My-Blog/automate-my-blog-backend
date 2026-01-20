@@ -242,6 +242,7 @@ JSON RESPONSE (follow EXACTLY):
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
+      "pitch": "REQUIRED: 2-3 sentence OpenAI-generated natural language pitch that synthesizes all the scenario data (demographics, psychographics, search behavior, business value) into a compelling narrative. Write as if you're a content strategist convincing a client why this audience is worth targeting. Demonstrate expertise, quantify the opportunity when possible, show emotional intelligence, and compel the user to select this audience. Use natural, persuasive prose (NOT a template or structured format). Vary structure for each pitch. Max 250 chars.",
       "targetSegment": {
         "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Specific age range, life stage, education, income, family status that differentiates this segment from others",
         "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
@@ -371,13 +372,13 @@ SCENARIO-SPECIFIC REQUIREMENTS:
         messages: [
           {
             role: 'system',
-            content: `You are a content strategist who creates blog topics that provide genuine insight and value, not generic content. You understand that readers are overwhelmed by surface-level advice and crave depth, empathy, and fresh perspectives. Your topics promise content that will make readers think differently about their problems.
+            content: `You are a content strategist who creates blog topics optimized for search and user intent. You understand that readers search using specific keywords and phrases when looking for solutions to their problems.
 
 CRITICAL PRINCIPLES:
-1. INSIGHT-DRIVEN: Topics must promise unique analytical perspectives, not generic advice recycling
-2. EMOTIONALLY INTELLIGENT: Topics acknowledge the real emotional complexity of audience problems
-3. CONTRARIAN THINKING: When appropriate, challenge conventional wisdom with defensible alternative viewpoints
-4. DEPTH OVER BREADTH: Focus on deep understanding of specific problems rather than broad overviews`
+1. SEO-OPTIMIZED: Focus on searchable keywords and clear value propositions that match what people actually search for
+2. CLEAR & DIRECT: Titles should tell readers exactly what they'll learn using straightforward language
+3. SEARCHABILITY: Use language people actually search for, not abstract concepts or academic phrasing
+4. PRACTICAL VALUE: Promise specific, actionable outcomes that solve real problems`
           },
           {
             role: 'user',
@@ -390,37 +391,37 @@ Business Analysis:
 
 TOPIC QUALITY REQUIREMENTS:
 
-1. INSIGHT PROMISE: Each topic must promise to provide a unique perspective, analytical framework, or counter-intuitive insight that goes beyond obvious advice.
+1. SEARCH-OPTIMIZED: Use keywords and phrases that people actually type into search engines when looking for solutions.
 
-2. EMOTIONAL RESONANCE: Topics should acknowledge the specific emotional reality and practical barriers the target audience faces.
+2. CLEAR VALUE: Make it immediately obvious what specific benefit or solution the reader will get from the article.
 
-3. DEPTH FOCUS: Avoid broad overview topics. Focus on specific, nuanced aspects of problems that deserve deep exploration.
+3. SPECIFIC FOCUS: Address concrete problems or questions with actionable answers, not broad conceptual overviews.
 
-4. VALUE DIFFERENTIATION: Each topic should promise content that will be genuinely different from what readers can find elsewhere.
+4. NATURAL LANGUAGE: Use conversational, everyday language that real people use when describing their problems.
 
 For each topic, provide:
 {
   "id": number,
-  "trend": "string - content theme/topic area that suggests depth",
-  "title": "string - title that promises genuine insight or fresh perspective (not generic advice)",
-  "subheader": "string - subtitle that acknowledges emotional reality and promises analytical depth",
-  "seoBenefit": "string - specific value like 'Can help [audience] understand [complex aspect] of [their situation] when they search for [specific insight-focused terms]'",
-  "category": "string - content category emphasizing analytical depth"
+  "trend": "string - content theme/topic area using searchable keywords",
+  "title": "string - clear, SEO-friendly title using searchable keywords (e.g., 'How to Manage Postpartum Depression' not 'The Paradox of Maternal Mental Health')",
+  "subheader": "string - subtitle that clarifies the specific problem solved and target audience",
+  "seoBenefit": "string - specific value like 'Can help [audience] find answers when they search for [actual search terms they use]'",
+  "category": "string - content category using common search terms"
 }
 
 AVOID:
-- Generic "how-to" topics that rehash obvious advice
-- Broad overview topics that stay surface-level
-- Titles that promise simple solutions to complex problems
-- Topics that ignore the emotional/psychological aspects
+- Abstract or philosophical language (e.g., "The Paradox of...", "Navigating the Complexity of...")
+- Excessive use of colons or clever wordplay in titles
+- Vague promises that don't specify what the reader will learn
+- Academic or overly formal language that people don't search for
 
 CREATE:
-- Topics that promise to explain WHY things work the way they do
-- Titles that suggest contrarian or counter-intuitive insights
-- Content angles that acknowledge complexity rather than oversimplify
-- Topics that demonstrate deep understanding of audience psychology
+- Direct, searchable titles that match common search queries
+- Specific problem statements that readers can immediately relate to
+- Clear benefit statements using action words (How to, Ways to, Steps to, Guide to)
+- Language that sounds like something a real person would type into Google
 
-Return an array of 2 strategic topics that promise genuinely valuable, insight-driven content.`
+Return an array of 2 SEO-optimized topics that address real search intent with clear value.`
           }
         ],
         temperature: 0.7,
