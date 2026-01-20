@@ -364,7 +364,8 @@ router.post('/', async (req, res) => {
       customer_language,
       conversion_path,
       business_value,
-      priority = 1
+      priority = 1,
+      pitch
     } = req.body;
 
     // Validate input data to prevent corruption
@@ -461,15 +462,16 @@ router.post('/', async (req, res) => {
       customer_language: safeStringify(customer_language, 'customer_language'),
       conversion_path,
       business_value: safeStringify(business_value, 'business_value'),
-      priority
+      priority,
+      pitch
     };
 
     const result = await db.query(`
       INSERT INTO audiences (
         user_id, session_id, project_id, organization_intelligence_id,
-        target_segment, customer_problem, customer_language, 
-        conversion_path, business_value, priority
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        target_segment, customer_problem, customer_language,
+        conversion_path, business_value, priority, pitch
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       RETURNING *
     `, [
       audienceData.user_id,
@@ -481,7 +483,8 @@ router.post('/', async (req, res) => {
       audienceData.customer_language,
       audienceData.conversion_path,
       audienceData.business_value,
-      audienceData.priority
+      audienceData.priority,
+      audienceData.pitch
     ]);
 
     const audience = result.rows[0];
@@ -500,6 +503,7 @@ router.post('/', async (req, res) => {
         conversion_path: audience.conversion_path,
         business_value: safeParse(audience.business_value, 'business_value_response', audience.id),
         priority: audience.priority,
+        pitch: audience.pitch,
         created_at: audience.created_at,
         updated_at: audience.updated_at
       }
@@ -684,6 +688,7 @@ router.get('/', async (req, res) => {
       target_segment: safeParse(row.target_segment, 'target_segment', row.id),
       customer_problem: row.customer_problem,
       priority: row.priority,
+      pitch: row.pitch,
       topics_count: parseInt(row.topics_count),
       keywords_count: parseInt(row.keywords_count),
       created_at: row.created_at
@@ -771,6 +776,7 @@ router.get('/:id', async (req, res) => {
         conversion_path: audience.conversion_path,
         business_value: safeParse(audience.business_value, 'business_value_get', audience.id),
         priority: audience.priority,
+        pitch: audience.pitch,
         created_at: audience.created_at,
         updated_at: audience.updated_at,
         topics: topicsResult.rows,
@@ -823,7 +829,8 @@ router.put('/:id', async (req, res) => {
       customer_language,
       conversion_path,
       business_value,
-      priority
+      priority,
+      pitch
     } = req.body;
 
     // Validate input data to prevent corruption
@@ -951,6 +958,12 @@ router.put('/:id', async (req, res) => {
       paramIndex++;
     }
 
+    if (pitch !== undefined) {
+      updates.push(`pitch = $${paramIndex}`);
+      updateValues.push(pitch);
+      paramIndex++;
+    }
+
     if (updates.length === 0) {
       return res.status(400).json({
         success: false,
@@ -980,6 +993,7 @@ router.put('/:id', async (req, res) => {
         conversion_path: audience.conversion_path,
         business_value: safeParse(audience.business_value, 'business_value_update', audience.id),
         priority: audience.priority,
+        pitch: audience.pitch,
         created_at: audience.created_at,
         updated_at: audience.updated_at
       }
