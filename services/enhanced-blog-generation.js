@@ -1638,13 +1638,21 @@ CRITICAL REQUIREMENTS:
       });
 
       // SKIP synchronous image processing - will be done async after save
+      console.log('🔍 [IMAGE DEBUG] Checking for image placeholders...');
+      console.log('🔍 [IMAGE DEBUG] Content length:', blogData.content?.length);
+      console.log('🔍 [IMAGE DEBUG] Content preview:', blogData.content?.substring(0, 300));
+      console.log('🔍 [IMAGE DEBUG] Contains ![IMAGE:', blogData.content?.includes('![IMAGE:'));
+      console.log('🔍 [IMAGE DEBUG] Contains ![CHART:', blogData.content?.includes('![CHART:'));
+
       if (blogData.content && (blogData.content.includes('![IMAGE:') || blogData.content.includes('![CHART:'))) {
+        console.log('✅ [IMAGE DEBUG] Setting _hasImagePlaceholders = true');
         console.log('🎨 Detected image/chart placeholders - will process ASYNC after save');
         // Store metadata for async processing
         blogData._hasImagePlaceholders = true;
         blogData._topicForImages = topic;
         blogData._organizationIdForImages = organizationId;
       } else {
+        console.log('❌ [IMAGE DEBUG] No placeholders found');
         console.log('📊 No image/chart placeholders detected in generated content');
         blogData._hasImagePlaceholders = false;
       }
@@ -1908,6 +1916,9 @@ CRITICAL REQUIREMENTS:
 
       console.log(`✅ Complete enhanced blog generation finished`);
       console.log(`📊 Quality prediction: ${completeResponse.qualityPrediction.expectedSEOScore} SEO score`);
+      console.log('🔍 [IMAGE DEBUG] Return object has _hasImagePlaceholders:', completeResponse._hasImagePlaceholders);
+      console.log('🔍 [IMAGE DEBUG] Return object has _topicForImages:', !!completeResponse._topicForImages);
+      console.log('🔍 [IMAGE DEBUG] Return object has _organizationIdForImages:', !!completeResponse._organizationIdForImages);
 
       return completeResponse;
 

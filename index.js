@@ -1508,6 +1508,23 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       response.message = 'Blog post generated and saved to your account';
     }
 
+    // Safety check: Detect placeholders even if flag wasn't set
+    const contentHasPlaceholders = blogPost.content?.includes('![IMAGE:') || blogPost.content?.includes('![CHART:');
+    console.log('🔍 [IMAGE DEBUG] Fallback detection check:', {
+      contentLength: blogPost.content?.length,
+      hasImagePlaceholder: blogPost.content?.includes('![IMAGE:'),
+      hasChartPlaceholder: blogPost.content?.includes('![CHART:'),
+      flagWasSet: blogPost._hasImagePlaceholders,
+      contentHasPlaceholders
+    });
+
+    if (contentHasPlaceholders && !blogPost._hasImagePlaceholders) {
+      console.warn('⚠️ [IMAGE DEBUG] Found placeholders but flag not set - correcting');
+      blogPost._hasImagePlaceholders = true;
+      blogPost._topicForImages = topic;
+      blogPost._organizationIdForImages = organizationId;
+    }
+
     // NEW: Add image generation metadata for frontend
     response.imageGeneration = {
       hasPlaceholders: blogPost._hasImagePlaceholders || false,
