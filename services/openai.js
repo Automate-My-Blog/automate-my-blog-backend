@@ -943,6 +943,162 @@ Provide a JSON response with this exact structure:
       return null;
     }
   }
+
+  /**
+   * Generate audience scenarios WITHOUT pitches (faster, focused on audience intelligence)
+   * @param {Object} analysisData - Basic website analysis data
+   * @param {String} webSearchData - Web search research data
+   * @param {String} keywordData - Keyword research data
+   * @returns {Promise<Array>} Array of scenarios without pitches
+   */
+  async generateAudienceScenarios(analysisData, webSearchData = '', keywordData = '') {
+    try {
+      console.log('🎯 Generating audience scenarios (without pitches)...');
+
+      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+
+      const completion = await openai.chat.completions.create({
+        model: model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are a customer psychology expert focused on audience research and segmentation. Generate detailed audience scenarios for content marketing.`
+          },
+          {
+            role: 'user',
+            content: `Based on this business analysis, generate 4-5 distinct audience scenarios:
+
+Business Context:
+- Business Type: ${analysisData.businessType}
+- Business Name: ${analysisData.businessName}
+- Target Audience: ${analysisData.targetAudience}
+- Business Model: ${analysisData.businessModel}
+- Content Focus: ${analysisData.contentFocus}
+${webSearchData}
+${keywordData}
+
+Generate scenarios as JSON array. Each scenario MUST have UNIQUE demographics (different age ranges, life stages, etc.):
+
+[
+  {
+    "customerProblem": "Specific problem driving search behavior",
+    "targetSegment": {
+      "demographics": "Natural language description (e.g., 'First-time mothers aged 25-35 experiencing high pregnancy anxiety')",
+      "psychographics": "Emotional state, urgency level, decision-making context",
+      "searchBehavior": "When/how they search (crisis-driven vs planned)"
+    },
+    "businessValue": {
+      "searchVolume": "e.g., 'High - 3,500/month'",
+      "competition": "Low/Medium/High with gaps",
+      "conversionPotential": "High/Medium/Low",
+      "priority": 1
+    },
+    "customerLanguage": ["search phrase 1", "search phrase 2"],
+    "seoKeywords": ["keyword 1", "keyword 2", "keyword 3"],
+    "conversionPath": "How content leads to business goal",
+    "contentIdeas": [
+      {
+        "title": "Blog post title",
+        "searchIntent": "Why they search",
+        "businessAlignment": "Conversion strategy"
+      }
+    ]
+  }
+]
+
+CRITICAL: Each scenario must target DIFFERENT demographics. Order by priority (highest value first).`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 3500
+      });
+
+      const response = completion.choices[0].message.content;
+      const scenarios = JSON.parse(response);
+
+      console.log(`✅ Generated ${scenarios.length} audience scenarios`);
+      return scenarios;
+
+    } catch (error) {
+      console.error('❌ Failed to generate audience scenarios:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate step-by-step funnel pitches for audience scenarios
+   * @param {Array} scenarios - Audience scenarios without pitches
+   * @param {Object} businessContext - Business context for revenue calculations
+   * @returns {Promise<Array>} Scenarios with generated pitches
+   */
+  async generatePitches(scenarios, businessContext) {
+    try {
+      console.log('💰 Generating conversion funnel pitches...');
+
+      const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+
+      // Generate pitches for each scenario (can be done in parallel for speed)
+      const pitchPromises = scenarios.map(async (scenario, index) => {
+        const completion = await openai.chat.completions.create({
+          model: model,
+          messages: [
+            {
+              role: 'system',
+              content: `You are a conversion funnel expert who creates educational step-by-step revenue projections.`
+            },
+            {
+              role: 'user',
+              content: `Create a step-by-step conversion funnel pitch for this audience scenario:
+
+Business: ${businessContext.businessType} - ${businessContext.businessName}
+Audience: ${scenario.targetSegment.demographics}
+Problem: ${scenario.customerProblem}
+Emotional State: ${scenario.targetSegment.psychographics}
+Search Behavior: ${scenario.targetSegment.searchBehavior}
+Search Volume: ${scenario.businessValue.searchVolume}
+Keywords: ${scenario.seoKeywords.join(', ')}
+Conversion Potential: ${scenario.businessValue.conversionPotential}
+
+Generate a pitch as plain text string (NOT JSON) following this format:
+
+Step 1: [search volume number] people search monthly for "[actual keywords]"
+Step 2: Your blog posts capture [X-Y%] ([A-B clicks]) once SEO builds over 6-12 months
+Step 3: [M-N%] engage and read ([P-Q readers]) vs bouncing - [WHY based on their emotional state]
+Step 4: [R-S%] click CTA ([T-U bookings]) - [WHY based on their search urgency]
+Step 5: Revenue of $[low]-$[high] monthly assuming $[realistic price]/consultation
+
+Example:
+Step 1: 3,500 people search monthly for "safe anxiety medication during pregnancy"
+Step 2: Your posts capture 2-5% (70-175 clicks) once SEO authority builds
+Step 3: 60-80% engage (42-140 readers) vs bouncing because they desperately need clinical guidance, not generic advice
+Step 4: 15-25% book (6-35 consultations) due to crisis-driven urgency and fear about harming baby
+Step 5: $3,000-$17,500/month at $500/consultation
+
+Use their specific emotional state and urgency to justify rates. Plain text only, max 600 characters.`
+            }
+          ],
+          temperature: 0.3,
+          max_tokens: 800
+        });
+
+        const pitch = completion.choices[0].message.content.trim();
+
+        return {
+          ...scenario,
+          pitch
+        };
+      });
+
+      const scenariosWithPitches = await Promise.all(pitchPromises);
+
+      console.log(`✅ Generated ${scenariosWithPitches.length} pitches`);
+      return scenariosWithPitches;
+
+    } catch (error) {
+      console.error('❌ Failed to generate pitches:', error);
+      throw error;
+    }
+  }
 }
 
 export default new OpenAIService();

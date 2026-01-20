@@ -1086,6 +1086,83 @@ app.post('/api/analyze-website', async (req, res) => {
   }
 });
 
+// Generate audience scenarios endpoint (Step 2 of 3-step analysis)
+app.post('/api/generate-audiences', async (req, res) => {
+  console.log('=== Generate Audiences Request ===');
+
+  try {
+    const { analysisData, webSearchData, keywordData } = req.body;
+
+    if (!analysisData) {
+      return res.status(400).json({
+        error: 'Analysis data is required',
+        message: 'Please provide website analysis data'
+      });
+    }
+
+    console.log('Generating audience scenarios for:', analysisData.businessName);
+
+    const scenarios = await openaiService.generateAudienceScenarios(
+      analysisData,
+      webSearchData || '',
+      keywordData || ''
+    );
+
+    res.json({
+      success: true,
+      scenarios,
+      count: scenarios.length
+    });
+
+  } catch (error) {
+    console.error('Generate audiences error:', error);
+    res.status(500).json({
+      error: 'Failed to generate audience scenarios',
+      message: error.message
+    });
+  }
+});
+
+// Generate pitches endpoint (Step 3 of 3-step analysis)
+app.post('/api/generate-pitches', async (req, res) => {
+  console.log('=== Generate Pitches Request ===');
+
+  try {
+    const { scenarios, businessContext } = req.body;
+
+    if (!scenarios || !Array.isArray(scenarios)) {
+      return res.status(400).json({
+        error: 'Scenarios array is required',
+        message: 'Please provide audience scenarios'
+      });
+    }
+
+    if (!businessContext) {
+      return res.status(400).json({
+        error: 'Business context is required',
+        message: 'Please provide business context'
+      });
+    }
+
+    console.log(`Generating pitches for ${scenarios.length} scenarios`);
+
+    const scenariosWithPitches = await openaiService.generatePitches(scenarios, businessContext);
+
+    res.json({
+      success: true,
+      scenarios: scenariosWithPitches,
+      count: scenariosWithPitches.length
+    });
+
+  } catch (error) {
+    console.error('Generate pitches error:', error);
+    res.status(500).json({
+      error: 'Failed to generate pitches',
+      message: error.message
+    });
+  }
+});
+
 // Trending topics endpoint
 app.post('/api/trending-topics', async (req, res) => {
   try {
