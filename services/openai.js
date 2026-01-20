@@ -1011,12 +1011,13 @@ Problem: ${scenario.customerProblem}
 Emotional State: ${scenario.targetSegment.psychographics}
 Search Behavior: ${scenario.targetSegment.searchBehavior}
 Search Volume: ${scenario.businessValue.searchVolume}
-Keywords: ${scenario.seoKeywords.join(', ')}
+Primary SEO Keyword (USE EXACTLY IN STEP 1): "${scenario.seoKeywords[0]}"
+Related Keywords: ${scenario.seoKeywords.slice(1).join(', ')}
 Conversion Potential: ${scenario.businessValue.conversionPotential}
 
 Generate a pitch as plain text string (NOT JSON) following this format:
 
-Step 1: [search volume number] people search monthly for "[actual keywords]"
+Step 1: [search volume number] people search monthly for "${scenario.seoKeywords[0]}"
 Step 2: Your blog posts capture [X-Y%] ([A-B clicks]) once SEO builds over 6-12 months
 Step 3: [M-N%] engage and read ([P-Q readers]) vs bouncing - [WHY based on their emotional state]
 Step 4: [R-S%] click CTA ([T-U bookings]) - [WHY based on their search urgency]
