@@ -969,7 +969,7 @@ CRITICAL: Each scenario must target DIFFERENT demographics. Order by priority (h
       });
 
       const response = completion.choices[0].message.content;
-      const scenarios = JSON.parse(response);
+      const scenarios = this.parseOpenAIResponse(response);
 
       console.log(`✅ Generated ${scenarios.length} audience scenarios`);
       return scenarios;
