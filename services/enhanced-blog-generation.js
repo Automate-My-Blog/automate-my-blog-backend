@@ -524,14 +524,12 @@ export class EnhancedBlogGenerationService extends OpenAIService {
   }
 
   /**
-   * Linkify URLs, mentions, and hashtags in tweet text
+   * Format tweet text for display (just escape, no linkification)
+   * The tweet card itself provides the Twitter-like styling
    */
   linkifyTweetText(text) {
-    const escaped = this.escapeHtml(text);
-    return escaped
-      .replace(/https?:\/\/[^\s]+/g, '<a href="$&" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">$&</a>')
-      .replace(/@(\w+)/g, '<a href="https://x.com/$1" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">@$1</a>')
-      .replace(/#(\w+)/g, '<a href="https://x.com/hashtag/$1" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2; text-decoration: none;">#$1</a>');
+    // Just escape HTML entities - keep text simple and readable
+    return this.escapeHtml(text);
   }
 
   /**
