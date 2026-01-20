@@ -1179,6 +1179,52 @@ app.post('/api/tweets/search-for-topic', async (req, res) => {
 });
 
 /**
+ * TEST ENDPOINT: Direct Grok search without OpenAI preprocessing
+ * Use this to diagnose Grok performance issues
+ */
+app.post('/api/test/grok-direct', async (req, res) => {
+  try {
+    const { query = 'postpartum depression support', maxTweets = 3 } = req.body;
+
+    console.log('🧪 [TEST] Direct Grok search starting...');
+    console.log(`🔍 Query: "${query}"`);
+
+    const startTime = Date.now();
+
+    // Import Grok service
+    const { default: grokTweetSearch } = await import('./services/grok-tweet-search.js');
+
+    // Call Grok directly
+    const tweets = await grokTweetSearch.searchRelevantTweets({
+      topic: query,
+      businessType: 'Healthcare',
+      targetAudience: 'General',
+      maxTweets: maxTweets
+    });
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    console.log(`✅ [TEST] Grok search completed in ${elapsed}s`);
+    console.log(`📊 [TEST] Found ${tweets.length} tweets`);
+
+    res.json({
+      success: true,
+      tweets,
+      elapsed: `${elapsed}s`,
+      query
+    });
+
+  } catch (error) {
+    console.error('❌ [TEST] Grok direct test failed:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+/**
  * Generate images for a saved blog post
  * This endpoint is called AFTER blog generation to avoid timeout issues
  * Similar pattern to tweet search - separate endpoint with own 60s window
