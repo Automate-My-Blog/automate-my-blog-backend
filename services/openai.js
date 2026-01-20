@@ -242,7 +242,7 @@ JSON RESPONSE (follow EXACTLY):
   "scenarios": [
     {
       "customerProblem": "Specific problem that drives search behavior (use emotional language)",
-      "pitch": "REQUIRED: Write a compelling 2-3 sentence business case directly TO the business owner (use 'your practice', 'your website', 'your business'). Weave together: (1) who the audience is, (2) their emotional need/problem, (3) search volume, (4) competition level, (5) why they're valuable. CRITICAL: Vary your sentence structure - DON'T follow the same pattern for each pitch. Sound like a savvy consultant pitching an opportunity, not filling in a template. Make it persuasive and natural. Max 280 chars.",
+      "pitch": "REQUIRED: Explain the business opportunity directly TO the owner (use 'your practice', 'your website'). Structure: (1) WHO is searching - specific age/demographic (e.g., 'First-time mothers aged 25-35'), (2) WHAT they're searching for - actual keywords/problems (e.g., 'safe antidepressants during pregnancy'), (3) SIZE of opportunity - exact monthly search number (e.g., '3,500 monthly searches'), (4) WHY it's valuable - competition level + conversion logic (e.g., 'with low competition, your targeted content can convert their urgent need into consultation bookings'). Focus on strategic LOGIC not just data points. Vary sentence structures. Max 320 chars.",
       "targetSegment": {
         "demographics": "MUST BE UNIQUE FOR EACH SCENARIO: Specific age range, life stage, education, income, family status that differentiates this segment from others",
         "psychographics": "MUST BE DISTINCT: Different emotional state, urgency level, healthcare-seeking behavior, decision-making context from other scenarios",
