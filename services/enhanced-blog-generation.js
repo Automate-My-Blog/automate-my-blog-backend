@@ -502,26 +502,23 @@ export class EnhancedBlogGenerationService extends OpenAIService {
    * Generate HTML for rich tweet card
    */
   generateTweetCardHTML(tweet) {
-    // Safely escape text content (not URLs)
+    // Prepare tweet data for TipTap custom node
     const tweetId = tweet.id || '0';
-    const authorName = this.escapeHtml(tweet.author_name || 'Unknown');
+    const authorName = tweet.author_name || 'Unknown';
     // Remove @ prefix from handle if present to avoid @@
     const rawHandle = (tweet.author_handle || 'unknown').replace(/^@+/, '');
-    const authorHandle = this.escapeHtml(rawHandle);
+    const authorHandle = rawHandle;
     const authorAvatar = tweet.author_avatar || `https://unavatar.io/twitter/${rawHandle}`;
     const tweetUrl = tweet.url || '#';
-    const tweetText = this.linkifyTweetText(tweet.text || '');
+    const tweetText = tweet.text || '';
     const createdAt = this.formatDate(tweet.created_at);
     const likes = this.formatNumber(tweet.likes || 0);
     const retweets = this.formatNumber(tweet.retweets || 0);
+    const verified = tweet.author_verified ? 'true' : 'false';
 
-    const verifiedBadge = tweet.author_verified
-      ? '<svg style="width: 18px; height: 18px; fill: #1DA1F2; margin-left: 4px;" viewBox="0 0 24 24"><path d="M22.25 12c0-1.43-.88-2.67-2.19-3.34.46-1.39.2-2.9-.81-3.91s-2.52-1.27-3.91-.81c-.66-1.31-1.91-2.19-3.34-2.19s-2.67.88-3.33 2.19c-1.4-.46-2.91-.2-3.92.81s-1.26 2.52-.8 3.91c-1.31.67-2.2 1.91-2.2 3.34s.89 2.67 2.2 3.34c-.46 1.39-.21 2.9.8 3.91s2.52 1.26 3.91.81c.67 1.31 1.91 2.19 3.34 2.19s2.68-.88 3.34-2.19c1.39.45 2.9.2 3.91-.81s1.27-2.52.81-3.91c1.31-.67 2.19-1.91 2.19-3.34zm-11.71 4.2L6.8 12.46l1.41-1.42 2.26 2.26 4.8-5.23 1.47 1.36-6.2 6.77z"/></svg>'
-      : '';
-
-    // Generate compact HTML with proper styling: light grey background, 90% width, proper spacing
-    // Use !important to override any conflicting CSS
-    return `<div class="tweet-card" data-tweet-id="${tweetId}" style="border: 1px solid #e1e8ed !important; border-radius: 12px !important; padding: 16px !important; margin: 24px auto !important; background: #f8f9fa !important; width: 90% !important; max-width: 90% !important; box-sizing: border-box !important; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;"><div style="display: flex !important; align-items: center !important; margin-bottom: 12px !important;"><img src="${authorAvatar}" alt="${authorName}" style="width: 48px !important; height: 48px !important; border-radius: 50% !important; margin-right: 12px !important; flex-shrink: 0 !important; display: block !important;" /><div style="flex: 1 !important; min-width: 0 !important;"><div style="display: flex !important; align-items: center !important;"><span style="font-weight: 700 !important; color: #14171a !important; font-size: 15px !important;">${authorName}</span>${verifiedBadge}</div><span style="color: #657786 !important; font-size: 15px !important;">@${authorHandle}</span></div><a href="${tweetUrl}" target="_blank" rel="noopener noreferrer" style="color: #1DA1F2 !important; text-decoration: none !important; flex-shrink: 0 !important;"><svg style="width: 20px; height: 20px; fill: #1DA1F2;" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a></div><p style="color: #14171a !important; font-size: 15px !important; line-height: 1.5 !important; margin: 0 0 12px 0 !important; white-space: pre-wrap !important; word-wrap: break-word !important;">${tweetText}</p><div style="display: flex !important; align-items: center !important; gap: 20px !important; color: #657786 !important; font-size: 13px !important; padding-top: 12px !important; border-top: 1px solid #e1e8ed !important;"><span>${createdAt}</span><span style="display: flex !important; align-items: center !important; gap: 6px !important;"><span>❤️</span><span>${likes}</span></span><span style="display: flex !important; align-items: center !important; gap: 6px !important;"><span>🔁</span><span>${retweets}</span></span></div></div>`;
+    // Generate simple div with data attributes for TipTap to parse
+    // The TweetCard extension will render the actual styled component
+    return `<div class="tweet-card" data-author-name="${this.escapeHtml(authorName)}" data-author-handle="${this.escapeHtml(authorHandle)}" data-author-avatar="${this.escapeHtml(authorAvatar)}" data-tweet-text="${this.escapeHtml(tweetText)}" data-tweet-url="${this.escapeHtml(tweetUrl)}" data-created-at="${this.escapeHtml(createdAt)}" data-likes="${this.escapeHtml(likes)}" data-retweets="${this.escapeHtml(retweets)}" data-verified="${verified}"></div>`;
   }
 
   /**
