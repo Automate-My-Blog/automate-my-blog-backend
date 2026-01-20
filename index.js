@@ -1216,10 +1216,16 @@ app.post('/api/test/grok-direct', async (req, res) => {
 
   } catch (error) {
     console.error('❌ [TEST] Grok direct test failed:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error response:', error.response?.status, error.response?.data);
+
     res.status(500).json({
       success: false,
       error: error.message,
-      stack: error.stack
+      errorCode: error.code,
+      responseStatus: error.response?.status,
+      responseData: error.response?.data,
+      isTimeout: error.code === 'ECONNABORTED' || error.message.includes('timeout')
     });
   }
 });

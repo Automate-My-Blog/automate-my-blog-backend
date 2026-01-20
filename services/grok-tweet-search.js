@@ -102,8 +102,15 @@ Return ONLY this JSON (no explanations):
         outputLength: response.data.output?.length,
         hasText: !!response.data.text,
         textKeys: response.data.text ? Object.keys(response.data.text) : [],
-        outputTypes: response.data.output?.map(o => o.type)
+        outputTypes: response.data.output?.map(o => o.type),
+        status: response.data.status,
+        allKeys: Object.keys(response.data)
       });
+
+      // Log if status indicates incomplete/error
+      if (response.data.status && response.data.status !== 'completed') {
+        console.warn('⚠️ [GROK] Non-completed status:', response.data.status);
+      }
 
       // Extract content from Agent Tools API response
       // Structure: output[] contains a 'message' type with content[].text
