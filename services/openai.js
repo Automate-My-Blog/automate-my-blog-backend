@@ -714,32 +714,35 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       const searchBehavior = scenario.targetSegment.searchBehavior || '';
 
       // Create a prompt showing person searching online with contextual background
-      const searchPrompt = `A professional photograph showing a person from behind or side angle sitting at a laptop, typing and searching online for information.
+      const searchPrompt = `A close-up, over-the-shoulder photograph of a person actively searching for help online on their laptop.
 
-      The person should be:
-      - Viewed from behind/side, hands on keyboard, clearly searching/typing
-      - Dressed casually but appropriately
-      - In a natural, everyday setting
+      CLOSE-UP FRAMING (important):
+      - Camera positioned just behind and slightly to the side of the person
+      - Frame tightly on: person's shoulder, side of head/hair, hands on keyboard, laptop screen
+      - Person fills most of the frame - this is a CLOSE shot
+      - Hands clearly visible on keyboard, actively typing
+      - Laptop screen visible (glowing, no readable text)
 
-      Background environment (slightly out of focus):
-      - Should reflect the lifestyle and circumstances relevant to: ${demographics}
-      - Natural lighting, comfortable home or professional setting
-      - Subtle environmental details that suggest context
-      - Warm, inviting atmosphere
+      Person appearance:
+      - Viewed from behind/over shoulder (no face visible)
+      - Casually dressed, appropriate for: ${demographics}
+      - Engaged and focused on searching for information
+      - Natural posture of someone seeking help online
+
+      Background (blurred, barely visible):
+      - Shallow depth of field - background very soft/blurred
+      - Hints of environment appropriate to: ${demographics}
+      - Warm, natural lighting
+      - Home or professional setting suggested but not in focus
 
       Style:
-      - Professional photography, natural lighting
-      - Shallow depth of field (person in focus, background slightly blurred)
-      - Realistic, candid moment
-      - Magazine quality, authentic feel
-      - Warm, approachable tones
+      - Professional photography, natural window lighting
+      - Intimate, close perspective
+      - Realistic, candid moment of someone seeking help
+      - Warm, relatable tones
+      - Magazine quality
 
-      Requirements:
-      - Person shown from behind or side angle (no face visible)
-      - Focus on the act of searching/researching online
-      - Background subtly contextual but not overly specific
-      - No text visible on screen
-      - Natural, non-staged appearance`;
+      CRITICAL: This must be a CLOSE-UP shot. The person and laptop should fill the frame.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
