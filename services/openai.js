@@ -735,54 +735,68 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
 
       const visualTone = getToneFromBrandVoice(brandVoice);
 
-      // Create a friendly illustration in the style of Google or Facebook illustrations
-      const searchPrompt = `A modern, friendly illustration in the style of Google Material Design or Facebook illustrations, showing a person sitting at a laptop searching for information online.
+      // Extract the core problem the person is facing
+      const customerProblem = scenario.customerProblem || 'seeking information online';
 
-      ILLUSTRATION STYLE (like Google/Facebook):
-      - Clean, friendly vector illustration
-      - Recognizable human form (not overly abstract)
-      - Simplified but clearly defined body, arms, legs
-      - Smooth, rounded shapes with clean lines
-      - Colorful, approachable, warm aesthetic
-      - Professional but friendly and relatable
-      - Character-based illustration style
+      // Create ultra-consistent minimal flat illustration
+      const searchPrompt = `STRICT STYLE REQUIREMENTS - MUST FOLLOW EXACTLY:
 
-      FRAMING:
-      - 3/4 view or side angle showing person at laptop
-      - Person clearly sitting at desk/table with laptop
-      - Comfortable, natural posture
-      - Environment visible but simplified
-      - Medium shot showing person and workspace
+ILLUSTRATION TYPE: Minimalist flat illustration / simple cartoon
+MUST BE CONSISTENT WITH OTHER IMAGES IN THIS EXACT STYLE
 
-      PERSON REPRESENTATION (avoiding racial features):
-      - Simplified face with minimal features (or face turned away/in profile)
-      - Stylized hair as solid color shape (purple, blue, green, or abstract color - not realistic hair colors)
-      - Body shown in non-skin-tone colors (soft purple, blue, coral, mint - stylized colors)
-      - Clear limbs and hands on keyboard
-      - Wearing simple, modern clothing
-      - Friendly, approachable character design
+VISUAL STYLE (CRITICAL - NO VARIATION):
+- Ultra-flat 2D illustration with NO gradients, NO shadows, NO depth
+- Simple geometric shapes only (circles, rectangles, rounded rectangles)
+- Solid color fills only - no textures or patterns
+- Clean vector art style like modern app icons
+- Minimalist line work - only essential lines
+- Maximum 4-5 colors total in entire image
 
-      SETTING appropriate to: ${demographics}
-      - Simple desk/table with laptop
-      - Comfortable chair
-      - Minimal background elements (plants, window, shelves simplified)
-      - Modern, clean workspace aesthetic
+CONSISTENCY RULES:
+- Character MUST be same style across all images
+- Same level of detail/simplification in every image
+- Same color palette approach (solid pastels)
+- Same geometric simplification approach
 
-      BACKGROUND:
-      - Pure white or very light neutral background
-      - Minimal background elements that fade to white at edges
-      - Clean, airy composition with plenty of white space
-      - Background should not compete with the character
-      - Transparent or white edges (suitable for web display)
+SUBJECT: Single person dealing with this problem in daily life: ${customerProblem}
 
-      COLOR PALETTE & TONE (matching brand voice: ${brandVoice}):
-      - Visual tone: ${visualTone}
-      - Character in stylized non-skin-tone colors (purples, blues, corals, mint green)
-      - Adjust color intensity and mood to match brand voice
-      - High contrast but harmonious
-      - Modern, professional yet approachable
+PERSON (EXACT SPECIFICATION):
+- Simple geometric head (solid color circle or oval)
+- No facial features OR simple dots for eyes only
+- Body as simple rounded rectangles
+- Stylized non-skin-tone color (soft blue, purple, coral, or mint)
+- Simple solid color clothing
+- Minimal limbs (simple rounded rectangles)
+- NO realistic details, NO complex shapes
 
-      CRITICAL: Style must match Google Material Design or Facebook illustration aesthetic - friendly, recognizable human forms with simplified features and stylized colors that avoid realistic skin tones. Not overly abstract, but clearly an illustration with a warm, relatable feel. White or transparent background for clean web display.`;
+SCENE SHOWING THE PROBLEM:
+- Person in simple daily life situation related to: ${customerProblem}
+- Maximum 2-3 simple objects/props showing the problem
+- Props as basic geometric shapes with solid colors
+- Clear visual showing WHY they need help
+
+BACKGROUND (CRITICAL):
+- Pure white background (#FFFFFF)
+- NO environment details
+- NO decorative elements
+- NO patterns or textures
+- Just the person and minimal problem-related props on white
+
+COLOR PALETTE:
+- Exact same pastel color scheme for all images
+- Soft blues, purples, corals, mints ONLY
+- Visual tone: ${visualTone}
+- Maximum 4 colors total
+- High contrast against white background
+
+ABSOLUTE REQUIREMENTS:
+- Flat illustration like app icons or infographics
+- NO perspective, NO 3D effects, NO shadows
+- Pure white background with no decorations
+- Simple geometric shapes only
+- Must be visually consistent with other minimalist illustrations
+- Focus on the PROBLEM situation, not just computer use`;
+
 
       const response = await openai.images.generate({
         model: "dall-e-3",
