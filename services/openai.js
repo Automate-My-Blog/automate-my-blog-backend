@@ -713,38 +713,46 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       const demographics = scenario.targetSegment.demographics || '';
       const searchBehavior = scenario.targetSegment.searchBehavior || '';
 
-      // Create a diverse, inclusive prompt showing multiple people of different backgrounds
-      const searchPrompt = `A professional photograph showing 3-4 diverse people working on laptops in a shared space, searching for information online.
+      // Create a flat, illustrated image to obscure racial features and avoid representation bias
+      const searchPrompt = `A modern flat illustration showing a person from behind, sitting at a laptop and searching for information online.
 
-      DIVERSE REPRESENTATION (critical):
-      - Show people of different races, ethnicities, genders, and ages
-      - Each person should be distinctly different from the others
-      - Include visible diversity in every image (mix of skin tones, genders, ages)
-      - Natural, authentic representation
-      - All people engaged in searching/researching online
+      ILLUSTRATION STYLE (critical):
+      - Flat design, vector illustration aesthetic
+      - Simple, clean shapes and forms
+      - Minimal detail, stylized representation
+      - NO photorealistic features
+      - Abstract, neutral representation that obscures race/ethnicity
+      - Modern, professional illustration style
 
       FRAMING:
-      - Medium shot showing multiple people
-      - Some people in sharper focus (foreground), others slightly softer (background)
-      - Camera angle shows people from behind, side angles, or over-shoulder views
-      - Hands on keyboards visible, laptop screens glowing
-      - Collaborative or shared workspace feel
+      - Over-the-shoulder view from behind
+      - Person shown as simple silhouette or abstract shape
+      - Hands on keyboard (simplified geometric shapes)
+      - Laptop screen visible with soft glow
+      - Close-up perspective showing person and laptop
+
+      PERSON REPRESENTATION:
+      - Viewed entirely from behind (back of head, shoulders visible)
+      - Simplified, geometric shapes for body
+      - Neutral colors that don't suggest specific skin tones
+      - Hair shown as simple shape/color without detail
+      - Abstract enough to avoid any racial identification
 
       SETTING appropriate to: ${demographics}
-      - Comfortable, welcoming environment
-      - Natural lighting, warm atmosphere
-      - Modern laptops and workspace
-      - Could be home, office, cafe, or community space
-      - Background suggests supportive, inclusive environment
+      - Background as simple flat shapes/colors
+      - Suggest comfortable workspace with minimal details
+      - Warm, welcoming color palette
+      - Modern, clean aesthetic
+      - Abstract environmental elements
 
-      STYLE:
-      - Professional photography, natural lighting
-      - Warm, approachable tones
-      - Candid, authentic moment
-      - People focused on searching for help/information online
-      - Magazine quality, realistic
+      COLOR PALETTE:
+      - Warm, approachable colors (blues, greens, soft purples, coral)
+      - Avoid skin-tone colors for the person silhouette
+      - Use stylized, abstract colors instead
+      - Modern, professional color scheme
+      - Cohesive, harmonious palette
 
-      CRITICAL: Every image MUST show diverse representation - different races, genders, ages visible in the same frame. No single demographic should dominate.`;
+      CRITICAL: This must be a FLAT ILLUSTRATION, not a photograph. Use abstract, geometric shapes that completely obscure racial features while maintaining the concept of someone searching online for help.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
