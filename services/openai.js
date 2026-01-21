@@ -713,36 +713,38 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       const demographics = scenario.targetSegment.demographics || '';
       const searchBehavior = scenario.targetSegment.searchBehavior || '';
 
-      // Create a prompt showing person searching online with contextual background
-      const searchPrompt = `A close-up, over-the-shoulder photograph of a person actively searching for help online on their laptop.
+      // Create a diverse, inclusive prompt showing multiple people of different backgrounds
+      const searchPrompt = `A professional photograph showing 3-4 diverse people working on laptops in a shared space, searching for information online.
 
-      CLOSE-UP FRAMING (important):
-      - Camera positioned just behind and slightly to the side of the person
-      - Frame tightly on: person's shoulder, side of head/hair, hands on keyboard, laptop screen
-      - Person fills most of the frame - this is a CLOSE shot
-      - Hands clearly visible on keyboard, actively typing
-      - Laptop screen visible (glowing, no readable text)
+      DIVERSE REPRESENTATION (critical):
+      - Show people of different races, ethnicities, genders, and ages
+      - Each person should be distinctly different from the others
+      - Include visible diversity in every image (mix of skin tones, genders, ages)
+      - Natural, authentic representation
+      - All people engaged in searching/researching online
 
-      Person appearance:
-      - Viewed from behind/over shoulder (no face visible)
-      - Casually dressed, appropriate for: ${demographics}
-      - Engaged and focused on searching for information
-      - Natural posture of someone seeking help online
+      FRAMING:
+      - Medium shot showing multiple people
+      - Some people in sharper focus (foreground), others slightly softer (background)
+      - Camera angle shows people from behind, side angles, or over-shoulder views
+      - Hands on keyboards visible, laptop screens glowing
+      - Collaborative or shared workspace feel
 
-      Background (blurred, barely visible):
-      - Shallow depth of field - background very soft/blurred
-      - Hints of environment appropriate to: ${demographics}
-      - Warm, natural lighting
-      - Home or professional setting suggested but not in focus
+      SETTING appropriate to: ${demographics}
+      - Comfortable, welcoming environment
+      - Natural lighting, warm atmosphere
+      - Modern laptops and workspace
+      - Could be home, office, cafe, or community space
+      - Background suggests supportive, inclusive environment
 
-      Style:
-      - Professional photography, natural window lighting
-      - Intimate, close perspective
-      - Realistic, candid moment of someone seeking help
-      - Warm, relatable tones
-      - Magazine quality
+      STYLE:
+      - Professional photography, natural lighting
+      - Warm, approachable tones
+      - Candid, authentic moment
+      - People focused on searching for help/information online
+      - Magazine quality, realistic
 
-      CRITICAL: This must be a CLOSE-UP shot. The person and laptop should fill the frame.`;
+      CRITICAL: Every image MUST show diverse representation - different races, genders, ages visible in the same frame. No single demographic should dominate.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
