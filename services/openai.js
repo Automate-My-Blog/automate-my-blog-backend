@@ -709,27 +709,41 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
     try {
       console.log('Generating DALL-E image for audience:', scenario.targetSegment.demographics);
 
-      // Create a neutral, abstract prompt focused on support and wellness
-      // Avoid specific medical conditions to prevent content filter blocks
-      const neutralPrompt = `Create a professional, calming image representing a wellness and support concept.
+      // Extract demographic context to inform the background
+      const demographics = scenario.targetSegment.demographics || '';
+      const searchBehavior = scenario.targetSegment.searchBehavior || '';
 
-      Theme: Healthcare consultation and professional support
-      Style: Clean, modern, professional photography
-      Setting: Bright, welcoming consultation space with natural lighting
-      Elements: Comfortable seating, plants, soft natural colors, professional atmosphere
-      Mood: Supportive, reassuring, professional, warm
-      Colors: Soft blues, greens, warm neutrals
-      Quality: High-quality professional photography, sharp focus
+      // Create a prompt showing person searching online with contextual background
+      const searchPrompt = `A professional photograph showing a person from behind or side angle sitting at a laptop, typing and searching online for information.
+
+      The person should be:
+      - Viewed from behind/side, hands on keyboard, clearly searching/typing
+      - Dressed casually but appropriately
+      - In a natural, everyday setting
+
+      Background environment (slightly out of focus):
+      - Should reflect the lifestyle and circumstances relevant to: ${demographics}
+      - Natural lighting, comfortable home or professional setting
+      - Subtle environmental details that suggest context
+      - Warm, inviting atmosphere
+
+      Style:
+      - Professional photography, natural lighting
+      - Shallow depth of field (person in focus, background slightly blurred)
+      - Realistic, candid moment
+      - Magazine quality, authentic feel
+      - Warm, approachable tones
 
       Requirements:
-      - No people, no faces, no medical equipment
-      - Abstract and welcoming
-      - Focus on the environment of care and support
-      - Modern healthcare office aesthetic`;
+      - Person shown from behind or side angle (no face visible)
+      - Focus on the act of searching/researching online
+      - Background subtly contextual but not overly specific
+      - No text visible on screen
+      - Natural, non-staged appearance`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
-        prompt: neutralPrompt,
+        prompt: searchPrompt,
         size: "1024x1024",
         quality: "standard",
         n: 1,
@@ -741,8 +755,8 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
     } catch (error) {
       console.error('DALL-E audience image generation error:', error);
 
-      // Fallback to a placeholder image with audience demographics
-      const fallbackUrl = `https://via.placeholder.com/1024x1024/e3f2fd/1890ff?text=${encodeURIComponent('Audience Support')}`;
+      // Fallback to a placeholder image
+      const fallbackUrl = `https://via.placeholder.com/1024x1024/e3f2fd/1890ff?text=${encodeURIComponent('Online Search')}`;
       console.log('Using fallback image:', fallbackUrl);
       return fallbackUrl;
     }
