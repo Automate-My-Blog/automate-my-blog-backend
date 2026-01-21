@@ -735,67 +735,39 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
 
       const visualTone = getToneFromBrandVoice(brandVoice);
 
-      // Extract the core problem the person is facing
-      const customerProblem = scenario.customerProblem || 'seeking information online';
+      // Create simple, clean character illustration
+      const searchPrompt = `Create a simple, clean flat illustration of a person representing this audience: ${demographics}
 
-      // Create ultra-consistent minimal flat illustration
-      const searchPrompt = `STRICT STYLE REQUIREMENTS - MUST FOLLOW EXACTLY:
+PURPOSE: This is the cover image for an audience preview card, so the person should clearly represent the target audience.
 
-ILLUSTRATION TYPE: Minimalist flat illustration / simple cartoon
-MUST BE CONSISTENT WITH OTHER IMAGES IN THIS EXACT STYLE
-
-VISUAL STYLE (CRITICAL - NO VARIATION):
-- Ultra-flat 2D illustration with NO gradients, NO shadows, NO depth
-- Simple geometric shapes only (circles, rectangles, rounded rectangles)
-- Solid color fills only - no textures or patterns
-- Clean vector art style like modern app icons
-- Minimalist line work - only essential lines
-- Maximum 4-5 colors total in entire image
-
-CONSISTENCY RULES:
-- Character MUST be same style across all images
-- Same level of detail/simplification in every image
-- Same color palette approach (solid pastels)
-- Same geometric simplification approach
-
-SUBJECT: Single person dealing with this problem in daily life: ${customerProblem}
-
-PERSON (EXACT SPECIFICATION):
-- Simple geometric head (solid color circle or oval)
-- No facial features OR simple dots for eyes only
-- Body as simple rounded rectangles
-- Stylized non-skin-tone color (soft blue, purple, coral, or mint)
-- Simple solid color clothing
-- Minimal limbs (simple rounded rectangles)
-- NO realistic details, NO complex shapes
-
-SCENE SHOWING THE PROBLEM:
-- Person in simple daily life situation related to: ${customerProblem}
-- Maximum 2-3 simple objects/props showing the problem
-- Props as basic geometric shapes with solid colors
-- Clear visual showing WHY they need help
-
-BACKGROUND (CRITICAL):
-- Pure white background (#FFFFFF)
-- NO environment details
-- NO decorative elements
-- NO patterns or textures
-- Just the person and minimal problem-related props on white
-
-COLOR PALETTE:
-- Exact same pastel color scheme for all images
-- Soft blues, purples, corals, mints ONLY
+STYLE:
+- Minimalist flat illustration (like modern app icons)
+- Simple, friendly cartoon character
+- Clean lines and basic shapes
+- Solid pastel colors (blue, purple, coral, or mint)
 - Visual tone: ${visualTone}
-- Maximum 4 colors total
-- High contrast against white background
 
-ABSOLUTE REQUIREMENTS:
-- Flat illustration like app icons or infographics
-- NO perspective, NO 3D effects, NO shadows
-- Pure white background with no decorations
-- Simple geometric shapes only
-- Must be visually consistent with other minimalist illustrations
-- Focus on the PROBLEM situation, not just computer use`;
+PERSON (REPRESENTING THE AUDIENCE):
+- Single person that visually represents: ${demographics}
+- Standing or sitting in a simple, neutral pose
+- Simple geometric forms for body
+- Stylized non-skin-tone color (soft blue, purple, coral, mint)
+- Minimal facial features (dots for eyes, simple smile)
+- Simple, modern clothing appropriate to the demographic
+- Person should be identifiable as the target audience
+
+BACKGROUND:
+- Completely transparent or pure white (#FFFFFF)
+- NO props, NO objects, NO environment, NO decorative elements
+- Just the person alone on transparent/white background
+
+CONSISTENCY:
+- Same illustration style across all 4 images
+- Same level of simplification
+- Same color approach
+- Clean, professional look suitable for preview cards
+
+Focus: Simple character that clearly represents the audience demographic. This is a preview card cover, so the audience should be the prominent feature.`;
 
 
       const response = await openai.images.generate({
