@@ -713,46 +713,49 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       const demographics = scenario.targetSegment.demographics || '';
       const searchBehavior = scenario.targetSegment.searchBehavior || '';
 
-      // Create a flat, illustrated image to obscure racial features and avoid representation bias
-      const searchPrompt = `A modern flat illustration showing a person from behind, sitting at a laptop and searching for information online.
+      // Create a friendly illustration in the style of Google or Facebook illustrations
+      const searchPrompt = `A modern, friendly illustration in the style of Google Material Design or Facebook illustrations, showing a person sitting at a laptop searching for information online.
 
-      ILLUSTRATION STYLE (critical):
-      - Flat design, vector illustration aesthetic
-      - Simple, clean shapes and forms
-      - Minimal detail, stylized representation
-      - NO photorealistic features
-      - Abstract, neutral representation that obscures race/ethnicity
-      - Modern, professional illustration style
+      ILLUSTRATION STYLE (like Google/Facebook):
+      - Clean, friendly vector illustration
+      - Recognizable human form (not overly abstract)
+      - Simplified but clearly defined body, arms, legs
+      - Smooth, rounded shapes with clean lines
+      - Colorful, approachable, warm aesthetic
+      - Professional but friendly and relatable
+      - Character-based illustration style
 
       FRAMING:
-      - Over-the-shoulder view from behind
-      - Person shown as simple silhouette or abstract shape
-      - Hands on keyboard (simplified geometric shapes)
-      - Laptop screen visible with soft glow
-      - Close-up perspective showing person and laptop
+      - 3/4 view or side angle showing person at laptop
+      - Person clearly sitting at desk/table with laptop
+      - Comfortable, natural posture
+      - Environment visible but simplified
+      - Medium shot showing person and workspace
 
-      PERSON REPRESENTATION:
-      - Viewed entirely from behind (back of head, shoulders visible)
-      - Simplified, geometric shapes for body
-      - Neutral colors that don't suggest specific skin tones
-      - Hair shown as simple shape/color without detail
-      - Abstract enough to avoid any racial identification
+      PERSON REPRESENTATION (avoiding racial features):
+      - Simplified face with minimal features (or face turned away/in profile)
+      - Stylized hair as solid color shape (purple, blue, green, or abstract color - not realistic hair colors)
+      - Body shown in non-skin-tone colors (soft purple, blue, coral, mint - stylized colors)
+      - Clear limbs and hands on keyboard
+      - Wearing simple, modern clothing
+      - Friendly, approachable character design
 
       SETTING appropriate to: ${demographics}
-      - Background as simple flat shapes/colors
-      - Suggest comfortable workspace with minimal details
-      - Warm, welcoming color palette
-      - Modern, clean aesthetic
-      - Abstract environmental elements
+      - Simple desk/table with laptop
+      - Comfortable chair
+      - Background with simple shapes suggesting room/space
+      - Maybe plants, window, shelves (simplified)
+      - Warm, inviting environment
+      - Modern, clean workspace aesthetic
 
       COLOR PALETTE:
-      - Warm, approachable colors (blues, greens, soft purples, coral)
-      - Avoid skin-tone colors for the person silhouette
-      - Use stylized, abstract colors instead
-      - Modern, professional color scheme
-      - Cohesive, harmonious palette
+      - Vibrant, friendly colors (like Google/Facebook illustrations)
+      - Character in stylized non-skin-tone colors (purples, blues, corals, mint green)
+      - Warm, optimistic color scheme
+      - High contrast but harmonious
+      - Modern, professional yet approachable
 
-      CRITICAL: This must be a FLAT ILLUSTRATION, not a photograph. Use abstract, geometric shapes that completely obscure racial features while maintaining the concept of someone searching online for help.`;
+      CRITICAL: Style must match Google Material Design or Facebook illustration aesthetic - friendly, recognizable human forms with simplified features and stylized colors that avoid realistic skin tones. Not overly abstract, but clearly an illustration with a warm, relatable feel.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
