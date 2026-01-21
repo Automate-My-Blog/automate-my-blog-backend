@@ -1168,7 +1168,7 @@ app.post('/api/generate-audience-images', async (req, res) => {
   console.log('=== Generate Audience Images Request ===');
 
   try {
-    const { scenarios } = req.body;
+    const { scenarios, brandContext } = req.body;
 
     if (!scenarios || !Array.isArray(scenarios)) {
       return res.status(400).json({
@@ -1177,9 +1177,9 @@ app.post('/api/generate-audience-images', async (req, res) => {
       });
     }
 
-    console.log(`Generating images for ${scenarios.length} scenarios`);
+    console.log(`Generating images for ${scenarios.length} scenarios with brand voice: ${brandContext?.brandVoice || 'Professional'}`);
 
-    const scenariosWithImages = await openaiService.generateAudienceImages(scenarios);
+    const scenariosWithImages = await openaiService.generateAudienceImages(scenarios, brandContext || {});
 
     res.json({
       success: true,

@@ -704,14 +704,36 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
 
   /**
    * Generate DALL-E image for a single audience scenario
+   * @param {Object} scenario - The audience scenario
+   * @param {Object} brandContext - Brand voice and style context
    */
-  async generateAudienceImage(scenario) {
+  async generateAudienceImage(scenario, brandContext = {}) {
     try {
       console.log('Generating DALL-E image for audience:', scenario.targetSegment.demographics);
 
       // Extract demographic context to inform the background
       const demographics = scenario.targetSegment.demographics || '';
       const searchBehavior = scenario.targetSegment.searchBehavior || '';
+      const brandVoice = brandContext.brandVoice || 'Professional';
+
+      // Map brand voice to visual tone
+      const getToneFromBrandVoice = (voice) => {
+        const voiceLower = (voice || '').toLowerCase();
+        if (voiceLower.includes('playful') || voiceLower.includes('fun') || voiceLower.includes('casual')) {
+          return 'vibrant, playful, energetic with bold colors';
+        } else if (voiceLower.includes('professional') || voiceLower.includes('corporate') || voiceLower.includes('formal')) {
+          return 'clean, professional, sophisticated with muted colors';
+        } else if (voiceLower.includes('friendly') || voiceLower.includes('approachable') || voiceLower.includes('warm')) {
+          return 'warm, inviting, friendly with soft colors';
+        } else if (voiceLower.includes('modern') || voiceLower.includes('innovative') || voiceLower.includes('tech')) {
+          return 'modern, sleek, minimalist with cool colors';
+        } else if (voiceLower.includes('luxury') || voiceLower.includes('premium') || voiceLower.includes('elegant')) {
+          return 'elegant, refined, sophisticated with rich colors';
+        }
+        return 'balanced, professional yet approachable with harmonious colors';
+      };
+
+      const visualTone = getToneFromBrandVoice(brandVoice);
 
       // Create a friendly illustration in the style of Google or Facebook illustrations
       const searchPrompt = `A modern, friendly illustration in the style of Google Material Design or Facebook illustrations, showing a person sitting at a laptop searching for information online.
@@ -743,19 +765,24 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
       SETTING appropriate to: ${demographics}
       - Simple desk/table with laptop
       - Comfortable chair
-      - Background with simple shapes suggesting room/space
-      - Maybe plants, window, shelves (simplified)
-      - Warm, inviting environment
+      - Minimal background elements (plants, window, shelves simplified)
       - Modern, clean workspace aesthetic
 
-      COLOR PALETTE:
-      - Vibrant, friendly colors (like Google/Facebook illustrations)
+      BACKGROUND:
+      - Pure white or very light neutral background
+      - Minimal background elements that fade to white at edges
+      - Clean, airy composition with plenty of white space
+      - Background should not compete with the character
+      - Transparent or white edges (suitable for web display)
+
+      COLOR PALETTE & TONE (matching brand voice: ${brandVoice}):
+      - Visual tone: ${visualTone}
       - Character in stylized non-skin-tone colors (purples, blues, corals, mint green)
-      - Warm, optimistic color scheme
+      - Adjust color intensity and mood to match brand voice
       - High contrast but harmonious
       - Modern, professional yet approachable
 
-      CRITICAL: Style must match Google Material Design or Facebook illustration aesthetic - friendly, recognizable human forms with simplified features and stylized colors that avoid realistic skin tones. Not overly abstract, but clearly an illustration with a warm, relatable feel.`;
+      CRITICAL: Style must match Google Material Design or Facebook illustration aesthetic - friendly, recognizable human forms with simplified features and stylized colors that avoid realistic skin tones. Not overly abstract, but clearly an illustration with a warm, relatable feel. White or transparent background for clean web display.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
@@ -780,15 +807,17 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
 
   /**
    * Generate DALL-E images for multiple audience scenarios in parallel
+   * @param {Array} scenarios - Array of audience scenarios
+   * @param {Object} brandContext - Brand voice and style context
    */
-  async generateAudienceImages(scenarios) {
+  async generateAudienceImages(scenarios, brandContext = {}) {
     try {
-      console.log(`🎨 Generating DALL-E images for ${scenarios.length} audiences...`);
+      console.log(`🎨 Generating DALL-E images for ${scenarios.length} audiences with brand voice: ${brandContext.brandVoice || 'Professional'}...`);
 
       // Generate images in parallel to minimize total time
       const imagePromises = scenarios.map(async (scenario, index) => {
         console.log(`Generating image ${index + 1}/${scenarios.length} for: ${scenario.targetSegment.demographics}`);
-        const imageUrl = await this.generateAudienceImage(scenario);
+        const imageUrl = await this.generateAudienceImage(scenario, brandContext);
         return {
           ...scenario,
           imageUrl
