@@ -1549,8 +1549,8 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
 
         // Deduct credit for successful generation
         try {
-          await billingService.useCredit(req.user.userId, 'generation');
-          console.log(`✅ Credit deducted for user ${req.user.userId}`);
+          await billingService.useCredit(req.user.userId, 'generation', savedPost.id);
+          console.log(`✅ Credit deducted for user ${req.user.userId}, post: ${savedPost.id}`);
         } catch (creditError) {
           console.error('Failed to deduct credit:', creditError);
           // Don't fail the response, but log for admin review

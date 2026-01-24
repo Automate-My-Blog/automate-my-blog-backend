@@ -369,7 +369,7 @@ async function handlePaymentFailed(invoice) {
 function getPlanNameFromPriceId(priceId) {
   const priceMap = {
     [process.env.STRIPE_PRICE_CREATOR]: 'Starter',
-    [process.env.STRIPE_PRICE_PROFESSIONAL]: 'Pro'
+    [process.env.STRIPE_PRICE_PROFESSIONAL]: 'Professional'
   };
   return priceMap[priceId] || 'Unknown';
 }
@@ -380,7 +380,8 @@ function getPlanNameFromPriceId(priceId) {
 function getPlanCredits(planName) {
   const creditMap = {
     'Starter': 4,
-    'Pro': 999999, // Unlimited
+    'Professional': 8,
+    'Pro': 999999, // Unlimited (legacy)
     'Free': 1
   };
   return creditMap[planName] || 0;
