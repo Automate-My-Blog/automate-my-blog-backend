@@ -5,7 +5,7 @@ import db from './database.js';
 
 // JWT configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-development';
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN && process.env.JWT_EXPIRES_IN.trim()) || '7d';
 
 // In-memory fallback storage for when database is not available
 const fallbackUsers = new Map();
@@ -275,12 +275,51 @@ class DatabaseAuthService {
       'active'
     ]);
 
-    // Create billing account
+    // Create free plan subscription for new user
     await db.query(`
-      INSERT INTO billing_accounts (
-        user_id, current_plan, billing_status, usage_limit, current_usage, created_at
-      ) VALUES ($1, $2, $3, $4, $5, NOW())
-    `, [user.id, 'free', 'active', 1, 0]); // 1 free blog post
+      INSERT INTO subscriptions (
+        user_id,
+        organization_id,
+        plan_name,
+        status,
+        current_period_start,
+        current_period_end,
+        created_at
+      ) VALUES (
+        $1,
+        $2,
+        'Free',
+        'active',
+        NOW(),
+        NOW() + INTERVAL '1 month',
+        NOW()
+      )
+    `, [user.id, organization.id]);
+
+    // Initialize usage tracking for the current month
+    const currentMonth = new Date();
+    const periodStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+    const periodEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+    await db.query(`
+      INSERT INTO user_usage_tracking (
+        user_id,
+        feature_type,
+        period_start,
+        period_end,
+        usage_count,
+        limit_count,
+        created_at
+      ) VALUES (
+        $1,
+        'generation',
+        $2,
+        $3,
+        0,
+        1,
+        NOW()
+      )
+    `, [user.id, periodStart, periodEnd]);
 
     // Log registration activity
     await this.logUserActivity(user.id, 'user_registered', {
