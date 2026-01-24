@@ -102,6 +102,11 @@ app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), m
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
+
+// Stripe webhook endpoint - NO AUTH (Stripe authenticates via webhook signature)
+app.use('/api/v1/stripe/webhook', stripeRoutes);
+
+// Other Stripe endpoints - require authentication
 app.use('/api/v1/stripe', authService.authMiddleware.bind(authService), stripeRoutes);
 
 // Health check endpoint
