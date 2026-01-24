@@ -25,9 +25,14 @@ router.post('/create-checkout-session', async (req, res) => {
     console.log(`Creating checkout session for user ${userId}, priceId: ${priceId}, planType: ${planType}`);
 
     // Determine success/cancel URLs based on environment
-    const baseUrl = process.env.NODE_ENV === 'production'
-      ? 'https://automate-my-blog.vercel.app'
-      : 'http://localhost:3000';
+    // Use FRONTEND_URL env variable if set, otherwise use default
+    const baseUrl = process.env.FRONTEND_URL || (
+      process.env.NODE_ENV === 'production'
+        ? 'https://automatemyblog.com'
+        : 'http://localhost:3000'
+    );
+
+    console.log(`Using frontend URL for redirects: ${baseUrl}`);
 
     const session = await stripe.checkout.sessions.create({
       customer_email: userEmail,
