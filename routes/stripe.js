@@ -218,7 +218,17 @@ async function handleCheckoutCompleted(session) {
           WHERE id = $4
         `, [planName, session.subscription, stripeCustomerId, existingSub.rows[0].id]);
 
-        console.log(`✅ Updated subscription for user ${userId}`);
+        console.log(`✅ Updated subscription for user ${userId} to ${planName}`);
+
+        // CRITICAL: Delete old unused subscription credits when upgrading
+        await db.query(`
+          DELETE FROM user_credits
+          WHERE user_id = $1
+            AND source_type = 'subscription'
+            AND status = 'active'
+        `, [userId]);
+
+        console.log(`🗑️ Deleted old subscription credits for user ${userId}`);
       } else {
         // Create new subscription
         await db.query(`
@@ -245,6 +255,8 @@ async function handleCheckoutCompleted(session) {
 
       // Create individual credits for limited subscription plans
       const credits = getPlanCredits(planName);
+      console.log(`📊 Plan ${planName} should receive ${credits} credits`);
+
       let subscriptionId = existingSub.rows[0]?.id;
 
       // Get the subscription ID if we just created it
@@ -257,8 +269,12 @@ async function handleCheckoutCompleted(session) {
         subscriptionId = newSubResult.rows[0]?.id;
       }
 
+      console.log(`🔑 Subscription ID: ${subscriptionId}`);
+
       // For limited plans (not Pro/unlimited), create individual credit records
       if (credits > 0 && credits < 999999 && subscriptionId) {
+        console.log(`💳 Creating ${credits} credits for ${planName} plan...`);
+
         for (let i = 0; i < credits; i++) {
           await db.query(`
             INSERT INTO user_credits (
@@ -281,12 +297,30 @@ async function handleCheckoutCompleted(session) {
             userId,
             subscriptionId,
             `${planName} Plan - Monthly Allocation`,
-            planName === 'Starter' ? 5.00 : 0.00  // $20/4 posts = $5/post
+            planName === 'Starter' ? 5.00 : planName === 'Professional' ? 2.50 : 0.00
           ]);
         }
         console.log(`✅ Created ${credits} subscription credits for user ${userId}`);
+
+        // Verify credits were created
+        const verifyResult = await db.query(`
+          SELECT COUNT(*) as credit_count
+          FROM user_credits
+          WHERE user_id = $1
+            AND source_type = 'subscription'
+            AND status = 'active'
+        `, [userId]);
+
+        const actualCredits = parseInt(verifyResult.rows[0]?.credit_count || 0);
+        console.log(`🔍 Verification: User ${userId} now has ${actualCredits} active subscription credits`);
+
+        if (actualCredits !== credits) {
+          console.error(`⚠️ WARNING: Expected ${credits} credits but found ${actualCredits}!`);
+        }
       } else if (credits >= 999999) {
         console.log(`✅ User ${userId} has unlimited plan (${planName}) - no individual credits needed`);
+      } else {
+        console.error(`❌ ERROR: Invalid credit count (${credits}) or missing subscription ID for user ${userId}`);
       }
 
       // Reset usage tracking for the new billing period
