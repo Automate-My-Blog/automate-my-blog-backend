@@ -373,21 +373,81 @@ class ReferralService {
           const rewardId1 = uuidv4();
           const rewardId2 = uuidv4();
 
+          // Get referrer email for description
+          const referrerInfoResult = await client.query(`
+            SELECT email FROM users WHERE id = $1
+          `, [invite.inviter_user_id]);
+
+          const referrerEmail = referrerInfoResult.rows[0]?.email || 'Unknown';
+
+          // Get new user email for description
+          const newUserInfoResult = await client.query(`
+            SELECT email FROM users WHERE id = $1
+          `, [newUserId]);
+
+          const newUserEmail = newUserInfoResult.rows[0]?.email || 'Unknown';
+
           // Reward for referrer
           await client.query(`
             INSERT INTO referral_rewards (
-              id, user_id, earned_from_invite_id, reward_type, reward_value, 
+              id, user_id, earned_from_invite_id, reward_type, reward_value,
               status, granted_at
             ) VALUES ($1, $2, $3, $4, $5, 'active', NOW())
           `, [rewardId1, invite.inviter_user_id, invite.id, 'free_generation', this.rewardValues.free_generation]);
 
+          // Create user_credit for referrer
+          await client.query(`
+            INSERT INTO user_credits (
+              user_id,
+              source_type,
+              source_id,
+              source_description,
+              quantity,
+              value_usd,
+              status,
+              priority,
+              created_at
+            ) VALUES (
+              $1, 'referral', $2, $3, 1, $4, 'active', 75, NOW()
+            )
+          `, [
+            invite.inviter_user_id,
+            rewardId1,
+            `Referral reward from ${newUserEmail}`,
+            this.rewardValues.free_generation
+          ]);
+
           // Reward for new user
           await client.query(`
             INSERT INTO referral_rewards (
-              id, user_id, earned_from_invite_id, reward_type, reward_value, 
+              id, user_id, earned_from_invite_id, reward_type, reward_value,
               status, granted_at
             ) VALUES ($1, $2, $3, $4, $5, 'active', NOW())
           `, [rewardId2, newUserId, invite.id, 'free_generation', this.rewardValues.free_generation]);
+
+          // Create user_credit for new user
+          await client.query(`
+            INSERT INTO user_credits (
+              user_id,
+              source_type,
+              source_id,
+              source_description,
+              quantity,
+              value_usd,
+              status,
+              priority,
+              created_at
+            ) VALUES (
+              $1, 'referral', $2, $3, 1, $4, 'active', 75, NOW()
+            )
+          `, [
+            newUserId,
+            rewardId2,
+            `Welcome bonus from referral by ${referrerEmail}`,
+            this.rewardValues.free_generation
+          ]);
+
+          console.log(`✅ Created referral credits for referrer ${invite.inviter_user_id} and new user ${newUserId}`);
 
           // Update referrer's stats
           await client.query(`

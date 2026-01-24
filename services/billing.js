@@ -15,72 +15,154 @@ class BillingService {
    */
   async getUserCredits(userId) {
     try {
-      // Get base billing info
-      const billingResult = await db.query(`
-        SELECT usage_limit, current_usage, current_plan, billing_status
-        FROM billing_accounts 
-        WHERE user_id = $1
+      // 1. Check for unlimited subscription
+      const subResult = await db.query(`
+        SELECT s.plan_name, pd.is_unlimited
+        FROM subscriptions s
+        JOIN plan_definitions pd ON pd.name = s.plan_name
+        WHERE s.user_id = $1
+          AND s.status = 'active'
+          AND s.current_period_end > NOW()
+        ORDER BY s.created_at DESC
+        LIMIT 1
       `, [userId]);
 
-      if (billingResult.rows.length === 0) {
-        throw new Error('Billing account not found');
+      if (subResult.rows.length > 0 && subResult.rows[0].is_unlimited) {
+        return {
+          basePlan: subResult.rows[0].plan_name,
+          isUnlimited: true,
+          totalCredits: 999999,
+          availableCredits: 999999,
+          usedCredits: 0,
+          breakdown: { subscription: 999999, purchases: 0, referrals: 0 }
+        };
       }
 
-      const billing = billingResult.rows[0];
-
-      // Get active referral rewards
-      const rewardsResult = await db.query(`
-        SELECT SUM(reward_value) as total_reward_value, COUNT(*) as reward_count
-        FROM referral_rewards 
-        WHERE user_id = $1 AND status = 'active'
+      // 2. Count active credits by source
+      const creditsResult = await db.query(`
+        SELECT
+          source_type,
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as available,
+          SUM(CASE WHEN status = 'used' THEN 1 ELSE 0 END) as used
+        FROM user_credits
+        WHERE user_id = $1
+          AND (expires_at IS NULL OR expires_at > NOW())
+        GROUP BY source_type
       `, [userId]);
 
-      const totalRewardValue = parseFloat(rewardsResult.rows[0].total_reward_value || 0);
-      const bonusCredits = Math.floor(totalRewardValue / this.rewardValuePerPost);
+      const breakdown = { subscription: 0, purchases: 0, referrals: 0 };
+      let totalAvailable = 0;
+      let totalUsed = 0;
+
+      creditsResult.rows.forEach(row => {
+        const available = parseInt(row.available) || 0;
+        const used = parseInt(row.used) || 0;
+
+        if (row.source_type === 'subscription') breakdown.subscription = available;
+        else if (row.source_type === 'purchase') breakdown.purchases = available;
+        else if (row.source_type === 'referral') breakdown.referrals = available;
+
+        totalAvailable += available;
+        totalUsed += used;
+      });
 
       return {
-        basePlan: billing.current_plan,
-        baseCredits: parseInt(billing.usage_limit),
-        bonusCredits,
-        totalCredits: parseInt(billing.usage_limit) + bonusCredits,
-        usedCredits: parseInt(billing.current_usage),
-        availableCredits: parseInt(billing.usage_limit) + bonusCredits - parseInt(billing.current_usage),
-        rewardValue: totalRewardValue,
-        billingStatus: billing.billing_status
+        basePlan: subResult.rows[0]?.plan_name || 'Pay as You Go',
+        isUnlimited: false,
+        totalCredits: totalAvailable + totalUsed,
+        availableCredits: totalAvailable,
+        usedCredits: totalUsed,
+        breakdown
       };
+
     } catch (error) {
       console.error('Error getting user credits:', error);
-      throw error;
+
+      // Fallback for users with no credits system data yet
+      return {
+        basePlan: 'Pay as You Go',
+        isUnlimited: false,
+        totalCredits: 0,
+        availableCredits: 0,
+        usedCredits: 0,
+        breakdown: { subscription: 0, purchases: 0, referrals: 0 }
+      };
     }
   }
 
   /**
    * Use a credit for content generation
    */
-  async useCredit(userId, contentType = 'blog_post') {
+  async useCredit(userId, featureType = 'generation', featureId = null) {
     try {
-      const credits = await this.getUserCredits(userId);
-
-      if (credits.availableCredits <= 0) {
-        throw new Error('No credits available');
-      }
-
-      // Increment usage
-      await db.query(`
-        UPDATE billing_accounts 
-        SET current_usage = current_usage + 1
+      // 1. Find highest priority active credit
+      const creditResult = await db.query(`
+        SELECT id, source_type, priority
+        FROM user_credits
         WHERE user_id = $1
+          AND status = 'active'
+          AND (expires_at IS NULL OR expires_at > NOW())
+        ORDER BY priority DESC, created_at ASC
+        LIMIT 1
+        FOR UPDATE
       `, [userId]);
 
-      // If we used a bonus credit (beyond base plan), mark rewards as used
-      if (credits.usedCredits >= credits.baseCredits) {
-        await this.markRewardAsUsed(userId);
+      if (creditResult.rows.length === 0) {
+        throw new Error('No available credits');
       }
 
-      return {
-        success: true,
-        creditsRemaining: credits.availableCredits - 1
-      };
+      const credit = creditResult.rows[0];
+
+      // 2. Mark credit as used
+      await db.query(`
+        UPDATE user_credits
+        SET
+          status = 'used',
+          used_at = NOW(),
+          used_for_type = $2,
+          used_for_id = $3
+        WHERE id = $1
+      `, [credit.id, featureType, featureId]);
+
+      // 3. Update usage tracking
+      const currentMonth = new Date();
+      const periodStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+      const periodEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
+
+      if (credit.source_type === 'subscription') {
+        // Subscription credit - increment usage_count
+        await db.query(`
+          INSERT INTO user_usage_tracking (
+            user_id, feature_type, period_start, period_end, usage_count, limit_count
+          ) VALUES (
+            $1, $2, $3, $4, 1, 0
+          )
+          ON CONFLICT (user_id, feature_type, period_start)
+          DO UPDATE SET
+            usage_count = user_usage_tracking.usage_count + 1,
+            updated_at = NOW()
+        `, [userId, featureType, periodStart, periodEnd]);
+      } else {
+        // Bonus credit (purchase or referral) - increment bonus_usage_count
+        await db.query(`
+          INSERT INTO user_usage_tracking (
+            user_id, feature_type, period_start, period_end,
+            usage_count, bonus_usage_count, bonus_source
+          ) VALUES (
+            $1, $2, $3, $4, 0, 1, $5
+          )
+          ON CONFLICT (user_id, feature_type, period_start)
+          DO UPDATE SET
+            bonus_usage_count = user_usage_tracking.bonus_usage_count + 1,
+            bonus_source = $5,
+            updated_at = NOW()
+        `, [userId, featureType, periodStart, periodEnd, credit.source_type]);
+      }
+
+      console.log(`✅ Used ${credit.source_type} credit for user ${userId}`);
+      return { success: true, creditId: credit.id, sourceType: credit.source_type };
+
     } catch (error) {
       console.error('Error using credit:', error);
       throw error;

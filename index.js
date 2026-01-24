@@ -16,6 +16,7 @@ import organizationService from './services/organizations.js';
 import projectsService from './services/projects.js';
 import db from './services/database.js';
 import enhancedBlogGenerationService from './services/enhanced-blog-generation.js';
+import { expireOldCredits } from './jobs/expireCredits.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
@@ -28,6 +29,7 @@ import manualInputRoutes from './routes/manual-inputs.js';
 import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 import organizationRoutes from './routes/organizations.js';
+import stripeRoutes from './routes/stripe.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 
 // Load environment variables
@@ -100,6 +102,7 @@ app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), m
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
+app.use('/api/v1/stripe', authService.authMiddleware.bind(authService), stripeRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -1434,11 +1437,30 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       });
     }
 
+    // Check if user has credits available (if authenticated)
+    if (req.user) {
+      const hasCredits = await billingService.hasCredits(req.user.userId);
+      if (!hasCredits) {
+        const credits = await billingService.getUserCredits(req.user.userId);
+        return res.status(402).json({
+          success: false,
+          error: 'Insufficient credits',
+          message: 'You have used all your blog post credits for this billing period.',
+          data: {
+            currentPlan: credits.basePlan,
+            creditsUsed: credits.usedCredits,
+            creditsAvailable: credits.availableCredits,
+            upgradeUrl: '/pricing'
+          }
+        });
+      }
+    }
+
     // Generate the blog post content using enhanced or basic generation
     let blogPost;
     let visualSuggestions = [];
     let qualityPrediction = null;
-    
+
     if (useEnhancedGeneration && organizationId) {
       console.log(`🚀 Using enhanced blog generation for organization: ${organizationId}`);
       console.log(`📊 Enhanced generation parameters:`, {
@@ -1524,6 +1546,15 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
         });
 
         console.log(`✅ Blog post saved for user ${req.user.userId}: ${savedPost.id}`);
+
+        // Deduct credit for successful generation
+        try {
+          await billingService.useCredit(req.user.userId, 'generation');
+          console.log(`✅ Credit deducted for user ${req.user.userId}`);
+        } catch (creditError) {
+          console.error('Failed to deduct credit:', creditError);
+          // Don't fail the response, but log for admin review
+        }
 
         // ✨ REMOVED: Async image generation moved to dedicated endpoint
         // Images are now generated via /api/images/generate-for-blog
@@ -3232,6 +3263,19 @@ app.listen(PORT, () => {
   console.log(`🚀 AutoBlog API server running on port ${PORT} (v2.0 - auth fix deployed)`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 API base: http://localhost:${PORT}/api`);
+
+  // Run credit expiration job daily in production
+  if (process.env.NODE_ENV === 'production') {
+    // Run immediately on startup
+    expireOldCredits().catch(err => console.error('Credit expiration failed:', err));
+
+    // Then run daily at midnight (24 hours = 86400000 ms)
+    setInterval(() => {
+      expireOldCredits().catch(err => console.error('Credit expiration failed:', err));
+    }, 24 * 60 * 60 * 1000);
+
+    console.log('⏰ Credit expiration job scheduled (daily at midnight)');
+  }
 });
 
 export default app;
