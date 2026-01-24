@@ -26,13 +26,21 @@ router.post('/create-checkout-session', async (req, res) => {
 
     // Determine success/cancel URLs based on environment
     // Use FRONTEND_URL env variable if set, otherwise use default
-    const baseUrl = process.env.FRONTEND_URL || (
+    let baseUrl = process.env.FRONTEND_URL || (
       process.env.NODE_ENV === 'production'
         ? 'https://automatemyblog.com'
         : 'http://localhost:3000'
     );
 
+    // Clean up baseUrl - trim whitespace and remove trailing slash
+    baseUrl = baseUrl.trim().replace(/\/$/, '');
+
+    const successUrl = `${baseUrl}/dashboard?payment=success`;
+    const cancelUrl = `${baseUrl}/dashboard?payment=cancelled`;
+
     console.log(`Using frontend URL for redirects: ${baseUrl}`);
+    console.log(`Success URL: ${successUrl}`);
+    console.log(`Cancel URL: ${cancelUrl}`);
 
     const session = await stripe.checkout.sessions.create({
       customer_email: userEmail,
@@ -43,8 +51,8 @@ router.post('/create-checkout-session', async (req, res) => {
         },
       ],
       mode: planType === 'one_time' ? 'payment' : 'subscription',
-      success_url: `${baseUrl}/dashboard?payment=success`,
-      cancel_url: `${baseUrl}/dashboard?payment=cancelled`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
         userId: userId,
         priceId: priceId,
