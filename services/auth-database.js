@@ -361,6 +361,18 @@ class DatabaseAuthService {
     // Link website lead if user came from website analysis
     await this.linkWebsiteLeadToUser(user.id, organization.id, websiteUrl);
 
+    // Fetch available credits for the user
+    const creditsResult = await db.query(`
+      SELECT COUNT(*) as available_credits
+      FROM user_credits
+      WHERE user_id = $1
+        AND status = 'active'
+        AND (expires_at IS NULL OR expires_at > NOW())
+    `, [user.id]);
+
+    const availableCredits = parseInt(creditsResult.rows[0]?.available_credits || 0);
+    console.log(`✅ [${dbRegId}] User has ${availableCredits} available credits`);
+
     // Generate tokens
     const tokens = this.generateTokens(user);
 
@@ -375,6 +387,7 @@ class DatabaseAuthService {
         organizationRole: 'owner',
         referralCode: user.referral_code,
         planTier: user.plan_tier,
+        postsRemaining: availableCredits,
         createdAt: user.created_at
       },
       ...tokens
