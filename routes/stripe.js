@@ -281,8 +281,6 @@ async function handleCheckoutCompleted(session) {
       const periodStart = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
       const periodEnd = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0);
 
-      const credits = getPlanCredits(planName);
-
       await db.query(`
         INSERT INTO user_usage_tracking (
           user_id,
