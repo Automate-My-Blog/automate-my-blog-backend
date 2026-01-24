@@ -276,7 +276,7 @@ class DatabaseAuthService {
     ]);
 
     // Create free plan subscription for new user
-    await db.query(`
+    const subscriptionResult = await db.query(`
       INSERT INTO subscriptions (
         user_id,
         organization_id,
@@ -294,7 +294,37 @@ class DatabaseAuthService {
         NOW() + INTERVAL '1 month',
         NOW()
       )
+      RETURNING id
     `, [user.id, organization.id]);
+
+    const subscriptionId = subscriptionResult.rows[0].id;
+
+    // Create 1 free credit in user_credits table
+    await db.query(`
+      INSERT INTO user_credits (
+        user_id,
+        source_type,
+        source_id,
+        source_description,
+        quantity,
+        value_usd,
+        status,
+        priority,
+        created_at
+      ) VALUES (
+        $1,
+        'subscription',
+        $2,
+        'Free Plan - Welcome Post',
+        1,
+        0.00,
+        'active',
+        25,
+        NOW()
+      )
+    `, [user.id, subscriptionId]);
+
+    console.log(`✅ [${dbRegId}] Created 1 free credit for new user ${user.id}`);
 
     // Initialize usage tracking for the current month
     const currentMonth = new Date();
