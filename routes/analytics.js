@@ -139,6 +139,44 @@ router.get('/funnel',
 );
 
 /**
+ * Get users at a specific funnel stage
+ * GET /api/v1/analytics/funnel/stage/:funnelStep/users
+ */
+router.get('/funnel/stage/:funnelStep/users',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { funnelStep } = req.params;
+      const { startDate, endDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'startDate and endDate are required'
+        });
+      }
+
+      const users = await analyticsService.getUsersAtFunnelStage(funnelStep, startDate, endDate);
+
+      res.json({
+        success: true,
+        funnelStep,
+        users,
+        count: users.length
+      });
+    } catch (error) {
+      console.error('Error getting users at funnel stage:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get users at funnel stage',
+        message: error.message
+      });
+    }
+  }
+);
+
+/**
  * Get user journey
  * GET /api/v1/analytics/users/:userId/journey
  */

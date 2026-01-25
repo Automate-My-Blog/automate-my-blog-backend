@@ -92,57 +92,183 @@ class AnalyticsService {
     try {
       console.log(`📈 Analytics: Getting funnel data from ${startDate} to ${endDate}`);
 
-      // Define funnel steps in order
-      const funnelSteps = [
-        { name: 'Lead', step: 'lead', description: 'Anonymous visitor' },
-        { name: 'Signup Initiated', step: 'signup_initiated', description: 'Started registration' },
-        { name: 'Signed Up', step: 'signed_up', description: 'Account created' },
-        { name: 'Email Verified', step: 'email_verified', description: 'Confirmed email' },
-        { name: 'First Login', step: 'first_login', description: 'Successfully logged in' },
-        { name: 'Project Created', step: 'project_created', description: 'Created first project' },
-        { name: 'First Generation', step: 'first_generation', description: 'Generated first post' },
-        { name: 'Checkout Initiated', step: 'checkout_initiated', description: 'Clicked upgrade/buy' },
-        { name: 'Payment Success', step: 'payment_success', description: 'Completed payment' },
-        { name: 'Active Subscriber', step: 'active_subscriber', description: 'Has active subscription' },
-        { name: 'Upsell', step: 'upsell', description: 'Upgraded to higher tier' }
+      // Calculate funnel based on actual user actions and data
+      const result = await db.query(`
+        WITH user_base AS (
+          SELECT DISTINCT u.id, u.email, u.created_at, u.email_verified
+          FROM users u
+          WHERE u.created_at >= $1 AND u.created_at <= $2
+        ),
+        user_logins AS (
+          SELECT DISTINCT user_id
+          FROM user_activity_events
+          WHERE event_type IN ('login', 'user_login', 'session_start')
+            AND timestamp >= $1
+        ),
+        user_generations AS (
+          SELECT DISTINCT user_id
+          FROM blog_posts
+          WHERE created_at >= $1
+        ),
+        user_payments AS (
+          SELECT DISTINCT user_id
+          FROM pay_per_use_charges
+          WHERE charged_at >= $1
+        ),
+        user_subscriptions AS (
+          SELECT DISTINCT user_id, plan_name
+          FROM subscriptions
+          WHERE status = 'active'
+            AND created_at >= $1
+        )
+        SELECT
+          (SELECT COUNT(*) FROM user_base) as signed_up,
+          (SELECT COUNT(*) FROM user_base WHERE email_verified = true) as email_verified,
+          (SELECT COUNT(DISTINCT ul.user_id) FROM user_logins ul INNER JOIN user_base ub ON ul.user_id = ub.id) as first_login,
+          (SELECT COUNT(DISTINCT ug.user_id) FROM user_generations ug INNER JOIN user_base ub ON ug.user_id = ub.id) as first_generation,
+          (SELECT COUNT(DISTINCT up.user_id) FROM user_payments up INNER JOIN user_base ub ON up.user_id = ub.id) as payment_success,
+          (SELECT COUNT(DISTINCT us.user_id) FROM user_subscriptions us INNER JOIN user_base ub ON us.user_id = ub.id) as active_subscriber,
+          (SELECT COUNT(DISTINCT us.user_id) FROM user_subscriptions us INNER JOIN user_base ub ON us.user_id = ub.id WHERE us.plan_name = 'Professional') as upsell
+      `, [startDate, endDate]);
+
+      const counts = result.rows[0];
+
+      // Build steps array with conversion rates
+      const steps = [
+        { step: 'signed_up', name: 'Signed Up', count: parseInt(counts.signed_up), conversion_rate: 100 },
+        { step: 'email_verified', name: 'Email Verified', count: parseInt(counts.email_verified), conversion_rate: 0 },
+        { step: 'first_login', name: 'First Login', count: parseInt(counts.first_login), conversion_rate: 0 },
+        { step: 'first_generation', name: 'First Generation', count: parseInt(counts.first_generation), conversion_rate: 0 },
+        { step: 'payment_success', name: 'Payment Success', count: parseInt(counts.payment_success), conversion_rate: 0 },
+        { step: 'active_subscriber', name: 'Active Subscriber', count: parseInt(counts.active_subscriber), conversion_rate: 0 },
+        { step: 'upsell', name: 'Upsell', count: parseInt(counts.upsell), conversion_rate: 0 }
       ];
 
-      // Get counts for each funnel step
-      const steps = await Promise.all(
-        funnelSteps.map(async (step) => {
-          const result = await db.query(`
-            SELECT COUNT(DISTINCT user_id) as count
-            FROM user_activity_events
-            WHERE conversion_funnel_step = $1
-              AND timestamp >= $2
-              AND timestamp <= $3
-          `, [step.step, startDate, endDate]);
+      // Calculate conversion rates (percentage of previous step)
+      for (let i = 1; i < steps.length; i++) {
+        const prevCount = steps[i - 1].count;
+        if (prevCount > 0) {
+          steps[i].conversion_rate = (steps[i].count / prevCount) * 100;
+        }
+      }
 
-          return {
-            name: step.name,
-            step: step.step,
-            description: step.description,
-            count: parseInt(result.rows[0].count)
-          };
-        })
-      );
-
-      // Calculate overall conversion rates
-      const leadCount = steps[0].count || 1; // Avoid division by zero
-      const signupCount = steps.find(s => s.step === 'signed_up')?.count || 0;
-      const payingCount = steps.find(s => s.step === 'payment_success')?.count || 0;
-      const upsellCount = steps.find(s => s.step === 'upsell')?.count || 0;
-
-      const conversions = {
-        leadToSignup: leadCount > 0 ? ((signupCount / leadCount) * 100).toFixed(2) : 0,
-        signupToPaying: signupCount > 0 ? ((payingCount / signupCount) * 100).toFixed(2) : 0,
-        payingToUpsell: payingCount > 0 ? ((upsellCount / payingCount) * 100).toFixed(2) : 0
-      };
-
-      return { steps, conversions };
+      return { steps, conversions: {} };
     } catch (error) {
       console.error(`⚠️ Analytics: Failed to get funnel data - ${error.message}`);
       return { steps: [], conversions: {} };
+    }
+  }
+
+  /**
+   * Get users at a specific funnel stage
+   * @param {String} funnelStep - Funnel step (signed_up, email_verified, first_login, etc.)
+   * @param {String} startDate - Start date
+   * @param {String} endDate - End date
+   * @returns {Promise<Array>} Users at this stage with email/website
+   */
+  async getUsersAtFunnelStage(funnelStep, startDate, endDate) {
+    try {
+      console.log(`📊 Analytics: Getting users at funnel stage ${funnelStep}`);
+
+      let query = '';
+
+      switch (funnelStep) {
+        case 'signed_up':
+          query = `
+            SELECT u.id, u.email, u.created_at, wa.website_url
+            FROM users u
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'email_verified':
+          query = `
+            SELECT u.id, u.email, u.created_at, wa.website_url
+            FROM users u
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+              AND u.email_verified = true
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'first_login':
+          query = `
+            SELECT DISTINCT u.id, u.email, u.created_at, wa.website_url
+            FROM users u
+            INNER JOIN user_activity_events uae ON u.id = uae.user_id
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+              AND uae.event_type IN ('login', 'user_login', 'session_start')
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'first_generation':
+          query = `
+            SELECT DISTINCT u.id, u.email, u.created_at, wa.website_url
+            FROM users u
+            INNER JOIN blog_posts bp ON u.id = bp.user_id
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'payment_success':
+          query = `
+            SELECT DISTINCT u.id, u.email, u.created_at, wa.website_url
+            FROM users u
+            INNER JOIN pay_per_use_charges ppu ON u.id = ppu.user_id
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'active_subscriber':
+          query = `
+            SELECT DISTINCT u.id, u.email, u.created_at, wa.website_url, s.plan_name
+            FROM users u
+            INNER JOIN subscriptions s ON u.id = s.user_id
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+              AND s.status = 'active'
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        case 'upsell':
+          query = `
+            SELECT DISTINCT u.id, u.email, u.created_at, wa.website_url, s.plan_name
+            FROM users u
+            INNER JOIN subscriptions s ON u.id = s.user_id
+            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            WHERE u.created_at >= $1 AND u.created_at <= $2
+              AND s.status = 'active'
+              AND s.plan_name = 'Professional'
+            ORDER BY u.created_at DESC
+            LIMIT 100
+          `;
+          break;
+
+        default:
+          return [];
+      }
+
+      const result = await db.query(query, [startDate, endDate]);
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get users at funnel stage - ${error.message}`);
+      return [];
     }
   }
 
