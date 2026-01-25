@@ -96,7 +96,7 @@ class AnalyticsService {
       // Use DATE() to properly compare date strings with timestamp columns
       const result = await db.query(`
         WITH user_base AS (
-          SELECT DISTINCT u.id, u.email, u.created_at, u.email_verified
+          SELECT DISTINCT u.id, u.email, u.created_at, u.email_verified_at
           FROM users u
           WHERE DATE(u.created_at) >= DATE($1)
             AND DATE(u.created_at) <= DATE($2)
@@ -125,7 +125,7 @@ class AnalyticsService {
         )
         SELECT
           (SELECT COUNT(*) FROM user_base) as signed_up,
-          (SELECT COUNT(*) FROM user_base WHERE email_verified = true) as email_verified,
+          (SELECT COUNT(*) FROM user_base WHERE email_verified_at IS NOT NULL) as email_verified,
           (SELECT COUNT(DISTINCT ul.user_id) FROM user_logins ul INNER JOIN user_base ub ON ul.user_id = ub.id) as first_login,
           (SELECT COUNT(DISTINCT ug.user_id) FROM user_generations ug INNER JOIN user_base ub ON ug.user_id = ub.id) as first_generation,
           (SELECT COUNT(DISTINCT up.user_id) FROM user_payments up INNER JOIN user_base ub ON up.user_id = ub.id) as payment_success,
@@ -196,7 +196,7 @@ class AnalyticsService {
             FROM users u
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
-              AND u.email_verified = true
+              AND u.email_verified_at IS NOT NULL
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
