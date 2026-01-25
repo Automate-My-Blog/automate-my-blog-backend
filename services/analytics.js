@@ -835,6 +835,142 @@ class AnalyticsService {
       return [];
     }
   }
+
+  /**
+   * Get clicks over time for usage metrics
+   * @param {String} startDate - Start date (ISO format)
+   * @param {String} endDate - End date (ISO format)
+   * @param {String} interval - Time interval ('hour' or 'day')
+   * @returns {Promise<Array>} Time-series click data
+   */
+  async getClicksOverTime(startDate, endDate, interval = 'day') {
+    try {
+      console.log(`📊 Analytics: Getting clicks over time from ${startDate} to ${endDate} (interval: ${interval})`);
+
+      const truncFunc = interval === 'hour' ? 'hour' : 'day';
+
+      const result = await db.query(`
+        SELECT
+          DATE_TRUNC('${truncFunc}', timestamp) as period,
+          COUNT(*) as click_count,
+          COUNT(DISTINCT user_id) as unique_users,
+          event_type
+        FROM user_activity_events
+        WHERE timestamp >= $1 AND timestamp <= $2
+          AND event_type IN ('click', 'page_view', 'button_click', 'post_generated', 'payment_success')
+        GROUP BY DATE_TRUNC('${truncFunc}', timestamp), event_type
+        ORDER BY period ASC
+      `, [startDate, endDate]);
+
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get clicks over time - ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get actions over time for usage metrics
+   * @param {String} startDate - Start date (ISO format)
+   * @param {String} endDate - End date (ISO format)
+   * @param {String} interval - Time interval ('hour' or 'day')
+   * @returns {Promise<Array>} Time-series action data
+   */
+  async getActionsOverTime(startDate, endDate, interval = 'hour') {
+    try {
+      console.log(`📊 Analytics: Getting actions over time from ${startDate} to ${endDate} (interval: ${interval})`);
+
+      const truncFunc = interval === 'hour' ? 'hour' : 'day';
+
+      const result = await db.query(`
+        SELECT
+          DATE_TRUNC('${truncFunc}', timestamp) as period,
+          event_type,
+          COUNT(*) as action_count,
+          COUNT(DISTINCT user_id) as unique_users
+        FROM user_activity_events
+        WHERE timestamp >= $1 AND timestamp <= $2
+          AND event_type NOT IN ('page_view')
+        GROUP BY DATE_TRUNC('${truncFunc}', timestamp), event_type
+        ORDER BY period ASC, action_count DESC
+      `, [startDate, endDate]);
+
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get actions over time - ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get active users over time for usage metrics
+   * @param {String} startDate - Start date (ISO format)
+   * @param {String} endDate - End date (ISO format)
+   * @param {String} interval - Time interval ('hour' or 'day')
+   * @returns {Promise<Array>} Time-series active user data
+   */
+  async getActiveUsersOverTime(startDate, endDate, interval = 'day') {
+    try {
+      console.log(`📊 Analytics: Getting active users over time from ${startDate} to ${endDate} (interval: ${interval})`);
+
+      const truncFunc = interval === 'hour' ? 'hour' : 'day';
+
+      const result = await db.query(`
+        SELECT
+          DATE_TRUNC('${truncFunc}', uae.timestamp) as period,
+          COUNT(DISTINCT uae.user_id) as active_users,
+          COUNT(DISTINCT CASE
+            WHEN s.status = 'active' AND s.stripe_subscription_id IS NOT NULL
+            THEN uae.user_id
+          END) as active_paying_users,
+          COUNT(DISTINCT CASE
+            WHEN s.status IS NULL OR s.stripe_subscription_id IS NULL
+            THEN uae.user_id
+          END) as active_free_users
+        FROM user_activity_events uae
+        LEFT JOIN subscriptions s ON uae.user_id = s.user_id
+        WHERE uae.timestamp >= $1 AND uae.timestamp <= $2
+        GROUP BY DATE_TRUNC('${truncFunc}', uae.timestamp)
+        ORDER BY period ASC
+      `, [startDate, endDate]);
+
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get active users over time - ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get clicks by page/tab for usage metrics
+   * @param {String} startDate - Start date (ISO format)
+   * @param {String} endDate - End date (ISO format)
+   * @returns {Promise<Array>} Page-level click data
+   */
+  async getClicksByPage(startDate, endDate) {
+    try {
+      console.log(`📊 Analytics: Getting clicks by page from ${startDate} to ${endDate}`);
+
+      const result = await db.query(`
+        SELECT
+          page_url,
+          COUNT(*) as click_count,
+          COUNT(DISTINCT user_id) as unique_users,
+          COUNT(DISTINCT session_id) as unique_sessions,
+          DATE_TRUNC('day', timestamp) as date
+        FROM user_activity_events
+        WHERE timestamp >= $1 AND timestamp <= $2
+          AND page_url IS NOT NULL
+        GROUP BY page_url, DATE_TRUNC('day', timestamp)
+        ORDER BY date DESC, click_count DESC
+      `, [startDate, endDate]);
+
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get clicks by page - ${error.message}`);
+      return [];
+    }
+  }
 }
 
 // Create singleton instance

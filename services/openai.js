@@ -1095,6 +1095,269 @@ BE SPECIFIC - Use actual user names, emails, and numbers from the data above. Ne
   }
 
   /**
+   * Generate revenue-focused insights for maximizing MRR and revenue
+   * @param {Object} metrics - Platform metrics
+   * @param {Array} userOpportunities - User opportunity data
+   * @returns {Promise<Object>} Revenue insights with potential MRR increase
+   */
+  async generateRevenueInsights(metrics, userOpportunities) {
+    try {
+      console.log('🤑 OpenAI: Generating revenue-focused insights');
+
+      // Filter for revenue-related opportunities
+      const revenueUsers = userOpportunities.filter(u =>
+        ['out_of_credits', 'upsell_to_pro', 'active_free_user'].includes(u.opportunity_type)
+      );
+
+      // Format user opportunities with specific details
+      const userSummary = revenueUsers.slice(0, 15).map((u, idx) =>
+        `${idx + 1}. [${u.opportunity_type}] ${u.full_name || 'Unknown'} (${u.email}):
+       - Plan: ${u.plan_name || 'Free'}
+       - Credits: ${u.available_credits || 0} available, ${u.used_credits || 0} used
+       - Posts (30d): ${u.posts_last_30_days || 0}
+       - Action: ${u.recommended_action}`
+      ).join('\n');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'system',
+          content: `You are a SaaS revenue strategist specializing in immediate revenue opportunities and pricing optimization. Your goal is to maximize Monthly Recurring Revenue (MRR) and pay-per-use revenue through specific user outreach and pricing strategies.`
+        }, {
+          role: 'user',
+          content: `Analyze this SaaS platform data and provide 3-5 HIGH-PRIORITY revenue opportunities.
+
+**Platform Revenue Metrics:**
+- Subscription MRR: $${metrics?.subscription_mrr || 0}/month
+- Pay-Per-Use Revenue (30d): $${metrics?.pay_per_use_revenue || 0}
+- Total Revenue (30d): $${metrics?.total_revenue || 0}
+- Starter Plans: ${metrics?.starter_count || 0} ($20/mo each)
+- Professional Plans: ${metrics?.professional_count || 0} ($50/mo each)
+- Active Paying Users: ${metrics?.total_paying_users || 0}
+- Total Users: ${metrics?.total_users || 0}
+
+**Revenue Opportunity Users (Top ${revenueUsers.length}):**
+${userSummary || 'No specific revenue opportunities identified'}
+
+**Pricing Context:**
+- Pay-per-use: $15 per blog post
+- Starter plan: $20/mo (4 posts included = $5/post)
+- Professional plan: $50/mo (8 posts included = $6.25/post)
+- Free tier: 3 free posts for new users
+
+Provide 3-5 SPECIFIC, ACTIONABLE revenue insights in this EXACT format:
+
+**[Priority: High/Medium] Insight Title**
+- **User/Segment**: [Specific user names & emails OR segment with exact user count]
+- **Action**: [WHO to reach out to, WHAT to offer, WHEN to do it, exact email template/message]
+- **Expected Result**: [Exact $ MRR increase or revenue impact with calculations]
+
+Focus on:
+1. Immediate revenue from users out of credits (ready to buy NOW)
+2. Upsell opportunities for users over their plan allocation
+3. Pricing strategy changes (data-driven recommendations)
+4. Converting high-engagement free users to paid plans
+
+Be SPECIFIC - use actual user names, emails, credit counts, and exact dollar calculations.`
+        }],
+        temperature: 0.5,
+        max_tokens: 2000
+      });
+
+      const insights = this.parseActionableInsights(completion.choices[0].message.content);
+
+      // Calculate potential MRR increase
+      const potentialMRR = revenueUsers.length * 20; // Estimate: $20/user avg
+
+      return {
+        title: "Revenue Opportunities",
+        priority: metrics?.subscription_mrr < 100 ? "immediate_action_required" : "monitor",
+        insights,
+        summary: `${insights.length} immediate revenue opportunities identified`,
+        potentialMRRIncrease: potentialMRR,
+        userCount: revenueUsers.length,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      console.error('❌ OpenAI: Failed to generate revenue insights:', error);
+      return {
+        title: "Revenue Opportunities",
+        insights: [],
+        error: error.message,
+        potentialMRRIncrease: 0,
+        userCount: 0,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Generate funnel and retention insights for user growth
+   * @param {Object} metrics - Platform metrics
+   * @param {Object} funnel - Funnel conversion data
+   * @param {Array} userOpportunities - User opportunity data
+   * @returns {Promise<Object>} Funnel insights with churn risk data
+   */
+  async generateFunnelInsights(metrics, funnel, userOpportunities) {
+    try {
+      console.log('📈 OpenAI: Generating sales funnel insights');
+
+      // Filter for growth-related opportunities
+      const funnelUsers = userOpportunities.filter(u =>
+        ['churn_risk', 'unused_referral'].includes(u.opportunity_type)
+      );
+
+      // Format user details
+      const userSummary = funnelUsers.slice(0, 15).map((u, idx) =>
+        `${idx + 1}. [${u.opportunity_type}] ${u.full_name || 'Unknown'} (${u.email}):
+       - Last Activity: ${u.last_activity ? new Date(u.last_activity).toLocaleDateString() : 'Never'}
+       - Subscription: ${u.subscription_status || 'None'} (${u.plan_name || 'Free'})
+       - Posts Generated: ${u.posts_last_30_days || 0} in last 30 days
+       - Issue: ${u.opportunity_reason}`
+      ).join('\n');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'system',
+          content: `You are a customer success and growth strategist specializing in conversion funnel optimization and user retention. Your goal is to maximize user activation, prevent churn, and improve conversion rates at every funnel stage.`
+        }, {
+          role: 'user',
+          content: `Analyze this conversion funnel data and provide 3-5 SPECIFIC actions to improve user growth.
+
+**Funnel Metrics:**
+- Total Users: ${metrics?.total_users || 0}
+- New Users (30d): ${metrics?.new_users || 0}
+- Active Users (30d): ${metrics?.active_users || 0}
+- User Growth Rate: ${metrics?.user_growth_rate || 0}%
+- Successful Referrals: ${metrics?.successful_referrals || 0}/${metrics?.total_referrals || 0} (${metrics?.referral_conversion_rate || 0}% conversion)
+
+**Funnel Steps:**
+${funnel?.steps ? funnel.steps.map(s => `- ${s.step}: ${s.count} users (${s.conversion_rate}% conversion)`).join('\n') : 'Funnel data not provided'}
+
+**At-Risk & Inactive Users (Top ${funnelUsers.length}):**
+${userSummary || 'No specific retention opportunities identified'}
+
+Provide 3-5 SPECIFIC, ACTIONABLE funnel insights in this EXACT format:
+
+**[Priority: High/Medium] Insight Title**
+- **User/Segment**: [Specific user names & emails OR segment with exact user count and stage]
+- **Action**: [Exact outreach strategy - WHO to contact, WHAT to say, WHEN to reach out, specific messaging]
+- **Expected Result**: [Concrete conversion % improvement or user activation count with calculations]
+
+Focus on:
+1. Users who registered but didn't generate their first post (activation gap)
+2. Paying customers at risk of churning (inactive 30+ days)
+3. Conversion rate improvements at specific funnel steps
+4. Referral program optimization (users with unused referral codes)
+
+Be SPECIFIC - use actual user names, emails, last activity dates, and exact expected outcomes.`
+        }],
+        temperature: 0.5,
+        max_tokens: 2000
+      });
+
+      const insights = this.parseActionableInsights(completion.choices[0].message.content);
+
+      return {
+        title: "Sales Funnel & Retention",
+        priority: funnelUsers.length > 5 ? "monitor" : "healthy",
+        insights,
+        summary: `${insights.length} funnel optimization opportunities`,
+        atRiskCount: funnelUsers.length,
+        potentialChurnCost: funnelUsers.filter(u => u.opportunity_type === 'churn_risk').length * 20,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      console.error('❌ OpenAI: Failed to generate funnel insights:', error);
+      return {
+        title: "Sales Funnel & Retention",
+        insights: [],
+        error: error.message,
+        atRiskCount: 0,
+        potentialChurnCost: 0,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Generate product improvement insights for feature adoption and UX
+   * @param {Object} metrics - Platform metrics
+   * @param {Object} funnel - Funnel conversion data
+   * @returns {Promise<Object>} Product insights with impact estimates
+   */
+  async generateProductInsights(metrics, funnel) {
+    try {
+      console.log('🛠️ OpenAI: Generating product insights');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{
+          role: 'system',
+          content: `You are a product strategist specializing in SaaS feature adoption and UX optimization. Your goal is to identify product gaps, feature dropoff points, and improvements that will increase user engagement and retention.`
+        }, {
+          role: 'user',
+          content: `Analyze this product usage data and provide 3-4 SPECIFIC product improvement recommendations.
+
+**Product Metrics:**
+- Total Users: ${metrics?.total_users || 0}
+- Active Users (30d): ${metrics?.active_users || 0} (${((metrics?.active_users / metrics?.total_users) * 100).toFixed(1)}% activation rate)
+- New Users (30d): ${metrics?.new_users || 0}
+- Average Posts per Active User: ${metrics?.active_users > 0 ? ((metrics?.total_posts || 0) / metrics?.active_users).toFixed(1) : 0}
+
+**Feature Adoption Gaps:**
+- Referral Program: ${metrics?.successful_referrals || 0}/${metrics?.total_referrals || 0} conversion (${metrics?.referral_conversion_rate || 0}%)
+- Referral Posts Used: ${metrics?.referral_posts_used || 0}/${metrics?.referral_posts_granted || 0} granted
+- Subscription Adoption: ${metrics?.total_paying_users || 0}/${metrics?.total_users || 0} users (${((metrics?.total_paying_users / metrics?.total_users) * 100).toFixed(1)}% paid conversion)
+
+**Funnel Conversion Issues:**
+${funnel?.steps ? funnel.steps.filter(s => s.conversion_rate < 50).map(s =>
+  `- ${s.step}: Only ${s.conversion_rate}% conversion (${s.count} users dropoff)`
+).join('\n') : 'Funnel data not provided'}
+
+Provide 3-4 SPECIFIC, ACTIONABLE product insights in this EXACT format:
+
+**[Priority: Medium/Low] Insight Title**
+- **User/Segment**: [Affected segment with exact user count OR % of users]
+- **Action**: [Specific product/feature change, UX improvement, or onboarding enhancement]
+- **Expected Result**: [Concrete adoption % improvement or engagement metric increase]
+
+Focus on:
+1. Features with low adoption rates (data-driven identification)
+2. Funnel steps with high dropoff (>50% dropoff rate)
+3. Onboarding improvements for new user activation
+4. Product changes to increase engagement frequency
+
+Be SPECIFIC - use actual percentages, user counts, and measurable expected outcomes. Provide concrete implementation ideas.`
+        }],
+        temperature: 0.5,
+        max_tokens: 2000
+      });
+
+      const insights = this.parseActionableInsights(completion.choices[0].message.content);
+
+      return {
+        title: "Product Opportunities",
+        priority: "backlog",
+        insights,
+        summary: `${insights.length} product improvement recommendations`,
+        impactedUserCount: Math.floor(metrics?.total_users * 0.6), // Estimate: 60% could benefit
+        timestamp: new Date()
+      };
+    } catch (error) {
+      console.error('❌ OpenAI: Failed to generate product insights:', error);
+      return {
+        title: "Product Opportunities",
+        insights: [],
+        error: error.message,
+        impactedUserCount: 0,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
    * Perform keyword and SEO research using web search
    */
   async performKeywordResearch(businessType, targetAudience, location = null) {

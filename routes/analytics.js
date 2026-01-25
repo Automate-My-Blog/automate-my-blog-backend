@@ -323,7 +323,7 @@ router.get('/platform',
 );
 
 /**
- * Get LLM-powered insights
+ * Get LLM-powered insights - Three specialized sections
  * GET /api/v1/analytics/insights
  */
 router.get('/insights',
@@ -331,9 +331,9 @@ router.get('/insights',
   requireSuperAdmin,
   async (req, res) => {
     try {
-      const { context = 'comprehensive', period = '30d' } = req.query;
+      const { period = '30d' } = req.query;
 
-      console.log(`📊 Generating insights for period: ${period}`);
+      console.log(`🔍 Analytics: Generating three-section insights for period ${period}`);
 
       // Calculate dates based on period
       const days = parseInt(period.replace('d', ''));
@@ -341,41 +341,46 @@ router.get('/insights',
       const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
         .toISOString().split('T')[0];
 
-      // Get comprehensive data including user opportunities
+      // Gather all data
       const [metrics, funnel, userOpportunities] = await Promise.all([
         analyticsService.getComprehensiveMetrics(period),
         analyticsService.getFunnelData(startDate, endDate),
         analyticsService.getUserOpportunities()
       ]);
 
-      console.log(`📊 Retrieved ${userOpportunities.length} user opportunities`);
+      console.log(`📊 Data gathered: ${metrics?.total_users || 0} users, ${userOpportunities?.length || 0} opportunities`);
 
-      // Generate insights with user context
-      const insights = await openaiService.generateAnalyticsInsights({
-        metrics,
-        funnel,
-        cohorts: [],
-        sessions: {},
-        revenue: {
-          total: metrics.total_revenue,
-          paying_users: metrics.total_paying_users
-        }
-      }, userOpportunities);
+      // Generate three separate insight sections in parallel
+      const [revenueInsights, funnelInsights, productInsights] = await Promise.all([
+        openaiService.generateRevenueInsights(metrics, userOpportunities),
+        openaiService.generateFunnelInsights(metrics, funnel, userOpportunities),
+        openaiService.generateProductInsights(metrics, funnel)
+      ]);
 
+      console.log(`✅ Generated insights: Revenue=${revenueInsights.insights.length}, Funnel=${funnelInsights.insights.length}, Product=${productInsights.insights.length}`);
+
+      // Return structured response with three sections
       res.json({
         success: true,
-        insights: insights.insights || [],
-        userOpportunities,  // Include for frontend display
+        sections: {
+          revenue: revenueInsights,
+          funnel: funnelInsights,
+          product: productInsights
+        },
+        userOpportunities, // Keep for reference
         timestamp: new Date()
       });
+
     } catch (error) {
-      console.error('Error generating insights:', error);
+      console.error('❌ Failed to generate insights:', error);
       res.status(500).json({
         success: false,
-        error: 'Failed to generate insights',
-        message: error.message,
-        insights: [],
-        timestamp: new Date()
+        error: error.message,
+        sections: {
+          revenue: { insights: [], title: "Revenue Opportunities", error: error.message },
+          funnel: { insights: [], title: "Sales Funnel & Retention", error: error.message },
+          product: { insights: [], title: "Product Opportunities", error: error.message }
+        }
       });
     }
   }
@@ -464,6 +469,98 @@ router.get('/user-opportunities',
         error: 'Failed to get user opportunities',
         message: error.message
       });
+    }
+  }
+);
+
+/**
+ * Get clicks over time for usage metrics
+ * GET /api/v1/analytics/usage-metrics/clicks-over-time
+ */
+router.get('/usage-metrics/clicks-over-time',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate, interval = 'day' } = req.query;
+
+      const start = startDate || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+      const end = endDate || new Date().toISOString();
+
+      const data = await analyticsService.getClicksOverTime(start, end, interval);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Failed to get clicks over time:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
+
+/**
+ * Get actions over time for usage metrics
+ * GET /api/v1/analytics/usage-metrics/actions-over-time
+ */
+router.get('/usage-metrics/actions-over-time',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate, interval = 'hour' } = req.query;
+
+      const start = startDate || new Date(Date.now() - 7*24*60*60*1000).toISOString();
+      const end = endDate || new Date().toISOString();
+
+      const data = await analyticsService.getActionsOverTime(start, end, interval);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Failed to get actions over time:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
+
+/**
+ * Get active users over time for usage metrics
+ * GET /api/v1/analytics/usage-metrics/active-users-over-time
+ */
+router.get('/usage-metrics/active-users-over-time',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate, interval = 'day' } = req.query;
+
+      const start = startDate || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+      const end = endDate || new Date().toISOString();
+
+      const data = await analyticsService.getActiveUsersOverTime(start, end, interval);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Failed to get active users over time:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
+
+/**
+ * Get clicks by page for usage metrics
+ * GET /api/v1/analytics/usage-metrics/clicks-by-page
+ */
+router.get('/usage-metrics/clicks-by-page',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+
+      const start = startDate || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+      const end = endDate || new Date().toISOString();
+
+      const data = await analyticsService.getClicksByPage(start, end);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Failed to get clicks by page:', error);
+      res.status(500).json({ success: false, error: error.message });
     }
   }
 );
