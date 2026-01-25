@@ -80,8 +80,9 @@ router.post('/create-checkout-session', async (req, res) => {
 /**
  * Stripe Webhook Handler
  * POST /api/v1/stripe/webhook
+ * Note: Raw body parsing is handled globally in index.js for this route
  */
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+router.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
 

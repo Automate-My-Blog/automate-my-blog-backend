@@ -74,17 +74,22 @@ app.use(cors({
   credentials: true
 }));
 
-// JSON parsing with proper error handling
+// JSON parsing with proper error handling (skip for Stripe webhook which needs raw body)
 app.use((req, res, next) => {
-  express.json({ limit: '10mb' })(req, res, (err) => {
-    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-      return res.status(400).json({
-        error: 'Invalid JSON format',
-        message: 'The request body contains malformed JSON'
-      });
-    }
-    next(err);
-  });
+  // Stripe webhook needs raw body for signature verification
+  if (req.path === '/api/v1/stripe/webhook') {
+    express.raw({ type: 'application/json' })(req, res, next);
+  } else {
+    express.json({ limit: '10mb' })(req, res, (err) => {
+      if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({
+          error: 'Invalid JSON format',
+          message: 'The request body contains malformed JSON'
+        });
+      }
+      next(err);
+    });
+  }
 });
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
