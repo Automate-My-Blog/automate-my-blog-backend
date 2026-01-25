@@ -49,11 +49,18 @@ router.post('/track-conversion', async (req, res) => {
       } else {
         // Auto-create a lead if it doesn't exist
         console.log(`📝 Auto-creating lead for session: ${sessionId}`);
-        const websiteUrl = stepData.website_url || 'unknown';
-        const leadRecord = await leadsService.captureLead(websiteUrl, {}, {
+        const websiteUrl = stepData.website_url || 'https://unknown.com';
+
+        // Create minimal session info (no IP to avoid inet type errors)
+        const sessionInfo = {
           sessionId,
-          requestId: `auto_${Date.now()}`
-        });
+          requestId: `auto_${Date.now()}`,
+          ipAddress: null, // Explicitly set to null to avoid inet errors
+          userAgent: req.headers['user-agent'] || null,
+          referrer: req.headers['referer'] || null
+        };
+
+        const leadRecord = await leadsService.captureLead(websiteUrl, {}, sessionInfo);
         actualLeadId = leadRecord.leadId;
         console.log(`✅ Auto-created lead: ${actualLeadId}`);
       }

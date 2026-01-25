@@ -112,7 +112,7 @@ class LeadService {
       console.log(`📝 [${requestId}] Step 4: Creating lead record...`);
       const leadRecordStart = Date.now();
       const leadId = uuidv4();
-      const ipAddress = sessionInfo.ipAddress || 'unknown';
+      const ipAddress = sessionInfo.ipAddress || null; // Use NULL instead of 'unknown' for inet type
       const userAgent = sessionInfo.userAgent || 'unknown';
       const referrer = sessionInfo.referrer || null;
 
@@ -150,20 +150,21 @@ class LeadService {
       console.log(`   💾 [${requestId}] Inserting lead into website_leads table...`);
       const leadResult = await db.query(`
         INSERT INTO website_leads (
-          id, organization_id, website_url, website_domain, business_name, business_type, 
-          industry_category, estimated_company_size, lead_source, status, ip_address, 
-          user_agent, referrer, analysis_data, target_audience, content_focus, 
+          id, organization_id, session_id, website_url, website_domain, business_name, business_type,
+          industry_category, estimated_company_size, lead_source, status, ip_address,
+          user_agent, referrer, analysis_data, target_audience, content_focus,
           brand_voice, project_id, anonymous_user_id, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW())
         RETURNING *
       `, [
         leadId,
         organizationId, // Link to organization
+        sessionInfo.sessionId || null, // Track session ID for anonymous users
         websiteUrl,
         websiteDomain,
         analysisData.businessName || 'Unknown Business',
         analysisData.businessType || 'unknown',
-        analysisData.businessType || 'unknown', 
+        analysisData.businessType || 'unknown',
         analysisData.companySize || 'unknown',
         leadSource,
         'new',
