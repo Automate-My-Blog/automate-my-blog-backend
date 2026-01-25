@@ -103,11 +103,15 @@ app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), 
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 
-// Stripe webhook endpoint - NO AUTH (Stripe authenticates via webhook signature)
-app.use('/api/v1/stripe/webhook', stripeRoutes);
-
-// Other Stripe endpoints - require authentication
-app.use('/api/v1/stripe', authService.authMiddleware.bind(authService), stripeRoutes);
+// Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
+app.use('/api/v1/stripe', (req, res, next) => {
+  // Skip auth for webhook endpoint (Stripe uses signature verification)
+  if (req.path === '/webhook') {
+    return next();
+  }
+  // All other Stripe endpoints require authentication
+  authService.authMiddleware.bind(authService)(req, res, next);
+}, stripeRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
