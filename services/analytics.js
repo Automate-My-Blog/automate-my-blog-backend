@@ -210,6 +210,7 @@ class AnalyticsService {
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND uae.event_type IN ('login', 'user_login', 'session_start')
+              AND DATE(uae.timestamp) >= DATE($1)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -222,6 +223,7 @@ class AnalyticsService {
             INNER JOIN blog_posts bp ON u.id = bp.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
+              AND DATE(bp.created_at) >= DATE($1)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -234,6 +236,7 @@ class AnalyticsService {
             INNER JOIN pay_per_use_charges ppu ON u.id = ppu.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
+              AND DATE(ppu.charged_at) >= DATE($1)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -247,6 +250,7 @@ class AnalyticsService {
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND s.status = 'active'
+              AND DATE(s.created_at) >= DATE($1)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -261,6 +265,7 @@ class AnalyticsService {
             WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND s.status = 'active'
               AND s.plan_name = 'Professional'
+              AND DATE(s.created_at) >= DATE($1)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -271,9 +276,11 @@ class AnalyticsService {
       }
 
       const result = await db.query(query, [startDate, endDate]);
+      console.log(`✅ Analytics: Found ${result.rows.length} users at stage ${funnelStep}`);
       return result.rows;
     } catch (error) {
-      console.error(`⚠️ Analytics: Failed to get users at funnel stage - ${error.message}`);
+      console.error(`⚠️ Analytics: Failed to get users at funnel stage ${funnelStep} - ${error.message}`);
+      console.error(`⚠️ Analytics: Stack trace - ${error.stack}`);
       return [];
     }
   }
