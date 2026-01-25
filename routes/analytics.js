@@ -565,4 +565,27 @@ router.get('/usage-metrics/clicks-by-page',
   }
 );
 
+/**
+ * Get revenue over time for revenue section visualization
+ * GET /api/v1/analytics/revenue-over-time
+ */
+router.get('/revenue-over-time',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate, interval = 'day' } = req.query;
+
+      const start = startDate || new Date(Date.now() - 30*24*60*60*1000).toISOString();
+      const end = endDate || new Date().toISOString();
+
+      const data = await analyticsService.getRevenueOverTime(start, end, interval);
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Failed to get revenue over time:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
+
 export default router;

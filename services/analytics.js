@@ -971,6 +971,58 @@ class AnalyticsService {
       return [];
     }
   }
+
+  /**
+   * Get revenue over time for revenue section visualization
+   * @param {String} startDate - Start date (ISO format)
+   * @param {String} endDate - End date (ISO format)
+   * @param {String} interval - Time interval ('day' or 'week' or 'month')
+   * @returns {Promise<Array>} Time-series revenue data
+   */
+  async getRevenueOverTime(startDate, endDate, interval = 'day') {
+    try {
+      console.log(`📊 Analytics: Getting revenue over time from ${startDate} to ${endDate} (interval: ${interval})`);
+
+      const truncFunc = interval === 'month' ? 'month' : interval === 'week' ? 'week' : 'day';
+
+      const result = await db.query(`
+        WITH pay_per_use_revenue AS (
+          SELECT
+            DATE_TRUNC('${truncFunc}', charged_at) as period,
+            SUM(total_amount) as pay_per_use_revenue,
+            COUNT(*) as transaction_count
+          FROM pay_per_use_charges
+          WHERE charged_at >= $1 AND charged_at <= $2
+          GROUP BY DATE_TRUNC('${truncFunc}', charged_at)
+        ),
+        subscription_revenue AS (
+          SELECT
+            DATE_TRUNC('${truncFunc}', s.created_at) as period,
+            COUNT(DISTINCT CASE WHEN s.plan_name = 'Starter' THEN s.id END) * 20 as starter_mrr,
+            COUNT(DISTINCT CASE WHEN s.plan_name = 'Professional' THEN s.id END) * 50 as professional_mrr
+          FROM subscriptions s
+          WHERE s.status = 'active'
+            AND s.created_at >= $1 AND s.created_at <= $2
+          GROUP BY DATE_TRUNC('${truncFunc}', s.created_at)
+        )
+        SELECT
+          COALESCE(ppu.period, sub.period) as period,
+          COALESCE(ppu.pay_per_use_revenue, 0) as pay_per_use_revenue,
+          COALESCE(ppu.transaction_count, 0) as transaction_count,
+          COALESCE(sub.starter_mrr, 0) as starter_mrr,
+          COALESCE(sub.professional_mrr, 0) as professional_mrr,
+          COALESCE(ppu.pay_per_use_revenue, 0) + COALESCE(sub.starter_mrr, 0) + COALESCE(sub.professional_mrr, 0) as total_revenue
+        FROM pay_per_use_revenue ppu
+        FULL OUTER JOIN subscription_revenue sub ON ppu.period = sub.period
+        ORDER BY period ASC
+      `, [startDate, endDate]);
+
+      return result.rows;
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get revenue over time - ${error.message}`);
+      return [];
+    }
+  }
 }
 
 // Create singleton instance
