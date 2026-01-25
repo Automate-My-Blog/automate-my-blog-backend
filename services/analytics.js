@@ -1210,6 +1210,133 @@ class AnalyticsService {
       return [];
     }
   }
+
+  async getLeadFunnelData(startDate, endDate) {
+    try {
+      console.log(`📈 Analytics: Getting lead funnel data from ${startDate} to ${endDate}`);
+
+      const result = await db.query(`
+        WITH lead_base AS (
+          SELECT DISTINCT wl.id, wl.session_id, wl.created_at
+          FROM website_leads wl
+          WHERE DATE(wl.created_at) >= DATE($1)
+            AND DATE(wl.created_at) <= DATE($2)
+        ),
+        conversion_steps AS (
+          SELECT
+            lb.id as lead_id,
+            MAX(CASE WHEN ct.conversion_step = 'analysis_started' THEN 1 ELSE 0 END) as analysis_started,
+            MAX(CASE WHEN ct.conversion_step = 'analysis_completed' THEN 1 ELSE 0 END) as analysis_completed,
+            MAX(CASE WHEN ct.conversion_step = 'previews_viewed' THEN 1 ELSE 0 END) as previews_viewed,
+            MAX(CASE WHEN ct.conversion_step = 'audience_selected' THEN 1 ELSE 0 END) as audience_selected,
+            MAX(CASE WHEN ct.conversion_step = 'registration' THEN 1 ELSE 0 END) as registered,
+            MAX(CASE WHEN ct.conversion_step = 'content_generated' THEN 1 ELSE 0 END) as content_generated,
+            MAX(CASE WHEN ct.conversion_step = 'project_saved' THEN 1 ELSE 0 END) as project_saved,
+            MAX(CASE WHEN ct.conversion_step = 'content_exported' THEN 1 ELSE 0 END) as content_exported,
+            MAX(CASE WHEN ct.conversion_step = 'first_payment' THEN 1 ELSE 0 END) as first_payment
+          FROM lead_base lb
+          LEFT JOIN conversion_tracking ct ON lb.id = ct.website_lead_id
+          GROUP BY lb.id
+        )
+        SELECT
+          (SELECT COUNT(*) FROM lead_base) as total_leads,
+          (SELECT SUM(analysis_started) FROM conversion_steps) as analysis_started,
+          (SELECT SUM(analysis_completed) FROM conversion_steps) as analysis_completed,
+          (SELECT SUM(previews_viewed) FROM conversion_steps) as previews_viewed,
+          (SELECT SUM(audience_selected) FROM conversion_steps) as audience_selected,
+          (SELECT SUM(registered) FROM conversion_steps) as registered,
+          (SELECT SUM(content_generated) FROM conversion_steps) as content_generated,
+          (SELECT SUM(project_saved) FROM conversion_steps) as project_saved,
+          (SELECT SUM(content_exported) FROM conversion_steps) as content_exported,
+          (SELECT SUM(first_payment) FROM conversion_steps) as first_payment
+      `, [startDate, endDate]);
+
+      const counts = result.rows[0] || {};
+
+      // Build funnel steps array
+      const steps = [
+        {
+          step: 'total_leads',
+          name: 'Website Visitors',
+          count: parseInt(counts.total_leads) || 0,
+          conversion_rate: 100
+        },
+        {
+          step: 'analysis_started',
+          name: 'Started Analysis',
+          count: parseInt(counts.analysis_started) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'analysis_completed',
+          name: 'Completed Analysis',
+          count: parseInt(counts.analysis_completed) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'previews_viewed',
+          name: 'Viewed Audience Options',
+          count: parseInt(counts.previews_viewed) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'audience_selected',
+          name: 'Selected Target Audience',
+          count: parseInt(counts.audience_selected) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'registered',
+          name: 'Registered Account',
+          count: parseInt(counts.registered) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'content_generated',
+          name: 'Generated Content',
+          count: parseInt(counts.content_generated) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'project_saved',
+          name: 'Saved Project',
+          count: parseInt(counts.project_saved) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'content_exported',
+          name: 'Exported Content',
+          count: parseInt(counts.content_exported) || 0,
+          conversion_rate: 0
+        },
+        {
+          step: 'first_payment',
+          name: 'First Payment',
+          count: parseInt(counts.first_payment) || 0,
+          conversion_rate: 0
+        }
+      ];
+
+      // Calculate conversion rates (each step relative to previous step)
+      for (let i = 1; i < steps.length; i++) {
+        const prevCount = steps[i - 1].count;
+        if (prevCount > 0) {
+          steps[i].conversion_rate = (steps[i].count / prevCount) * 100;
+        }
+      }
+
+      return {
+        steps,
+        conversions: counts
+      };
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get lead funnel data - ${error.message}`);
+      return {
+        steps: [],
+        conversions: {}
+      };
+    }
+  }
 }
 
 // Create singleton instance

@@ -2,6 +2,7 @@ import express from 'express';
 import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
+import leadsService from '../services/leads.js';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -198,6 +199,35 @@ async function handleCheckoutCompleted(session) {
           JSON.stringify({ priceId, sessionId: session.id, amount: 15.00, type: 'one_time' })
         ]);
         console.log(`📊 Analytics event tracked: payment_success (one-time purchase)`);
+
+        // Track first payment for lead funnel
+        try {
+          const leadResult = await db.query(`
+            SELECT wl.id, wl.session_id
+            FROM website_leads wl
+            WHERE wl.converted_to_user_id = $1
+            ORDER BY wl.created_at DESC
+            LIMIT 1
+          `, [userId]);
+
+          if (leadResult.rows[0]) {
+            await leadsService.trackConversionStep(
+              leadResult.rows[0].id,
+              'first_payment',
+              {
+                amount: 15.00,
+                payment_type: 'one_time',
+                price_id: priceId,
+                timestamp: new Date().toISOString()
+              },
+              leadResult.rows[0].session_id
+            );
+            console.log(`📊 Lead conversion tracked: first_payment`);
+          }
+        } catch (leadTrackError) {
+          console.error(`⚠️ Failed to track lead conversion:`, leadTrackError.message);
+          // Don't throw - tracking failure shouldn't block payment processing
+        }
       } catch (eventError) {
         console.error(`⚠️ Failed to track analytics event:`, eventError.message);
         // Don't throw - analytics failure shouldn't block payment processing
@@ -393,6 +423,36 @@ async function handleCheckoutCompleted(session) {
           })
         ]);
         console.log(`📊 Analytics event tracked: subscription_started (active_subscriber) - ${planName}`);
+
+        // Track first payment for lead funnel
+        try {
+          const leadResult = await db.query(`
+            SELECT wl.id, wl.session_id
+            FROM website_leads wl
+            WHERE wl.converted_to_user_id = $1
+            ORDER BY wl.created_at DESC
+            LIMIT 1
+          `, [userId]);
+
+          if (leadResult.rows[0]) {
+            await leadsService.trackConversionStep(
+              leadResult.rows[0].id,
+              'first_payment',
+              {
+                plan_name: planName,
+                payment_type: 'subscription',
+                subscription_id: session.subscription,
+                credits,
+                timestamp: new Date().toISOString()
+              },
+              leadResult.rows[0].session_id
+            );
+            console.log(`📊 Lead conversion tracked: first_payment (subscription)`);
+          }
+        } catch (leadTrackError) {
+          console.error(`⚠️ Failed to track lead conversion:`, leadTrackError.message);
+          // Don't throw - tracking failure shouldn't block subscription processing
+        }
       } catch (eventError) {
         console.error(`⚠️ Failed to track analytics event:`, eventError.message);
         // Don't throw - analytics failure shouldn't block subscription processing

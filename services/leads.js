@@ -815,6 +815,26 @@ class LeadService {
   }
 
   /**
+   * Get lead by session ID
+   */
+  async getLeadBySessionId(sessionId) {
+    try {
+      const result = await db.query(`
+        SELECT id, website_url, business_name, status, session_id
+        FROM website_leads
+        WHERE session_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [sessionId]);
+
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error getting lead by session ID:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Track any conversion step for a lead
    */
   async trackConversionStep(leadId, stepName, stepData = {}, sessionId = null) {

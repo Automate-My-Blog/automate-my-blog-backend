@@ -31,6 +31,7 @@ import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
+import leadsRoutes from './routes/leads.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 
 // Load environment variables
@@ -107,6 +108,7 @@ app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), m
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
+app.use('/api/v1/leads', leadsRoutes);
 
 // Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
 app.use('/api/v1/stripe', (req, res, next) => {

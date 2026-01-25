@@ -182,6 +182,41 @@ router.get('/funnel/stage/:funnelStep/users',
 );
 
 /**
+ * Get lead funnel data (anonymous visitor journey)
+ * GET /api/v1/analytics/lead-funnel
+ */
+router.get('/lead-funnel',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { startDate, endDate } = req.query;
+
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          success: false,
+          error: 'startDate and endDate are required'
+        });
+      }
+
+      const leadFunnelData = await analyticsService.getLeadFunnelData(startDate, endDate);
+
+      res.json({
+        success: true,
+        ...leadFunnelData
+      });
+    } catch (error) {
+      console.error('Error getting lead funnel data:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to get lead funnel data',
+        message: error.message
+      });
+    }
+  }
+);
+
+/**
  * Get user journey
  * GET /api/v1/analytics/users/:userId/journey
  */
