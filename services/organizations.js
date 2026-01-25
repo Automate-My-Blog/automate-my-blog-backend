@@ -20,7 +20,7 @@ class OrganizationService {
   /**
    * Create or update organization from website analysis data
    */
-  async createOrUpdateOrganization(websiteUrl, analysisData) {
+  async createOrUpdateOrganization(websiteUrl, analysisData, sessionInfo = {}) {
     try {
       const websiteDomain = new URL(websiteUrl).hostname;
       
@@ -73,14 +73,14 @@ class OrganizationService {
         await db.query(`
           INSERT INTO organizations (
             id, name, slug, business_type, industry_category, business_model,
-            company_size, description, target_audience, brand_voice, 
-            website_goals, website_url, last_analyzed_at, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW(), NOW(), NOW())
+            company_size, description, target_audience, brand_voice,
+            website_goals, website_url, session_id, last_analyzed_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), NOW())
         `, [
-          organizationId, orgData.name, slug, orgData.business_type, 
+          organizationId, orgData.name, slug, orgData.business_type,
           orgData.industry_category, orgData.business_model, orgData.company_size,
           orgData.description, orgData.target_audience, orgData.brand_voice,
-          orgData.website_goals, orgData.website_url
+          orgData.website_goals, orgData.website_url, sessionInfo.sessionId || null
         ]);
 
         console.log(`🏢 Created new organization: ${orgData.name} (${organizationId})`);

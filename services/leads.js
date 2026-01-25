@@ -42,7 +42,7 @@ class LeadService {
       // Step 1: Create or update organization with business intelligence
       console.log(`🏢 [${requestId}] Step 1: Creating/updating organization...`);
       const orgStart = Date.now();
-      const organizationId = await organizationService.createOrUpdateOrganization(websiteUrl, analysisData);
+      const organizationId = await organizationService.createOrUpdateOrganization(websiteUrl, analysisData, sessionInfo);
       const orgTime = Date.now() - orgStart;
       console.log(`✅ [${requestId}] Organization created/updated in ${orgTime}ms: ${organizationId}`);
       
