@@ -148,7 +148,7 @@ router.get('/funnel/stage/:funnelStep/users',
   async (req, res) => {
     try {
       const { funnelStep } = req.params;
-      const { startDate, endDate } = req.query;
+      const { startDate, endDate, excludeAdvanced } = req.query;
 
       if (!startDate || !endDate) {
         return res.status(400).json({
@@ -157,7 +157,12 @@ router.get('/funnel/stage/:funnelStep/users',
         });
       }
 
-      const users = await analyticsService.getUsersAtFunnelStage(funnelStep, startDate, endDate);
+      const users = await analyticsService.getUsersAtFunnelStage(
+        funnelStep,
+        startDate,
+        endDate,
+        excludeAdvanced === 'true'
+      );
 
       res.json({
         success: true,

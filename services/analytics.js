@@ -170,11 +170,12 @@ class AnalyticsService {
    * @param {String} funnelStep - Funnel step (signed_up, email_verified, first_login, etc.)
    * @param {String} startDate - Start date
    * @param {String} endDate - End date
+   * @param {Boolean} excludeAdvanced - Exclude users who have progressed to next stage
    * @returns {Promise<Array>} Users at this stage with email/website
    */
-  async getUsersAtFunnelStage(funnelStep, startDate, endDate) {
+  async getUsersAtFunnelStage(funnelStep, startDate, endDate, excludeAdvanced = false) {
     try {
-      console.log(`📊 Analytics: Getting users at funnel stage ${funnelStep}`);
+      console.log(`📊 Analytics: Getting users at funnel stage ${funnelStep} (excludeAdvanced: ${excludeAdvanced})`);
 
       let query = '';
 
@@ -186,6 +187,7 @@ class AnalyticsService {
             LEFT JOIN projects p ON u.id = p.user_id
             WHERE DATE(u.created_at) >= DATE($1)
               AND DATE(u.created_at) <= DATE($2)
+              ${excludeAdvanced ? 'AND u.email_verified_at IS NULL' : ''}
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -199,6 +201,12 @@ class AnalyticsService {
             WHERE DATE(u.created_at) >= DATE($1)
               AND DATE(u.created_at) <= DATE($2)
               AND u.email_verified_at IS NOT NULL
+              ${excludeAdvanced ? `AND NOT EXISTS (
+                SELECT 1 FROM user_activity_events uae
+                WHERE uae.user_id = u.id
+                  AND uae.event_type IN ('login', 'user_login', 'session_start')
+                  AND DATE(uae.timestamp) >= DATE($1)
+              )` : ''}
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -218,6 +226,10 @@ class AnalyticsService {
             LEFT JOIN projects p ON ub.id = p.user_id
             WHERE uae.event_type IN ('login', 'user_login', 'session_start')
               AND DATE(uae.timestamp) >= DATE($1)
+              ${excludeAdvanced ? `AND NOT EXISTS (
+                SELECT 1 FROM blog_posts bp
+                WHERE bp.user_id = ub.id AND DATE(bp.created_at) >= DATE($1)
+              )` : ''}
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -236,6 +248,10 @@ class AnalyticsService {
             INNER JOIN blog_posts bp ON ub.id = bp.user_id
             LEFT JOIN projects p ON ub.id = p.user_id
             WHERE DATE(bp.created_at) >= DATE($1)
+              ${excludeAdvanced ? `AND NOT EXISTS (
+                SELECT 1 FROM pay_per_use_charges ppu
+                WHERE ppu.user_id = ub.id AND DATE(ppu.charged_at) >= DATE($1)
+              )` : ''}
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -254,6 +270,10 @@ class AnalyticsService {
             INNER JOIN pay_per_use_charges ppu ON ub.id = ppu.user_id
             LEFT JOIN projects p ON ub.id = p.user_id
             WHERE DATE(ppu.charged_at) >= DATE($1)
+              ${excludeAdvanced ? `AND NOT EXISTS (
+                SELECT 1 FROM subscriptions s
+                WHERE s.user_id = ub.id AND s.status = 'active' AND DATE(s.created_at) >= DATE($1)
+              )` : ''}
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -273,6 +293,7 @@ class AnalyticsService {
             LEFT JOIN projects p ON ub.id = p.user_id
             WHERE s.status = 'active'
               AND DATE(s.created_at) >= DATE($1)
+              ${excludeAdvanced ? `AND s.plan_name != 'Professional'` : ''}
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
