@@ -74,10 +74,9 @@ app.use(cors({
   credentials: true
 }));
 
-// JSON parsing with proper error handling (skip for Stripe webhook which needs raw body)
+// Body parsing - raw for webhook, JSON for everything else
 app.use((req, res, next) => {
-  // Stripe webhook needs raw body for signature verification
-  if (req.path === '/api/v1/stripe/webhook') {
+  if (req.method === 'POST' && req.url === '/api/v1/stripe/webhook') {
     express.raw({ type: 'application/json' })(req, res, next);
   } else {
     express.json({ limit: '10mb' })(req, res, (err) => {
