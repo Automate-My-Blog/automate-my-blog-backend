@@ -51,15 +51,17 @@ class OrganizationService {
         organizationId = existingOrg.rows[0].id;
         
         await db.query(`
-          UPDATE organizations 
-          SET business_type = $2, industry_category = $3, business_model = $4, 
-              company_size = $5, description = $6, target_audience = $7, 
-              brand_voice = $8, website_goals = $9, last_analyzed_at = NOW(), updated_at = NOW()
+          UPDATE organizations
+          SET business_type = $2, industry_category = $3, business_model = $4,
+              company_size = $5, description = $6, target_audience = $7,
+              brand_voice = $8, website_goals = $9, session_id = COALESCE($10, session_id),
+              last_analyzed_at = NOW(), updated_at = NOW()
           WHERE id = $1
         `, [
           organizationId, orgData.business_type, orgData.industry_category,
           orgData.business_model, orgData.company_size, orgData.description,
-          orgData.target_audience, orgData.brand_voice, orgData.website_goals
+          orgData.target_audience, orgData.brand_voice, orgData.website_goals,
+          sessionInfo.sessionId || null
         ]);
 
         console.log(`📊 Updated existing organization: ${orgData.name}`);
