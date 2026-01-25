@@ -181,9 +181,9 @@ class AnalyticsService {
       switch (funnelStep) {
         case 'signed_up':
           query = `
-            SELECT u.id, u.email, u.created_at, wa.website_url
+            SELECT DISTINCT u.id, u.email, u.created_at, p.website_url
             FROM users u
-            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            LEFT JOIN projects p ON u.id = p.user_id
             WHERE DATE(u.created_at) >= DATE($1)
               AND DATE(u.created_at) <= DATE($2)
             ORDER BY u.created_at DESC
@@ -193,9 +193,9 @@ class AnalyticsService {
 
         case 'email_verified':
           query = `
-            SELECT u.id, u.email, u.created_at, wa.website_url
+            SELECT DISTINCT u.id, u.email, u.created_at, p.website_url
             FROM users u
-            LEFT JOIN website_analysis wa ON u.id = wa.user_id
+            LEFT JOIN projects p ON u.id = p.user_id
             WHERE DATE(u.created_at) >= DATE($1)
               AND DATE(u.created_at) <= DATE($2)
               AND u.email_verified_at IS NOT NULL
@@ -212,10 +212,10 @@ class AnalyticsService {
               WHERE DATE(u.created_at) >= DATE($1)
                 AND DATE(u.created_at) <= DATE($2)
             )
-            SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
+            SELECT DISTINCT ub.id, ub.email, ub.created_at, p.website_url
             FROM user_base ub
             INNER JOIN user_activity_events uae ON ub.id = uae.user_id
-            LEFT JOIN website_analysis wa ON ub.id = wa.user_id
+            LEFT JOIN projects p ON ub.id = p.user_id
             WHERE uae.event_type IN ('login', 'user_login', 'session_start')
               AND DATE(uae.timestamp) >= DATE($1)
             ORDER BY ub.created_at DESC
@@ -231,10 +231,10 @@ class AnalyticsService {
               WHERE DATE(u.created_at) >= DATE($1)
                 AND DATE(u.created_at) <= DATE($2)
             )
-            SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
+            SELECT DISTINCT ub.id, ub.email, ub.created_at, p.website_url
             FROM user_base ub
             INNER JOIN blog_posts bp ON ub.id = bp.user_id
-            LEFT JOIN website_analysis wa ON ub.id = wa.user_id
+            LEFT JOIN projects p ON ub.id = p.user_id
             WHERE DATE(bp.created_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
@@ -249,10 +249,10 @@ class AnalyticsService {
               WHERE DATE(u.created_at) >= DATE($1)
                 AND DATE(u.created_at) <= DATE($2)
             )
-            SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
+            SELECT DISTINCT ub.id, ub.email, ub.created_at, p.website_url
             FROM user_base ub
             INNER JOIN pay_per_use_charges ppu ON ub.id = ppu.user_id
-            LEFT JOIN website_analysis wa ON ub.id = wa.user_id
+            LEFT JOIN projects p ON ub.id = p.user_id
             WHERE DATE(ppu.charged_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
@@ -267,10 +267,10 @@ class AnalyticsService {
               WHERE DATE(u.created_at) >= DATE($1)
                 AND DATE(u.created_at) <= DATE($2)
             )
-            SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url, s.plan_name
+            SELECT DISTINCT ub.id, ub.email, ub.created_at, p.website_url, s.plan_name
             FROM user_base ub
             INNER JOIN subscriptions s ON ub.id = s.user_id
-            LEFT JOIN website_analysis wa ON ub.id = wa.user_id
+            LEFT JOIN projects p ON ub.id = p.user_id
             WHERE s.status = 'active'
               AND DATE(s.created_at) >= DATE($1)
             ORDER BY ub.created_at DESC
@@ -286,10 +286,10 @@ class AnalyticsService {
               WHERE DATE(u.created_at) >= DATE($1)
                 AND DATE(u.created_at) <= DATE($2)
             )
-            SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url, s.plan_name
+            SELECT DISTINCT ub.id, ub.email, ub.created_at, p.website_url, s.plan_name
             FROM user_base ub
             INNER JOIN subscriptions s ON ub.id = s.user_id
-            LEFT JOIN website_analysis wa ON ub.id = wa.user_id
+            LEFT JOIN projects p ON ub.id = p.user_id
             WHERE s.status = 'active'
               AND s.plan_name = 'Professional'
               AND DATE(s.created_at) >= DATE($1)
