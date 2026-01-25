@@ -588,7 +588,7 @@ class AnalyticsService {
               THEN uc.id
             END) as referral_posts_used
           FROM referrals r
-          LEFT JOIN referral_rewards rr ON r.id = rr.earned_from_referral_id
+          LEFT JOIN referral_rewards rr ON r.invite_id = rr.earned_from_invite_id
           LEFT JOIN user_credits uc ON rr.user_id = uc.user_id
             AND uc.source_type = 'referral'
         ),
