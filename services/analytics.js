@@ -184,7 +184,8 @@ class AnalyticsService {
             SELECT u.id, u.email, u.created_at, wa.website_url
             FROM users u
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+            WHERE DATE(u.created_at) >= DATE($1)
+              AND DATE(u.created_at) <= DATE($2)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -195,7 +196,8 @@ class AnalyticsService {
             SELECT u.id, u.email, u.created_at, wa.website_url
             FROM users u
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+            WHERE DATE(u.created_at) >= DATE($1)
+              AND DATE(u.created_at) <= DATE($2)
               AND u.email_verified_at IS NOT NULL
             ORDER BY u.created_at DESC
             LIMIT 100
@@ -207,14 +209,15 @@ class AnalyticsService {
             WITH user_base AS (
               SELECT DISTINCT u.id, u.email, u.created_at
               FROM users u
-              WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+              WHERE DATE(u.created_at) >= DATE($1)
+                AND DATE(u.created_at) <= DATE($2)
             )
             SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
             FROM user_base ub
             INNER JOIN user_activity_events uae ON ub.id = uae.user_id
             LEFT JOIN website_analysis wa ON ub.id = wa.user_id
             WHERE uae.event_type IN ('login', 'user_login', 'session_start')
-              AND uae.timestamp >= $1::date
+              AND DATE(uae.timestamp) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -225,13 +228,14 @@ class AnalyticsService {
             WITH user_base AS (
               SELECT DISTINCT u.id, u.email, u.created_at
               FROM users u
-              WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+              WHERE DATE(u.created_at) >= DATE($1)
+                AND DATE(u.created_at) <= DATE($2)
             )
             SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
             FROM user_base ub
             INNER JOIN blog_posts bp ON ub.id = bp.user_id
             LEFT JOIN website_analysis wa ON ub.id = wa.user_id
-            WHERE bp.created_at >= $1::date
+            WHERE DATE(bp.created_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -242,13 +246,14 @@ class AnalyticsService {
             WITH user_base AS (
               SELECT DISTINCT u.id, u.email, u.created_at
               FROM users u
-              WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+              WHERE DATE(u.created_at) >= DATE($1)
+                AND DATE(u.created_at) <= DATE($2)
             )
             SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url
             FROM user_base ub
             INNER JOIN pay_per_use_charges ppu ON ub.id = ppu.user_id
             LEFT JOIN website_analysis wa ON ub.id = wa.user_id
-            WHERE ppu.charged_at >= $1::date
+            WHERE DATE(ppu.charged_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -259,14 +264,15 @@ class AnalyticsService {
             WITH user_base AS (
               SELECT DISTINCT u.id, u.email, u.created_at
               FROM users u
-              WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+              WHERE DATE(u.created_at) >= DATE($1)
+                AND DATE(u.created_at) <= DATE($2)
             )
             SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url, s.plan_name
             FROM user_base ub
             INNER JOIN subscriptions s ON ub.id = s.user_id
             LEFT JOIN website_analysis wa ON ub.id = wa.user_id
             WHERE s.status = 'active'
-              AND s.created_at >= $1::date
+              AND DATE(s.created_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
@@ -277,7 +283,8 @@ class AnalyticsService {
             WITH user_base AS (
               SELECT DISTINCT u.id, u.email, u.created_at
               FROM users u
-              WHERE u.created_at >= $1::date AND u.created_at <= $2::date + interval '1 day'
+              WHERE DATE(u.created_at) >= DATE($1)
+                AND DATE(u.created_at) <= DATE($2)
             )
             SELECT DISTINCT ub.id, ub.email, ub.created_at, wa.website_url, s.plan_name
             FROM user_base ub
@@ -285,7 +292,7 @@ class AnalyticsService {
             LEFT JOIN website_analysis wa ON ub.id = wa.user_id
             WHERE s.status = 'active'
               AND s.plan_name = 'Professional'
-              AND s.created_at >= $1::date
+              AND DATE(s.created_at) >= DATE($1)
             ORDER BY ub.created_at DESC
             LIMIT 100
           `;
