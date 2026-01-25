@@ -93,33 +93,35 @@ class AnalyticsService {
       console.log(`📈 Analytics: Getting funnel data from ${startDate} to ${endDate}`);
 
       // Calculate funnel based on actual user actions and data
+      // Use DATE() to properly compare date strings with timestamp columns
       const result = await db.query(`
         WITH user_base AS (
           SELECT DISTINCT u.id, u.email, u.created_at, u.email_verified
           FROM users u
-          WHERE u.created_at >= $1 AND u.created_at <= $2
+          WHERE DATE(u.created_at) >= DATE($1)
+            AND DATE(u.created_at) <= DATE($2)
         ),
         user_logins AS (
           SELECT DISTINCT user_id
           FROM user_activity_events
           WHERE event_type IN ('login', 'user_login', 'session_start')
-            AND timestamp >= $1
+            AND DATE(timestamp) >= DATE($1)
         ),
         user_generations AS (
           SELECT DISTINCT user_id
           FROM blog_posts
-          WHERE created_at >= $1
+          WHERE DATE(created_at) >= DATE($1)
         ),
         user_payments AS (
           SELECT DISTINCT user_id
           FROM pay_per_use_charges
-          WHERE charged_at >= $1
+          WHERE DATE(charged_at) >= DATE($1)
         ),
         user_subscriptions AS (
           SELECT DISTINCT user_id, plan_name
           FROM subscriptions
           WHERE status = 'active'
-            AND created_at >= $1
+            AND DATE(created_at) >= DATE($1)
         )
         SELECT
           (SELECT COUNT(*) FROM user_base) as signed_up,
@@ -133,15 +135,17 @@ class AnalyticsService {
 
       const counts = result.rows[0];
 
+      console.log(`📊 Analytics: Funnel counts - signed_up: ${counts.signed_up}, email_verified: ${counts.email_verified}, first_login: ${counts.first_login}, first_generation: ${counts.first_generation}`);
+
       // Build steps array with conversion rates
       const steps = [
-        { step: 'signed_up', name: 'Signed Up', count: parseInt(counts.signed_up), conversion_rate: 100 },
-        { step: 'email_verified', name: 'Email Verified', count: parseInt(counts.email_verified), conversion_rate: 0 },
-        { step: 'first_login', name: 'First Login', count: parseInt(counts.first_login), conversion_rate: 0 },
-        { step: 'first_generation', name: 'First Generation', count: parseInt(counts.first_generation), conversion_rate: 0 },
-        { step: 'payment_success', name: 'Payment Success', count: parseInt(counts.payment_success), conversion_rate: 0 },
-        { step: 'active_subscriber', name: 'Active Subscriber', count: parseInt(counts.active_subscriber), conversion_rate: 0 },
-        { step: 'upsell', name: 'Upsell', count: parseInt(counts.upsell), conversion_rate: 0 }
+        { step: 'signed_up', name: 'Signed Up', count: parseInt(counts.signed_up) || 0, conversion_rate: 100 },
+        { step: 'email_verified', name: 'Email Verified', count: parseInt(counts.email_verified) || 0, conversion_rate: 0 },
+        { step: 'first_login', name: 'First Login', count: parseInt(counts.first_login) || 0, conversion_rate: 0 },
+        { step: 'first_generation', name: 'First Generation', count: parseInt(counts.first_generation) || 0, conversion_rate: 0 },
+        { step: 'payment_success', name: 'Payment Success', count: parseInt(counts.payment_success) || 0, conversion_rate: 0 },
+        { step: 'active_subscriber', name: 'Active Subscriber', count: parseInt(counts.active_subscriber) || 0, conversion_rate: 0 },
+        { step: 'upsell', name: 'Upsell', count: parseInt(counts.upsell) || 0, conversion_rate: 0 }
       ];
 
       // Calculate conversion rates (percentage of previous step)
@@ -152,9 +156,11 @@ class AnalyticsService {
         }
       }
 
+      console.log(`✅ Analytics: Returning ${steps.length} funnel steps`);
       return { steps, conversions: {} };
     } catch (error) {
       console.error(`⚠️ Analytics: Failed to get funnel data - ${error.message}`);
+      console.error(`⚠️ Analytics: Stack trace - ${error.stack}`);
       return { steps: [], conversions: {} };
     }
   }
@@ -178,7 +184,7 @@ class AnalyticsService {
             SELECT u.id, u.email, u.created_at, wa.website_url
             FROM users u
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -189,7 +195,7 @@ class AnalyticsService {
             SELECT u.id, u.email, u.created_at, wa.website_url
             FROM users u
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND u.email_verified = true
             ORDER BY u.created_at DESC
             LIMIT 100
@@ -202,7 +208,7 @@ class AnalyticsService {
             FROM users u
             INNER JOIN user_activity_events uae ON u.id = uae.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND uae.event_type IN ('login', 'user_login', 'session_start')
             ORDER BY u.created_at DESC
             LIMIT 100
@@ -215,7 +221,7 @@ class AnalyticsService {
             FROM users u
             INNER JOIN blog_posts bp ON u.id = bp.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -227,7 +233,7 @@ class AnalyticsService {
             FROM users u
             INNER JOIN pay_per_use_charges ppu ON u.id = ppu.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
             ORDER BY u.created_at DESC
             LIMIT 100
           `;
@@ -239,7 +245,7 @@ class AnalyticsService {
             FROM users u
             INNER JOIN subscriptions s ON u.id = s.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND s.status = 'active'
             ORDER BY u.created_at DESC
             LIMIT 100
@@ -252,7 +258,7 @@ class AnalyticsService {
             FROM users u
             INNER JOIN subscriptions s ON u.id = s.user_id
             LEFT JOIN website_analysis wa ON u.id = wa.user_id
-            WHERE u.created_at >= $1 AND u.created_at <= $2
+            WHERE DATE(u.created_at) >= DATE($1) AND DATE(u.created_at) <= DATE($2)
               AND s.status = 'active'
               AND s.plan_name = 'Professional'
             ORDER BY u.created_at DESC
