@@ -30,6 +30,7 @@ import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
+import analyticsRoutes from './routes/analytics.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 
 // Load environment variables
@@ -116,6 +117,9 @@ app.use('/api/v1/stripe', (req, res, next) => {
   // All other Stripe endpoints require authentication
   authService.authMiddleware.bind(authService)(req, res, next);
 }, stripeRoutes);
+
+// Analytics routes - all require authentication
+app.use('/api/v1/analytics', analyticsRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

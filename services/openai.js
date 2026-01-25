@@ -957,6 +957,144 @@ Provide a JSON response with this exact structure:
   }
 
   /**
+   * Generate analytics insights from data
+   * @param {Object} analyticsData - Analytics data (funnel, cohorts, sessions, revenue)
+   * @param {String} context - Analysis context (funnel, retention, revenue)
+   * @returns {Promise<Object>} Insights and recommendations
+   */
+  async generateAnalyticsInsights(analyticsData, userOpportunities = []) {
+    try {
+      console.log(`📈 OpenAI: Generating analytics insights with ${userOpportunities.length} user opportunities`);
+
+      const { funnel, metrics, cohorts, sessions, revenue } = analyticsData;
+
+      // Format user opportunities for LLM
+      const opportunitySummary = userOpportunities.slice(0, 15).map((opp, idx) =>
+        `${idx + 1}. [${opp.opportunity_type}] ${opp.full_name || 'Unknown'} (${opp.email}): ${opp.recommended_action}`
+      ).join('\n');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',  // Use GPT-4o for better reasoning
+        messages: [
+          {
+            role: 'system',
+            content: `You are a product analytics expert analyzing AutoBlog, a blog generation SaaS platform. Your goal is to provide SPECIFIC, ACTIONABLE insights with user names and concrete next steps - not generic advice.`
+          },
+          {
+            role: 'user',
+            content: `Analyze this product analytics data and provide 5-7 SPECIFIC actionable insights.
+
+**Platform Metrics:**
+- Total Users: ${metrics?.total_users || 0}
+- New Users (30d): ${metrics?.new_users || 0}
+- User Growth Rate: ${metrics?.user_growth_rate || 0}%
+- Active Paying Users: ${metrics?.total_paying_users || 0}
+- Starter Plans: ${metrics?.starter_count || 0}
+- Professional Plans: ${metrics?.professional_count || 0}
+- Subscription MRR: $${metrics?.subscription_mrr || 0}
+- Pay-Per-Use Revenue (30d): $${metrics?.pay_per_use_revenue || 0}
+- Total Revenue (30d): $${metrics?.total_revenue || 0}
+- Revenue Growth Rate: ${metrics?.revenue_growth_rate || 0}%
+- Total Referrals: ${metrics?.total_referrals || 0}
+- Successful Referrals: ${metrics?.successful_referrals || 0}
+- Referral Conversion Rate: ${metrics?.referral_conversion_rate || 0}%
+- Referral Posts Granted: ${metrics?.referral_posts_granted || 0}
+- Referral Posts Used: ${metrics?.referral_posts_used || 0}
+- Active Users (30d): ${metrics?.active_users || 0}
+
+**Top User Opportunities (Specific People to Contact):**
+${opportunitySummary || 'No specific user opportunities identified yet'}
+
+**IMPORTANT INSTRUCTIONS:**
+Provide insights in this EXACT format:
+**[Priority: High/Medium/Low] Insight Title**
+- **User/Segment**: [Specific user names/emails from above OR segment description with numbers]
+- **Action**: [Exact steps - WHO to contact, WHAT to say, WHEN to do it]
+- **Expected Result**: [Concrete metric improvement with target numbers]
+
+Focus on:
+1. **Immediate revenue opportunities** - Which SPECIFIC users to reach out to first and why
+2. **Conversion optimization** - Specific bottlenecks with user examples
+3. **Retention risks** - Name paying customers at risk of churning
+4. **Growth tactics** - Referral program improvements with user examples
+5. **Product improvements** - Based on user behavior patterns
+
+BE SPECIFIC - Use actual user names, emails, and numbers from the data above. Never say "reach out to users who..." - instead say "Reach out to John Smith (john@example.com)..."`
+          }
+        ],
+        temperature: 0.5,
+        max_tokens: 2500
+      });
+
+      const response = completion.choices[0].message.content;
+
+      return {
+        insights: this.parseActionableInsights(response),
+        rawResponse: response,
+        timestamp: new Date()
+      };
+    } catch (error) {
+      console.error('❌ OpenAI: Failed to generate analytics insights:', error);
+      return {
+        insights: [],
+        error: error.message,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Parse actionable insights with user/segment and specific actions
+   * @param {String} text - Raw LLM response
+   * @returns {Array} Parsed insights
+   */
+  parseActionableInsights(text) {
+    const insights = [];
+    // Updated regex to match the new format with Priority, User/Segment, Action, Expected Result
+    const regex = /\*\*\[Priority:\s*(High|Medium|Low)\]\s*(.+?)\*\*\s*-\s*\*\*User\/Segment\*\*:\s*(.+?)\n\s*-\s*\*\*Action\*\*:\s*(.+?)\n\s*-\s*\*\*Expected Result\*\*:\s*(.+?)(?=\n\*\*\[Priority:|$)/gs;
+
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      insights.push({
+        priority: match[1].trim(),
+        title: match[2].trim(),
+        userSegment: match[3].trim(),
+        action: match[4].trim(),
+        expectedResult: match[5].trim(),
+        impact: match[1].trim()  // Map priority to impact for backwards compatibility
+      });
+    }
+
+    // Fallback: try old format if new format didn't match
+    if (insights.length === 0) {
+      const oldRegex = /\d+\.\s\*\*Insight\*\*:\s(.+?)\n\s+-\s\*\*Impact\*\*:\s(.+?)\n\s+-\s\*\*Action\*\*:\s(.+?)\n\s+-\s\*\*Expected Result\*\*:\s(.+?)(?=\n\n|\n\d+\.|$)/gs;
+      let oldMatch;
+      while ((oldMatch = oldRegex.exec(text)) !== null) {
+        insights.push({
+          priority: oldMatch[2].trim(),
+          title: oldMatch[1].trim(),
+          userSegment: 'General',
+          action: oldMatch[3].trim(),
+          expectedResult: oldMatch[4].trim(),
+          impact: oldMatch[2].trim()
+        });
+      }
+    }
+
+    return insights;
+  }
+
+  /**
+   * Parse insights from analytics LLM response (legacy method for backwards compatibility)
+   * @param {String} text - Raw LLM response
+   * @returns {Array} Parsed insights
+   */
+  parseAnalyticsInsights(text) {
+    // Redirect to new parser
+    return this.parseActionableInsights(text);
+  }
+
+  /**
    * Perform keyword and SEO research using web search
    */
   async performKeywordResearch(businessType, targetAudience, location = null) {

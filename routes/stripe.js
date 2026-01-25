@@ -1,5 +1,6 @@
 import express from 'express';
 import Stripe from 'stripe';
+import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 
 const router = express.Router();
@@ -180,6 +181,27 @@ async function handleCheckoutCompleted(session) {
       `, [userId, chargeId]);
 
       console.log(`✅ Added 1 purchased credit to user ${userId}`);
+
+      // Track payment event for analytics funnel
+      try {
+        await db.query(`
+          INSERT INTO user_activity_events (
+            id, user_id, event_type, conversion_funnel_step,
+            revenue_attributed, event_data, timestamp
+          ) VALUES (
+            $1, $2, 'payment_success', 'payment_success',
+            15.00, $3, NOW()
+          )
+        `, [
+          uuidv4(),
+          userId,
+          JSON.stringify({ priceId, sessionId: session.id, amount: 15.00, type: 'one_time' })
+        ]);
+        console.log(`📊 Analytics event tracked: payment_success (one-time purchase)`);
+      } catch (eventError) {
+        console.error(`⚠️ Failed to track analytics event:`, eventError.message);
+        // Don't throw - analytics failure shouldn't block payment processing
+      }
     } else {
       // Subscription: Create or update subscription record
       const planName = getPlanNameFromPriceId(priceId);
@@ -349,6 +371,32 @@ async function handleCheckoutCompleted(session) {
       `, [userId, periodStart, periodEnd, credits]);
 
       console.log(`✅ Reset usage tracking for user ${userId}`);
+
+      // Track subscription event for analytics funnel
+      try {
+        await db.query(`
+          INSERT INTO user_activity_events (
+            id, user_id, event_type, conversion_funnel_step,
+            event_data, timestamp
+          ) VALUES (
+            $1, $2, 'subscription_started', 'active_subscriber',
+            $3, NOW()
+          )
+        `, [
+          uuidv4(),
+          userId,
+          JSON.stringify({
+            planName,
+            subscriptionId: session.subscription,
+            credits,
+            sessionId: session.id
+          })
+        ]);
+        console.log(`📊 Analytics event tracked: subscription_started (active_subscriber) - ${planName}`);
+      } catch (eventError) {
+        console.error(`⚠️ Failed to track analytics event:`, eventError.message);
+        // Don't throw - analytics failure shouldn't block subscription processing
+      }
     }
   } catch (error) {
     console.error('❌ Error handling checkout completion:', error);

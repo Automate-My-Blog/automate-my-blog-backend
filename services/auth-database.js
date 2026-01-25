@@ -358,6 +358,27 @@ class DatabaseAuthService {
       organization_id: organization.id
     });
 
+    // Track registration event for analytics funnel
+    try {
+      await db.query(`
+        INSERT INTO user_activity_events (
+          id, user_id, event_type, conversion_funnel_step,
+          event_data, timestamp
+        ) VALUES (
+          $1, $2, 'user_registered', 'signed_up',
+          $3, NOW()
+        )
+      `, [
+        uuidv4(),
+        user.id,
+        JSON.stringify({ email: user.email, plan_tier: user.plan_tier, organization_id: organization.id })
+      ]);
+      console.log(`📊 [${dbRegId}] Analytics event tracked: user_registered (signed_up)`);
+    } catch (eventError) {
+      console.error(`⚠️ [${dbRegId}] Failed to track analytics event:`, eventError.message);
+      // Don't throw - analytics failure shouldn't block registration
+    }
+
     // Link website lead if user came from website analysis
     await this.linkWebsiteLeadToUser(user.id, organization.id, websiteUrl);
 
@@ -540,6 +561,39 @@ class DatabaseAuthService {
     await this.logUserActivity(user.id, 'user_login', {
       session_id: sessionId
     });
+
+    // Track login event for analytics funnel
+    try {
+      // Check if this is the first login
+      const isFirstLogin = await db.query(`
+        SELECT COUNT(*) as login_count
+        FROM user_activity_events
+        WHERE user_id = $1 AND event_type = 'user_login'
+      `, [user.id]);
+
+      const loginCount = parseInt(isFirstLogin.rows[0]?.login_count || 0);
+      const funnelStep = loginCount === 0 ? 'first_login' : null;
+
+      await db.query(`
+        INSERT INTO user_activity_events (
+          id, user_id, session_id, event_type,
+          conversion_funnel_step, event_data, timestamp
+        ) VALUES (
+          $1, $2, $3, 'user_login',
+          $4, $5, NOW()
+        )
+      `, [
+        uuidv4(),
+        user.id,
+        sessionId,
+        funnelStep,
+        JSON.stringify({ email: user.email, session_id: sessionId })
+      ]);
+      console.log(`📊 Analytics event tracked: user_login${funnelStep ? ' (first_login)' : ''}`);
+    } catch (eventError) {
+      console.error(`⚠️ Failed to track analytics event:`, eventError.message);
+      // Don't throw - analytics failure shouldn't block login
+    }
 
     // Generate tokens with all user data including permissions
     const userForToken = {
