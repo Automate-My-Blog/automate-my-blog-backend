@@ -46,6 +46,16 @@ router.post('/track-conversion', async (req, res) => {
       const lead = await leadsService.getLeadBySessionId(sessionId);
       if (lead) {
         actualLeadId = lead.id;
+      } else {
+        // Auto-create a lead if it doesn't exist
+        console.log(`📝 Auto-creating lead for session: ${sessionId}`);
+        const websiteUrl = stepData.website_url || 'unknown';
+        const leadRecord = await leadsService.captureLead(websiteUrl, {}, {
+          sessionId,
+          requestId: `auto_${Date.now()}`
+        });
+        actualLeadId = leadRecord.leadId;
+        console.log(`✅ Auto-created lead: ${actualLeadId}`);
       }
     }
 
@@ -53,7 +63,7 @@ router.post('/track-conversion', async (req, res) => {
     if (!actualLeadId) {
       return res.status(400).json({
         success: false,
-        error: 'Either leadId or sessionId must be provided, and lead must exist'
+        error: 'Either leadId or sessionId must be provided'
       });
     }
 
