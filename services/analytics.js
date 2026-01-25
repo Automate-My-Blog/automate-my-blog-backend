@@ -500,6 +500,12 @@ class AnalyticsService {
       console.log(`📊 Analytics: Getting comprehensive metrics for period ${period}`);
       const days = parseInt(period.replace('d', ''));
 
+      if (isNaN(days) || days <= 0) {
+        throw new Error(`Invalid period: ${period}`);
+      }
+
+      console.log(`📊 Analytics: Calculated days: ${days}`);
+
       const result = await db.query(`
         WITH date_range AS (
           SELECT
@@ -640,9 +646,14 @@ class AnalyticsService {
              revenue_metrics rm, referral_metrics rfm, activity_metrics am
       `);
 
-      return result.rows[0];
+      console.log(`📊 Analytics: Query executed successfully, rows returned: ${result.rows.length}`);
+      const metrics = result.rows[0];
+      console.log(`📊 Analytics: Metrics data:`, JSON.stringify(metrics).substring(0, 200));
+      return metrics;
     } catch (error) {
-      console.error(`⚠️ Analytics: Failed to get comprehensive metrics - ${error.message}`);
+      console.error(`⚠️ Analytics: Failed to get comprehensive metrics`);
+      console.error(`⚠️ Error details: ${error.message}`);
+      console.error(`⚠️ Error stack: ${error.stack}`);
       return {
         total_users: 0,
         new_users: 0,
