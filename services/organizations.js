@@ -23,7 +23,7 @@ class OrganizationService {
   async createOrUpdateOrganization(websiteUrl, analysisData, sessionInfo = {}) {
     try {
       const websiteDomain = new URL(websiteUrl).hostname;
-      
+
       // Extract organization data from OpenAI analysis
       const orgData = {
         name: analysisData.businessName || this.extractBusinessNameFromDomain(websiteDomain),
@@ -39,10 +39,19 @@ class OrganizationService {
         last_analyzed_at: new Date()
       };
 
-      // Check if organization already exists by domain
-      const existingOrg = await db.query(`
+      // Check if organization already exists by exact URL first, then by domain
+      let existingOrg = await db.query(`
         SELECT id FROM organizations WHERE website_url = $1
       `, [websiteUrl]);
+
+      // If not found by exact URL, try to find by domain (handles http vs https)
+      if (existingOrg.rows.length === 0) {
+        existingOrg = await db.query(`
+          SELECT id FROM organizations
+          WHERE website_url LIKE $1 OR website_url LIKE $2
+          LIMIT 1
+        `, [`http://${websiteDomain}`, `https://${websiteDomain}`]);
+      }
 
       let organizationId;
 
@@ -68,24 +77,52 @@ class OrganizationService {
       } else {
         // Create new organization
         organizationId = uuidv4();
-        
-        // Generate unique slug
-        const slug = await this.generateUniqueSlug(orgData.name);
-        
-        await db.query(`
-          INSERT INTO organizations (
-            id, name, slug, business_type, industry_category, business_model,
-            company_size, description, target_audience, brand_voice,
-            website_goals, website_url, session_id, last_analyzed_at, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), NOW())
-        `, [
-          organizationId, orgData.name, slug, orgData.business_type,
-          orgData.industry_category, orgData.business_model, orgData.company_size,
-          orgData.description, orgData.target_audience, orgData.brand_voice,
-          orgData.website_goals, orgData.website_url, sessionInfo.sessionId || null
-        ]);
 
-        console.log(`🏢 Created new organization: ${orgData.name} (${organizationId})`);
+        // Generate unique slug
+        let slug = await this.generateUniqueSlug(orgData.name);
+
+        try {
+          await db.query(`
+            INSERT INTO organizations (
+              id, name, slug, business_type, industry_category, business_model,
+              company_size, description, target_audience, brand_voice,
+              website_goals, website_url, session_id, last_analyzed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), NOW())
+          `, [
+            organizationId, orgData.name, slug, orgData.business_type,
+            orgData.industry_category, orgData.business_model, orgData.company_size,
+            orgData.description, orgData.target_audience, orgData.brand_voice,
+            orgData.website_goals, orgData.website_url, sessionInfo.sessionId || null
+          ]);
+
+          console.log(`🏢 Created new organization: ${orgData.name} (${organizationId})`);
+        } catch (insertError) {
+          // Handle duplicate slug error (race condition)
+          if (insertError.code === '23505' && insertError.constraint === 'organizations_slug_key') {
+            console.log(`⚠️ Duplicate slug detected for ${orgData.name}, adding timestamp suffix`);
+
+            // Retry with timestamp-suffixed slug
+            slug = `${slug}-${Date.now()}`;
+
+            await db.query(`
+              INSERT INTO organizations (
+                id, name, slug, business_type, industry_category, business_model,
+                company_size, description, target_audience, brand_voice,
+                website_goals, website_url, session_id, last_analyzed_at, created_at, updated_at
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), NOW())
+            `, [
+              organizationId, orgData.name, slug, orgData.business_type,
+              orgData.industry_category, orgData.business_model, orgData.company_size,
+              orgData.description, orgData.target_audience, orgData.brand_voice,
+              orgData.website_goals, orgData.website_url, sessionInfo.sessionId || null
+            ]);
+
+            console.log(`🏢 Created organization with unique slug: ${orgData.name} (${slug})`);
+          } else {
+            // Re-throw other errors
+            throw insertError;
+          }
+        }
       }
 
       return organizationId;
