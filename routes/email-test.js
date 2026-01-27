@@ -283,24 +283,68 @@ router.get('/send-to-me/:emailType', async (req, res) => {
 
     console.log(`🧪 Sending test email: ${emailType} to ${user.email}`);
 
-    // Send based on email type
+    // Map email type to service method
+    const emailMethodMap = {
+      // Transactional
+      referral_invitation: () => emailService.sendReferralInvitation(user.id, 'friend@example.com', 'ABC123XYZ'),
+      organization_member_invitation: () => emailService.sendOrganizationMemberInvitation(user.id, 'teammate@example.com', 'Acme Corp', 'INV789'),
+      welcome_email: () => emailService.sendWelcomeEmail(user.id),
+      email_verification: () => emailService.sendEmailVerification(user.id, 'VERIFY123'),
+      password_reset: () => emailService.sendPasswordReset(user.email, 'RESET456'),
+      password_change_confirmation: () => emailService.sendPasswordChangeConfirmation(user.id),
+      account_deactivation_warning: () => emailService.sendAccountDeactivationWarning(user.id, 7),
+      account_reactivation: () => emailService.sendAccountReactivation(user.id),
+      // Engagement
+      blog_post_completion: () => emailService.sendBlogPostCompletion(user.id, 'test-post-123'),
+      low_credit_warning: () => emailService.sendLowCreditWarning(user.id),
+      usage_digest: () => emailService.sendUsageDigest(user.id),
+      // Re-engagement
+      '7_day_inactive_reminder': () => emailService.send7DayInactiveReminder(user.id),
+      '14_day_reengagement': () => emailService.send14DayReengagement(user.id),
+      // Lead nurturing
+      high_lead_score_followup: () => emailService.sendHighLeadScoreFollowup('test-lead-123'),
+      warm_lead_nurture: () => emailService.sendWarmLeadNurture('test-lead-456'),
+      cold_lead_reactivation: () => emailService.sendColdLeadReactivation('test-lead-789'),
+      lead_converted_celebration: () => emailService.sendLeadConvertedCelebration('test-lead-abc'),
+      // Admin alerts
+      new_user_signup_alert: () => emailService.sendNewUserSignupAlert(user.id),
+      payment_failed_alert: () => emailService.sendPaymentFailedAlert(user.id, 'inv_123', 99),
+      suspicious_activity_alert: () => emailService.sendSuspiciousActivityAlert(user.id, 'Multiple failed login attempts'),
+      high_value_lead_notification: () => emailService.sendHighValueLeadNotification('test-lead-hvl'),
+      system_error_alert: () => emailService.sendSystemErrorAlert('Test critical error', { test: true }),
+      monthly_revenue_summary: () => emailService.sendMonthlyRevenueSummary(),
+      // Subscription/Billing
+      subscription_confirmation: () => emailService.sendSubscriptionConfirmation(user.id, 'sub_test123'),
+      subscription_upgraded: () => emailService.sendSubscriptionUpgraded(user.id, 'starter', 'professional'),
+      subscription_cancelled: () => emailService.sendSubscriptionCancelled(user.id, 'user_cancelled'),
+      payment_received: () => emailService.sendPaymentReceived(user.id, 99, 'inv_received123'),
+      credit_expiration_warning: () => emailService.sendCreditExpirationWarning(user.id),
+      // Referral program
+      referral_accepted_notification: () => emailService.sendReferralAcceptedNotification(user.id, 'newuser@example.com'),
+      referral_reward_granted: () => emailService.sendReferralRewardGranted(user.id, 'free_generation', 1),
+      referral_link_share_reminder: () => emailService.sendReferralLinkShareReminder(user.id),
+      // Nice-to-have
+      weekly_analytics_report: () => emailService.sendWeeklyAnalyticsReport(user.id),
+      content_performance_insights: () => emailService.sendContentPerformanceInsights(user.id, 'test-post-perf'),
+      feature_announcement: () => emailService.sendFeatureAnnouncement(user.id, 'New AI Features', 'We added GPT-4 support!')
+    };
+
+    const emailMethod = emailMethodMap[emailType];
+    if (!emailMethod) {
+      return res.status(400).json({
+        error: 'Email type not supported',
+        message: `Email type "${emailType}" not found`,
+        availableTypes: Object.keys(emailMethodMap),
+        emailType
+      });
+    }
+
     let result;
-    switch (emailType) {
-      case 'low_credit_warning':
-        result = await emailService.sendLowCreditWarning(user.id);
-        break;
-      case 'welcome_email':
-        result = await emailService.sendWelcomeEmail(user.id);
-        break;
-      case 'usage_digest':
-        result = await emailService.sendUsageDigest(user.id);
-        break;
-      default:
-        return res.status(400).json({
-          error: 'Email type not supported',
-          message: `Supported types: low_credit_warning, welcome_email, usage_digest`,
-          emailType
-        });
+    try {
+      result = await emailMethod();
+    } catch (methodError) {
+      console.error(`❌ Email method failed for ${emailType}:`, methodError);
+      throw methodError;
     }
 
     res.json({
