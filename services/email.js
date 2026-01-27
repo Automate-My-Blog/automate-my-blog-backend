@@ -146,6 +146,11 @@ class EmailService {
       } catch (error) {
         lastError = error;
         console.error(`❌ SendGrid attempt ${attempt}/${maxRetries} failed:`, error.message);
+        console.error(`❌ SendGrid error details:`, JSON.stringify({
+          code: error.code,
+          statusCode: error.response?.statusCode,
+          body: error.response?.body
+        }, null, 2));
 
         if (attempt < maxRetries) {
           const delayMs = Math.pow(2, attempt) * 1000; // Exponential backoff
