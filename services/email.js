@@ -203,7 +203,7 @@ class EmailService {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoBlog</title>
+  <title>Automate My Blog</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
@@ -259,7 +259,7 @@ class EmailService {
 <body>
   <div class="email-container">
     <div class="email-header">
-      <h1 style="margin: 0; font-size: 24px;">AutoBlog</h1>
+      <h1 style="margin: 0; font-size: 24px;">Automate My Blog</h1>
     </div>
     <div class="email-body">
       ${bodyHtml}
