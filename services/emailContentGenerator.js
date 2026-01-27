@@ -35,8 +35,8 @@ class EmailContentGenerator {
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
-        temperature: template.temperature || 0.7,
-        max_tokens: template.max_tokens || 1000
+        temperature: parseFloat(template.temperature) || 0.7,
+        max_tokens: parseInt(template.max_tokens) || 1000
       });
 
       // 4. Parse and validate response

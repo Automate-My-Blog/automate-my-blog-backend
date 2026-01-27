@@ -61,12 +61,15 @@ class EmailService {
       // 4. Wrap content in HTML email template
       const htmlBody = this.wrapInEmailTemplate(generatedContent.bodyHtml, generatedContent.cta);
 
-      // 5. Prepare SendGrid message
+      // 5. Generate dynamic sender name (improves open rates)
+      const dynamicFromName = this.generateDynamicSenderName(context);
+
+      // 6. Prepare SendGrid message
       const message = {
         to: recipientEmail,
         from: {
           email: this.fromEmail,
-          name: this.fromName
+          name: dynamicFromName
         },
         replyTo: this.replyToEmail,
         subject: generatedContent.subject,
@@ -83,10 +86,10 @@ class EmailService {
         message.preheader = generatedContent.preheader;
       }
 
-      // 6. Send via SendGrid with retry logic
+      // 7. Send via SendGrid with retry logic
       const result = await this.sendWithRetry(message);
 
-      // 7. Log email to database
+      // 8. Log email to database
       await this.logEmail({
         userId,
         emailType,
@@ -153,6 +156,38 @@ class EmailService {
     }
 
     throw new Error(`SendGrid failed after ${maxRetries} attempts: ${lastError.message}`);
+  }
+
+  /**
+   * Generate dynamic sender name based on user context
+   * Examples: "TechCorp Blog Assistant", "Acme Inc Blog Assistant"
+   * Falls back to default "Automate My Blog" if no business name available
+   * @param {object} context - Email context data
+   * @returns {string} Sender name
+   */
+  generateDynamicSenderName(context) {
+    // Priority order: businessName > organizationName > companyName > default
+    const businessName = context.businessName ||
+                        context.organizationName ||
+                        context.companyName ||
+                        context.businessType;
+
+    if (businessName && businessName !== 'undefined') {
+      // Clean the name (remove extra spaces, capitalize properly)
+      const cleanName = businessName.trim();
+
+      // If it already contains "Blog" or "Assistant", use as-is
+      if (cleanName.toLowerCase().includes('blog') ||
+          cleanName.toLowerCase().includes('assistant')) {
+        return cleanName;
+      }
+
+      // Otherwise, append "Blog Assistant"
+      return `${cleanName} Blog Assistant`;
+    }
+
+    // Default fallback
+    return this.fromName;
   }
 
   /**
