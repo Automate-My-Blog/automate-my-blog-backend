@@ -302,15 +302,35 @@ router.get('/send-to-me/:emailType', async (req, res) => {
       '7_day_inactive_reminder': () => emailService.send7DayInactiveReminder(user.id),
       '14_day_reengagement': () => emailService.send14DayReengagement(user.id),
       // Lead nurturing
-      high_lead_score_followup: () => emailService.sendHighLeadScoreFollowup('test-lead-123'),
-      warm_lead_nurture: () => emailService.sendWarmLeadNurture('test-lead-456'),
-      cold_lead_reactivation: () => emailService.sendColdLeadReactivation('test-lead-789'),
-      lead_converted_celebration: () => emailService.sendLeadConvertedCelebration('test-lead-abc'),
+      high_lead_score_followup: async () => {
+        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
+        const leadId = leadResult.rows[0]?.id || user.id;
+        return emailService.sendHighLeadScoreFollowup(leadId);
+      },
+      warm_lead_nurture: async () => {
+        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
+        const leadId = leadResult.rows[0]?.id || user.id;
+        return emailService.sendWarmLeadNurture(leadId);
+      },
+      cold_lead_reactivation: async () => {
+        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
+        const leadId = leadResult.rows[0]?.id || user.id;
+        return emailService.sendColdLeadReactivation(leadId);
+      },
+      lead_converted_celebration: async () => {
+        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
+        const leadId = leadResult.rows[0]?.id || user.id;
+        return emailService.sendLeadConvertedCelebration(user.id, leadId);
+      },
       // Admin alerts
       new_user_signup_alert: () => emailService.sendNewUserSignupAlert(user.id),
       payment_failed_alert: () => emailService.sendPaymentFailedAlert(user.id, 'inv_123', 99),
       suspicious_activity_alert: () => emailService.sendSuspiciousActivityAlert(user.id, 'Multiple failed login attempts'),
-      high_value_lead_notification: () => emailService.sendHighValueLeadNotification('test-lead-hvl'),
+      high_value_lead_notification: async () => {
+        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
+        const leadId = leadResult.rows[0]?.id || user.id;
+        return emailService.sendHighValueLeadNotification(leadId);
+      },
       system_error_alert: () => emailService.sendSystemErrorAlert('Test critical error', { test: true }),
       monthly_revenue_summary: () => emailService.sendMonthlyRevenueSummary(),
       // Subscription/Billing
