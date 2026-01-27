@@ -65,11 +65,20 @@ class EmailService {
       const dynamicFromName = this.generateDynamicSenderName(context);
 
       // 6. Prepare SendGrid message
+      console.log('📧 SendGrid message config:', {
+        to: recipientEmail,
+        from: this.fromEmail,
+        fromName: dynamicFromName,
+        subjectLength: generatedContent.subject?.length,
+        hasHtml: !!htmlBody,
+        hasText: !!generatedContent.bodyPlainText
+      });
+
       const message = {
         to: recipientEmail,
         from: {
           email: this.fromEmail,
-          name: dynamicFromName
+          name: "Automate My Blog"
         },
         subject: generatedContent.subject,
         text: generatedContent.bodyPlainText,
