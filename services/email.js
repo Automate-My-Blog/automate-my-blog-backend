@@ -210,12 +210,10 @@ class EmailService {
       line-height: 1.6;
       color: #333;
       margin: 0;
-      padding: 20px;
+      padding: 0;
       background-color: #ffffff;
     }
     .email-body {
-      max-width: 600px;
-      margin: 0 auto;
       font-size: 15px;
     }
     .cta-button {
