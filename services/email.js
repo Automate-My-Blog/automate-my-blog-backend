@@ -71,7 +71,9 @@ class EmailService {
           email: this.fromEmail,
           name: dynamicFromName
         },
-        replyTo: this.replyToEmail,
+        replyTo: {
+          email: this.replyToEmail
+        },
         subject: generatedContent.subject,
         text: generatedContent.bodyPlainText,
         html: htmlBody,
@@ -80,11 +82,6 @@ class EmailService {
           openTracking: { enable: true }
         }
       };
-
-      // Add preheader if provided
-      if (generatedContent.preheader) {
-        message.preheader = generatedContent.preheader;
-      }
 
       // 7. Send via SendGrid with retry logic
       const result = await this.sendWithRetry(message);
