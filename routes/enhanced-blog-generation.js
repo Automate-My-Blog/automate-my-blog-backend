@@ -1,5 +1,6 @@
 import express from 'express';
 import enhancedBlogGenerationService from '../services/enhanced-blog-generation.js';
+import billingService from '../services/billing.js';
 import { waitUntil } from '@vercel/functions';
 
 // Mock SEO analysis service for now
@@ -71,6 +72,23 @@ router.post('/generate', async (req, res) => {
     console.log(`🚀 Enhanced blog generation requested for organization: ${organizationId}`);
     console.log(`📝 Topic: ${topic.title}`);
 
+    // Check if user has credits available
+    const hasCredits = await billingService.hasCredits(userId);
+    if (!hasCredits) {
+      const credits = await billingService.getUserCredits(userId);
+      return res.status(402).json({
+        success: false,
+        error: 'Insufficient credits',
+        message: 'You have used all your blog post credits for this billing period.',
+        data: {
+          currentPlan: credits.basePlan,
+          creditsUsed: credits.usedCredits,
+          creditsAvailable: credits.availableCredits,
+          upgradeUrl: '/pricing'
+        }
+      });
+    }
+
     // Generate complete enhanced blog
     const result = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
       topic,
@@ -94,6 +112,15 @@ router.post('/generate', async (req, res) => {
           { status: options.status || 'draft' }
         );
         console.log(`💾 Blog post auto-saved: ${savedPost.id}`);
+
+        // Deduct credit for successful generation
+        try {
+          await billingService.useCredit(userId, 'generation');
+          console.log(`✅ Credit deducted for user ${userId}`);
+        } catch (creditError) {
+          console.error('Failed to deduct credit:', creditError);
+          // Don't fail the response, but log for admin review
+        }
 
         // ✨ REMOVED: Async image generation moved to dedicated endpoint
         // Images are now generated via /api/images/generate-for-blog

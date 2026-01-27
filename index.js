@@ -32,7 +32,11 @@ import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
 import leadsRoutes from './routes/leads.js';
+import emailTestRoutes from './routes/email-test.js';
+import schedulerRoutes from './routes/scheduler.js';
+import emailPreferencesRoutes from './routes/email-preferences.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
+import { startEmailScheduler } from './jobs/scheduler.js';
 
 // Load environment variables
 dotenv.config();
@@ -122,6 +126,15 @@ app.use('/api/v1/stripe', (req, res, next) => {
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
+
+// Email test routes (optional auth for testing)
+app.use('/api/v1/email/test', authService.optionalAuthMiddleware.bind(authService), emailTestRoutes);
+
+// Scheduler routes (optional auth for testing/admin)
+app.use('/api/v1/scheduler', authService.optionalAuthMiddleware.bind(authService), schedulerRoutes);
+
+// Email preferences and unsubscribe routes (no auth required for unsubscribe token)
+app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -3283,17 +3296,12 @@ app.listen(PORT, () => {
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔗 API base: http://localhost:${PORT}/api`);
 
-  // Run credit expiration job daily in production
-  if (process.env.NODE_ENV === 'production') {
-    // Run immediately on startup
-    expireOldCredits().catch(err => console.error('Credit expiration failed:', err));
-
-    // Then run daily at midnight (24 hours = 86400000 ms)
-    setInterval(() => {
-      expireOldCredits().catch(err => console.error('Credit expiration failed:', err));
-    }, 24 * 60 * 60 * 1000);
-
-    console.log('⏰ Credit expiration job scheduled (daily at midnight)');
+  // Start email campaign scheduler (includes credit expiration)
+  // Note: Set EMAIL_SCHEDULER_ENABLED=false in .env to disable
+  if (process.env.EMAIL_SCHEDULER_ENABLED !== 'false') {
+    startEmailScheduler();
+  } else {
+    console.log('⏰ Email scheduler disabled (EMAIL_SCHEDULER_ENABLED=false)');
   }
 });
 

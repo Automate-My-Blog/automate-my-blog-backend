@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
 import organizationService from './organizations.js';
 import projectsService from './projects.js';
+import leadEmailTriggers from './leadEmailTriggers.js';
 
 /**
  * Website Lead Management Service
@@ -201,6 +202,15 @@ class LeadService {
       const leadScore = scoringResult.rows[0]?.lead_score || 0;
       const scoringTime = Date.now() - scoringStart;
       console.log(`✅ [${requestId}] Lead scored in ${scoringTime}ms - Score: ${leadScore}`);
+
+      // Queue lead nurture email based on score (async, don't block)
+      leadEmailTriggers.queueLeadNurtureEmail(leadId)
+        .then((result) => {
+          if (result.queued) {
+            console.log(`📧 [${requestId}] Lead nurture email queued: ${result.emailType} (scheduled: ${result.scheduledFor})`);
+          }
+        })
+        .catch(err => console.error(`❌ [${requestId}] Failed to queue lead nurture email:`, err.message));
 
       // Step 6: Track conversion step
       console.log(`📈 [${requestId}] Step 6: Tracking conversion step...`);

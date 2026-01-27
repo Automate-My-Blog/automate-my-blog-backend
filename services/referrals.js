@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import emailService from './email.js';
 
 /**
  * Referral System Service
@@ -93,8 +94,14 @@ class ReferralService {
 
       const inviteCode = inviteResult.rows[0].invite_code;
 
-      // TODO: Send email invitation here
-      // For now, we'll just return the invite details
+      // Send referral invitation email
+      try {
+        await emailService.sendReferralInvitation(inviterUserId, email, inviteCode);
+        console.log(`✅ Referral invitation email sent to ${email}`);
+      } catch (emailError) {
+        console.error('❌ Failed to send referral invitation email:', emailError);
+        // Don't throw - invitation was created, email failure shouldn't block the response
+      }
 
       return {
         inviteId,
@@ -157,7 +164,20 @@ class ReferralService {
 
       const inviteCode = inviteResult.rows[0].invite_code;
 
-      // TODO: Send email invitation here
+      // Send organization member invitation email
+      const organizationName = inviter.org_name || 'the organization';
+      try {
+        await emailService.sendOrganizationMemberInvitation(
+          inviterUserId,
+          email,
+          organizationName,
+          inviteCode
+        );
+        console.log(`✅ Organization invitation email sent to ${email}`);
+      } catch (emailError) {
+        console.error('❌ Failed to send organization invitation email:', emailError);
+        // Don't throw - invitation was created, email failure shouldn't block the response
+      }
 
       return {
         inviteId,
@@ -451,11 +471,25 @@ class ReferralService {
 
           // Update referrer's stats
           await client.query(`
-            UPDATE users 
+            UPDATE users
             SET successful_referrals = successful_referrals + 1,
                 lifetime_referral_rewards_earned = lifetime_referral_rewards_earned + $2
             WHERE id = $1
           `, [invite.inviter_user_id, this.rewardValues.free_generation]);
+
+          // Send referral notification emails (async, don't block transaction)
+          // These are fire-and-forget to avoid blocking the signup flow
+          emailService.sendReferralAcceptedNotification(invite.inviter_user_id, newUserEmail)
+            .then(() => console.log(`✅ Referral accepted notification sent to referrer ${invite.inviter_user_id}`))
+            .catch(err => console.error('❌ Failed to send referral accepted notification:', err));
+
+          emailService.sendReferralRewardGranted(invite.inviter_user_id, 'free_generation', this.rewardValues.free_generation)
+            .then(() => console.log(`✅ Referral reward notification sent to referrer ${invite.inviter_user_id}`))
+            .catch(err => console.error('❌ Failed to send referral reward notification to referrer:', err));
+
+          emailService.sendReferralRewardGranted(newUserId, 'free_generation', this.rewardValues.free_generation)
+            .then(() => console.log(`✅ Referral reward notification sent to new user ${newUserId}`))
+            .catch(err => console.error('❌ Failed to send referral reward notification to new user:', err));
 
           // Mark invite as rewarded
           await client.query(`
