@@ -203,77 +203,59 @@ class EmailService {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Automate My Blog</title>
+  <title>Message</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
       line-height: 1.6;
       color: #333;
       margin: 0;
-      padding: 0;
-      background-color: #f4f4f4;
-    }
-    .email-container {
-      max-width: 600px;
-      margin: 20px auto;
+      padding: 20px;
       background-color: #ffffff;
-      border-radius: 8px;
-      overflow: hidden;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-    .email-header {
-      background-color: #1890ff;
-      color: white;
-      padding: 30px 20px;
-      text-align: center;
     }
     .email-body {
-      padding: 30px;
-    }
-    .email-footer {
-      background-color: #f9f9f9;
-      padding: 20px;
-      text-align: center;
-      font-size: 12px;
-      color: #666;
-      border-top: 1px solid #e0e0e0;
+      max-width: 600px;
+      margin: 0 auto;
+      font-size: 15px;
     }
     .cta-button {
       display: inline-block;
-      background-color: #1890ff;
+      background-color: #2563eb;
       color: white !important;
-      padding: 12px 30px;
+      padding: 10px 24px;
       text-decoration: none;
-      border-radius: 4px;
-      margin: 20px 0;
-      font-weight: 600;
+      border-radius: 6px;
+      margin: 16px 0;
+      font-weight: 500;
     }
-    .cta-button:hover {
-      background-color: #0070d9;
+    .signature {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+      font-size: 13px;
+      color: #6b7280;
     }
     a {
-      color: #1890ff;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
     }
   </style>
 </head>
 <body>
-  <div class="email-container">
-    <div class="email-header">
-      <h1 style="margin: 0; font-size: 24px;">Automate My Blog</h1>
+  <div class="email-body">
+    ${bodyHtml}
+    ${cta ? `
+    <div style="margin: 20px 0;">
+      <a href="${cta.url}" class="cta-button">${cta.text}</a>
     </div>
-    <div class="email-body">
-      ${bodyHtml}
-      ${cta ? `
-      <div style="text-align: center; margin-top: 30px;">
-        <a href="${cta.url}" class="cta-button">${cta.text}</a>
-      </div>
-      ` : ''}
-    </div>
-    <div class="email-footer">
-      <p>© ${new Date().getFullYear()} AutoBlog. All rights reserved.</p>
-      <p>
-        <a href="${process.env.FRONTEND_URL}/unsubscribe">Unsubscribe</a> |
-        <a href="${process.env.FRONTEND_URL}/preferences">Email Preferences</a>
+    ` : ''}
+    <div class="signature">
+      <p style="margin: 4px 0; color: #9ca3af; font-size: 12px;">
+        <a href="${process.env.FRONTEND_URL}/preferences" style="color: #9ca3af;">Email Preferences</a> ·
+        <a href="${process.env.FRONTEND_URL}/unsubscribe" style="color: #9ca3af;">Unsubscribe</a>
       </p>
     </div>
   </div>
