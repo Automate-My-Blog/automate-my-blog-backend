@@ -71,16 +71,9 @@ class EmailService {
           email: this.fromEmail,
           name: dynamicFromName
         },
-        replyTo: {
-          email: this.replyToEmail
-        },
         subject: generatedContent.subject,
         text: generatedContent.bodyPlainText,
-        html: htmlBody,
-        trackingSettings: {
-          clickTracking: { enable: true },
-          openTracking: { enable: true }
-        }
+        html: htmlBody
       };
 
       // 7. Send via SendGrid with retry logic
