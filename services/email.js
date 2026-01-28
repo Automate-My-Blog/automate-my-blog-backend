@@ -784,7 +784,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendNewLeadAlert(leadData) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
 
     const context = {
       leadId: leadData.leadId,
@@ -805,7 +805,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendLeadPreviewAlert(previewData) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
 
     const context = {
       websiteUrl: previewData.websiteUrl,
@@ -823,7 +823,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendNewUserSignupAlert(userId) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
     const user = await this.getUserContext(userId);
 
     const context = {
@@ -846,7 +846,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendPaymentFailedAlert(userId, invoiceId, amount) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
     const user = await this.getUserContext(userId);
 
     const context = {
@@ -870,7 +870,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendSuspiciousActivityAlert(userId, activityType, details) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
     const user = await this.getUserContext(userId);
 
     const context = {
@@ -890,7 +890,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendHighValueLeadNotification(leadId) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
     const lead = await this.getLeadContext(leadId);
 
     const context = {
@@ -915,7 +915,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendSystemErrorAlert(errorType, errorMessage, context = {}) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
 
     const emailContext = {
       errorType,
@@ -934,7 +934,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendMonthlyRevenueSummary(revenueData = {}) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = 'james@automatemyblog.com';
 
     const context = {
       month: revenueData.month || new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
