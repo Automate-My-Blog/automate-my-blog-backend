@@ -71,4 +71,5 @@ export const linkFixtures = {
   absolute: { href: 'https://example.com/page' },
   noHref: {},
   targetUrl: { target_url: 'https://example.com/alt' },
+  urlOnly: { url: 'https://example.com/url-only' },
 };

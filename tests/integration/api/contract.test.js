@@ -46,4 +46,22 @@ describe.skipIf(!hasDb)('integration api contract', () => {
     const res = await request(app).get('/api/v1/auth/me').expect(401);
     expect(res.body).toHaveProperty('error');
   });
+
+  it('POST /api/v1/auth/refresh missing body returns 400 with error, message', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({})
+      .expect(400);
+    expect(res.body).toHaveProperty('error');
+    expect(res.body).toHaveProperty('message');
+  });
+
+  it('POST /api/v1/auth/logout returns 200 with success, message', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/logout')
+      .send({})
+      .expect(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('message');
+  });
 });

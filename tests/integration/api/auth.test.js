@@ -112,6 +112,64 @@ describe.skipIf(!hasDb)('integration api auth', () => {
     expect(me.body.user?.email).toBe(e);
   });
 
+  it('refresh with valid token returns new access and refresh tokens', async () => {
+    const e = email();
+    const reg = await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        email: e,
+        password: 'password123',
+        firstName: 'Test',
+        lastName: 'User',
+        organizationName: 'Test Org',
+      })
+      .expect(201);
+
+    const res = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: reg.body.refreshToken })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain('Tokens refreshed');
+    expect(res.body.accessToken).toBeDefined();
+    expect(res.body.refreshToken).toBeDefined();
+    const me = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Authorization', `Bearer ${res.body.accessToken}`)
+      .expect(200);
+    expect(me.body.user?.email).toBe(e);
+  });
+
+  it('refresh with missing token returns 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({})
+      .expect(400);
+
+    expect(res.body.error).toBeDefined();
+    expect(res.body.message).toBeDefined();
+  });
+
+  it('refresh with invalid token returns 401', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/refresh')
+      .send({ refreshToken: 'invalid.jwt.token' })
+      .expect(401);
+
+    expect(res.body.error).toBeDefined();
+  });
+
+  it('logout returns 200 and success message', async () => {
+    const res = await request(app)
+      .post('/api/v1/auth/logout')
+      .send({})
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain('Logout successful');
+  });
+
   it.skip('multi-tenant: user B cannot access user A organization context', async () => {
     const emailA = email();
     const emailB = email();

@@ -26,6 +26,7 @@ vi.mock('../../services/webscraper.js', () => ({
 }));
 
 import blogAnalyzer from '../../services/blog-analyzer.js';
+import webscraper from '../../services/webscraper.js';
 
 describe('blog-analyzer', () => {
   describe('parseAIResponse', () => {
@@ -138,6 +139,19 @@ describe('blog-analyzer', () => {
       const recs = blogAnalyzer.generateCTARecommendations(ctas, strategy);
       expect(recs.some((r) => r.toLowerCase().includes('action') || r.toLowerCase().includes('visibility'))).toBe(true);
     });
+
+    it('returns fewer recs when 3+ types, header present, effectiveness not low', () => {
+      const ctas = [
+        { type: 'button', placement: 'header' },
+        { type: 'link', placement: 'footer' },
+        { type: 'form', placement: 'sidebar' },
+      ];
+      const recs = blogAnalyzer.generateCTARecommendations(ctas, { effectiveness: 'high' });
+      expect(recs).toBeDefined();
+      expect(Array.isArray(recs)).toBe(true);
+      expect(recs.some((r) => r.toLowerCase().includes('diversif'))).toBe(false);
+      expect(recs.some((r) => r.toLowerCase().includes('header'))).toBe(false);
+    });
   });
 
   describe('generateLinkingRecommendations', () => {
@@ -154,6 +168,13 @@ describe('blog-analyzer', () => {
       const strategy = { totalInternalLinks: 15, linkingDensity: 'medium' };
       const recs = blogAnalyzer.generateLinkingRecommendations(categories, strategy);
       expect(recs.some((r) => r.toLowerCase().includes('blog'))).toBe(true);
+    });
+
+    it('returns empty recs when links >= 10, density not low, blog >= 3', () => {
+      const categories = { blog: [{}, {}, {}], navigation: [], content: [], footer: [], sidebar: [], product: [], about: [], contact: [] };
+      const strategy = { totalInternalLinks: 12, linkingDensity: 'medium' };
+      const recs = blogAnalyzer.generateLinkingRecommendations(categories, strategy);
+      expect(recs).toEqual([]);
     });
   });
 
@@ -198,6 +219,24 @@ describe('blog-analyzer', () => {
       const out = blogAnalyzer.assessAnalysisQuality(posts, ctas, linking);
       expect(out.score).toBeLessThanOrEqual(100);
     });
+
+    it('scores excellent at exact boundaries (3 posts, 5 CTAs, 10 links)', () => {
+      const posts = [{}, {}, {}];
+      const ctas = { totalCTAs: 5 };
+      const linking = { totalLinks: 10 };
+      const out = blogAnalyzer.assessAnalysisQuality(posts, ctas, linking);
+      expect(out.quality).toBe('excellent');
+      expect(out.score).toBeGreaterThanOrEqual(80);
+    });
+
+    it('scores good at exact boundaries (2 posts, 4 CTAs, 11 links)', () => {
+      const posts = [{}, {}];
+      const ctas = { totalCTAs: 4 };
+      const linking = { totalLinks: 11 };
+      const out = blogAnalyzer.assessAnalysisQuality(posts, ctas, linking);
+      expect(out.quality).toBe('good');
+      expect(out.score).toBeGreaterThanOrEqual(60);
+    });
   });
 
   describe('createBasicAnalysis', () => {
@@ -214,6 +253,127 @@ describe('blog-analyzer', () => {
       expect(out.analysisQuality.quality).toBe('limited');
       expect(out.recommendations.immediate).toBeDefined();
       expect(out.recommendations.strategic).toBeDefined();
+    });
+  });
+
+  describe('analyzeBlogContent', () => {
+    it('returns createBasicAnalysis when no blog posts discovered', async () => {
+      vi.mocked(webscraper.discoverBlogPages).mockResolvedValueOnce({
+        blogPosts: [],
+        totalPostsFound: 0,
+        blogSections: [],
+      });
+      const out = await blogAnalyzer.analyzeBlogContent('org-1', 'https://example.com');
+      expect(out.success).toBe(true);
+      expect(out.blogContentFound).toBe(0);
+      expect(out.totalPostsDiscovered).toBe(0);
+      expect(out.ctaStrategy.totalCTAs).toBe(0);
+      expect(out.linkingStrategy.totalLinks).toBe(0);
+      expect(out.analysisQuality.quality).toBe('limited');
+    });
+  });
+
+  describe('analyzeContentPatterns', () => {
+    it('returns default structure when no blog posts', async () => {
+      const out = await blogAnalyzer.analyzeContentPatterns([]);
+      expect(out.toneAnalysis).toEqual({ tone: 'unknown', confidence: 0 });
+      expect(out.stylePatterns).toEqual({});
+      expect(out.contentThemes).toEqual([]);
+      expect(out.writingStyle).toBe('unknown');
+    });
+
+    it('returns default structure when null or undefined', async () => {
+      const outNull = await blogAnalyzer.analyzeContentPatterns(null);
+      expect(outNull.toneAnalysis.tone).toBe('unknown');
+      const outUndef = await blogAnalyzer.analyzeContentPatterns(undefined);
+      expect(outUndef.writingStyle).toBe('unknown');
+    });
+
+    it('returns analysis_failed when AI errors', async () => {
+      const out = await blogAnalyzer.analyzeContentPatterns([{ title: 'T', content: 'C', headings: [] }]);
+      expect(out.toneAnalysis.tone).toBe('analysis_failed');
+      expect(out.writingStyle).toBe('unknown');
+      expect(out).toHaveProperty('error');
+    });
+  });
+
+  describe('analyzeCtaPatterns', () => {
+    it('returns minimal strategy when no CTAs', async () => {
+      const out = await blogAnalyzer.analyzeCtaPatterns([]);
+      expect(out.strategy).toBe('minimal');
+      expect(out.primaryCTAType).toBe('unknown');
+      expect(out.effectiveness).toBe('low');
+    });
+
+    it('returns minimal strategy when null or undefined', async () => {
+      expect(await blogAnalyzer.analyzeCtaPatterns(null)).toMatchObject({ strategy: 'minimal' });
+      expect(await blogAnalyzer.analyzeCtaPatterns(undefined)).toMatchObject({ strategy: 'minimal' });
+    });
+  });
+
+  describe('analyzeCTAs', () => {
+    it('returns structure with zero CTAs when extractCTAs returns empty for all pages', async () => {
+      vi.mocked(webscraper.extractCTAs).mockResolvedValue([]);
+
+      const out = await blogAnalyzer.analyzeCTAs('org-1', 'https://example.com', []);
+      expect(out.totalCTAs).toBe(0);
+      expect(out.blogCTAs).toBe(0);
+      expect(out.staticPageCTAs).toBe(0);
+      expect(out.ctasByPage).toEqual([]);
+      expect(out.recommendations).toBeDefined();
+      expect(out.strategy).toMatchObject({ strategy: 'minimal' });
+    });
+
+    it('skips page when extractCTAs throws and continues', async () => {
+      vi.mocked(webscraper.extractCTAs)
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockResolvedValue([]);
+
+      const out = await blogAnalyzer.analyzeCTAs('org-1', 'https://example.com', []);
+      expect(out.totalCTAs).toBe(0);
+      expect(out.ctasByPage).toEqual([]);
+    });
+
+    it('includes CTAs from blog posts when provided', async () => {
+      vi.mocked(webscraper.extractCTAs).mockResolvedValue([]);
+      const blogPosts = [
+        { url: 'https://example.com/p/1', title: 'Post 1', ctas: [{ type: 'button', text: 'Sign up', placement: 'footer', href: '/signup' }] },
+      ];
+
+      const out = await blogAnalyzer.analyzeCTAs('org-1', 'https://example.com', blogPosts);
+      expect(out.totalCTAs).toBe(1);
+      expect(out.blogCTAs).toBe(1);
+      expect(out.staticPageCTAs).toBe(0);
+      expect(out.ctasByPage.some((p) => p.pageType === 'blog_post')).toBe(true);
+    });
+  });
+
+  describe('analyzeInternalLinking', () => {
+    it('returns minimal when no links found', async () => {
+      vi.mocked(webscraper.extractInternalLinks).mockResolvedValueOnce({ totalLinksFound: 0, internalLinks: [] });
+
+      const out = await blogAnalyzer.analyzeInternalLinking('org-1', 'https://example.com');
+      expect(out.totalLinks).toBe(0);
+      expect(out.linkingStrategy).toBe('minimal');
+      expect(out.recommendations).toContain('Add internal linking to improve SEO and user navigation');
+    });
+
+    it('returns categorized links and strategy when links found', async () => {
+      vi.mocked(webscraper.extractInternalLinks).mockResolvedValueOnce({
+        totalLinksFound: 3,
+        internalLinks: [
+          { context: 'nav', linkType: 'menu' },
+          { context: 'footer', linkType: 'footer' },
+          { context: 'nav', linkType: 'menu' },
+        ],
+      });
+
+      const out = await blogAnalyzer.analyzeInternalLinking('org-1', 'https://example.com');
+      expect(out.totalLinks).toBe(3);
+      expect(out.linkCategories).toBeDefined();
+      expect(out.linkingStrategy).toBeDefined();
+      expect(out.linkingStrategy.totalInternalLinks).toBe(3);
+      expect(out.recommendations).toBeDefined();
     });
   });
 });

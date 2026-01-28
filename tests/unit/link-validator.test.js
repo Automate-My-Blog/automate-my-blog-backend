@@ -3,7 +3,7 @@ import axios from 'axios';
 import linkValidator from '../../services/link-validator.js';
 import { validationResultFixtures, linkFixtures } from '../utils/fixtures.js';
 
-const { validateLinks, getValidationStatusMessage } = linkValidator;
+const { validateLinks, getValidationStatusMessage, validateOrganizationCTAs } = linkValidator;
 
 describe('link-validator', () => {
   describe('getValidationStatusMessage', () => {
@@ -126,6 +126,18 @@ describe('link-validator', () => {
       }
     });
 
+    it('uses url when href and target_url missing', async () => {
+      const headSpy = vi.spyOn(axios, 'head').mockResolvedValue({ status: 200 });
+      try {
+        const result = await validateLinks([linkFixtures.urlOnly]);
+        expect(result.all_valid).toBe(true);
+        expect(result.results[0].href).toBe('https://example.com/url-only');
+        expect(headSpy).toHaveBeenCalled();
+      } finally {
+        headSpy.mockRestore();
+      }
+    });
+
     it('validates absolute URLs via HEAD and records success', async () => {
       const headSpy = vi.spyOn(axios, 'head').mockResolvedValue({ status: 200 });
       try {
@@ -170,6 +182,60 @@ describe('link-validator', () => {
         headSpy.mockRestore();
         getSpy.mockRestore();
       }
+    });
+
+    it('uses GET fallback when HEAD fails and GET succeeds', async () => {
+      const headSpy = vi.spyOn(axios, 'head').mockRejectedValue(new Error('HEAD not supported'));
+      const getSpy = vi.spyOn(axios, 'get').mockResolvedValue({
+        status: 200,
+        data: { destroy: vi.fn() },
+      });
+      try {
+        const result = await validateLinks([linkFixtures.absolute]);
+        expect(result.all_valid).toBe(true);
+        expect(result.results[0].valid).toBe(true);
+        expect(result.results[0].status).toBe(200);
+        expect(headSpy).toHaveBeenCalled();
+        expect(getSpy).toHaveBeenCalled();
+      } finally {
+        headSpy.mockRestore();
+        getSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('validateOrganizationCTAs', () => {
+    it('returns success when no CTAs to validate', async () => {
+      const mockDb = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+      const out = await validateOrganizationCTAs('org-1', mockDb);
+      expect(out.success).toBe(true);
+      expect(out.all_valid).toBe(true);
+      expect(out.invalid_count).toBe(0);
+      expect(out.message).toContain('No CTAs');
+    });
+
+    it('validates org CTAs via db and returns all valid', async () => {
+      const mockDb = {
+        query: vi.fn().mockResolvedValue({
+          rows: [
+            { id: 1, cta_text: 'Sign Up', href: '/signup', cta_type: 'button', placement: 'header' },
+            { id: 2, cta_text: 'Contact', href: 'mailto:hi@example.com', cta_type: 'link', placement: 'footer' },
+          ],
+        }),
+      };
+      const out = await validateOrganizationCTAs('org-1', mockDb);
+      expect(out.success).toBe(true);
+      expect(out.all_valid).toBe(true);
+      expect(out.invalid_count).toBe(0);
+      expect(out.message).toMatch(/All 2 CTAs/);
+    });
+
+    it('returns success false when db.query throws', async () => {
+      const mockDb = { query: vi.fn().mockRejectedValue(new Error('Connection refused')) };
+      const out = await validateOrganizationCTAs('org-1', mockDb);
+      expect(out.success).toBe(false);
+      expect(out.all_valid).toBe(false);
+      expect(out.error).toContain('Connection refused');
     });
   });
 });

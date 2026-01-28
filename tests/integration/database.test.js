@@ -21,6 +21,19 @@ describe.skipIf(!hasDb)('integration database', () => {
   const unique = () => `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const email = () => `${unique()}@example.com`;
 
+  it('FK prevents inserting organization_member with invalid organization_id', async () => {
+    const { default: db } = await import('../../services/database.js');
+    const fakeOrgId = '00000000-0000-0000-0000-000000000001';
+    const fakeUserId = '00000000-0000-0000-0000-000000000002';
+    await expect(
+      db.query(
+        `INSERT INTO organization_members (organization_id, user_id, role, status)
+         VALUES ($1::uuid, $2::uuid, 'owner', 'active')`,
+        [fakeOrgId, fakeUserId]
+      )
+    ).rejects.toMatchObject({ code: '23503' });
+  });
+
   it('register creates user, org, and org_member link', async () => {
     const e = email();
     const reg = await request(app)
