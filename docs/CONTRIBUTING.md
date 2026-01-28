@@ -2,6 +2,23 @@
 
 Thank you for contributing! This guide will help you get started working on issues.
 
+## 📋 For AI Coding Agents
+
+**IMPORTANT: If you're an AI coding agent working on this project, please read these guides first:**
+
+- **[Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md)** - Essential rules for working with multiple agents simultaneously
+- **[Agent Quick Reference](./AGENT_QUICK_REFERENCE.md)** - Quick checklist for before/during/after work
+- **[Technical Guardrails](./TECHNICAL_GUARDRAILS.md)** - Automated enforcement and technical setup
+
+**Key Rules for AI Agents:**
+1. **Claim issues first** - Comment on issue before starting work
+2. **Check for conflicts** - Look for open PRs modifying same files
+3. **Database migrations** - Only ONE agent works on migrations at a time
+4. **Follow branch naming** - Use `fix/123-description` format
+5. **Write tests** - All PRs must include tests
+
+See the [Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md) for complete details.
+
 ## Getting Started
 
 1. **Pick an Issue**
@@ -22,8 +39,11 @@ Thank you for contributing! This guide will help you get started working on issu
    ```
 
 4. **Work on the Issue**
+   - **AI Agents:** Read [Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md) first
    - Read the issue description carefully
    - Check the "References" section for related documentation
+   - **Check for conflicts:** Look for open PRs modifying same files
+   - **Database changes:** Coordinate migrations (see guardrails)
    - Implement the changes
    - Test your changes locally
    - Follow the code style and conventions (see below)
@@ -55,17 +75,34 @@ Thank you for contributing! This guide will help you get started working on issu
 ## PR Requirements
 
 Before opening a PR, make sure:
+- [ ] **AI Agents:** Followed [Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md)
 - [ ] Your code follows the project's style guidelines
 - [ ] You've tested your changes locally
 - [ ] You've added tests if applicable
 - [ ] Your PR description includes `Closes #<issue-number>`
 - [ ] You've checked for any linting errors
+- [ ] **Database migrations:** Checked migration number doesn't conflict
+- [ ] **File conflicts:** No other PRs modifying same files
 
 ## Getting Help
 
 - Check existing issues and PRs for similar work
 - Review the documentation in the `docs/` folder
+- **AI Agents:** See [Agent Quick Reference](./AGENT_QUICK_REFERENCE.md) for common scenarios
 - Ask questions in the issue comments
+
+## Additional Resources
+
+**For AI Coding Agents:**
+- [Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md) - Complete workflow rules
+- [Agent Quick Reference](./AGENT_QUICK_REFERENCE.md) - Quick checklist
+- [Technical Guardrails](./TECHNICAL_GUARDRAILS.md) - Automated enforcement setup
+
+**For All Contributors:**
+- [Testing Strategy](./testing-strategy.md) - Testing guidelines and setup
+- [Backend Audit](./backend-audit.md) - Current state and known issues
+- [Analytics & Growth Plan](./analytics-and-growth-plan.md) - Implementation roadmap
+- [GitHub Actions Quick Wins](./github-actions-quick-wins.md) - CI/CD improvements
 
 ## Issue Categories
 
