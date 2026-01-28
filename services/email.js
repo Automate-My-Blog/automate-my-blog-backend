@@ -784,7 +784,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendNewLeadAlert(leadData) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
 
     const context = {
       leadId: leadData.leadId,
@@ -805,7 +805,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendLeadPreviewAlert(previewData) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
 
     const context = {
       websiteUrl: previewData.websiteUrl,
@@ -823,7 +823,7 @@ class EmailService {
    * @returns {Promise<object>} Send result
    */
   async sendNewUserSignupAlert(userId) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
     const user = await this.getUserContext(userId);
 
     const context = {
