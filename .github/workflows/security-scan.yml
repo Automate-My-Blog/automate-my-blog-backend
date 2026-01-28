@@ -20,7 +20,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Run security audit
+      - name: Check for vulnerabilities
         run: |
-          npm audit --audit-level=moderate
-        continue-on-error: true
+          echo "Checking for security vulnerabilities..."
+          npm audit --audit-level=moderate || {
+            echo "::error::Security vulnerabilities found! Run 'npm audit fix' locally and commit the changes."
+            exit 1
+          }
+        continue-on-error: false
