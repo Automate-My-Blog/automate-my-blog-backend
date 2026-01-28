@@ -1,0 +1,92 @@
+name: Code Quality Checks
+
+on:
+  pull_request:
+    branches: [main, test/unit-tests]
+  push:
+    branches: [main, test/unit-tests]
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check for console.log statements
+        run: |
+          echo "Checking for console.log statements in production code..."
+          
+          # Files/directories to exclude (test files, scripts, etc.)
+          EXCLUDE_PATTERNS=(
+            "test-*.js"
+            "debug-*.js"
+            "verify-*.js"
+            "check-*.js"
+            "fix-*.js"
+            "create-*.js"
+            "run-*.js"
+            "add-*.js"
+            "clear-*.js"
+            "extract-*.js"
+            "improve-*.js"
+            "setup-*.js"
+            "simple-*.js"
+            "migration-*.js"
+            "emergency-*.js"
+            "end-to-end-test.js"
+            "comprehensive-validation-test.js"
+            "final-validation-test.js"
+            "tests/"
+            "*.test.js"
+            "*.spec.js"
+            "docs/"
+            "*.md"
+          )
+          
+          # Build exclude pattern for grep
+          EXCLUDE_GREP=""
+          for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            EXCLUDE_GREP="${EXCLUDE_GREP} --exclude=${pattern}"
+          done
+          
+          # Find console.log statements (excluding test/debug files)
+          CONSOLE_LOGS=$(grep -r "console\.log" ${EXCLUDE_GREP} --include="*.js" --include="*.ts" . | grep -v "node_modules" | grep -v ".git" || true)
+          
+          if [ -n "$CONSOLE_LOGS" ]; then
+            echo "::warning::Found console.log statements in production code:"
+            echo "$CONSOLE_LOGS" | while IFS= read -r line; do
+              echo "  $line"
+            done
+            echo ""
+            echo "Consider removing console.log statements from production code or using a proper logging library."
+          else
+            echo "✅ No console.log statements found in production code"
+          fi
+        continue-on-error: true
+      
+      - name: Check for TODO/FIXME comments
+        run: |
+          echo "Checking for TODO/FIXME comments..."
+          
+          # Find TODO/FIXME comments (case insensitive)
+          TODOS=$(grep -ri "TODO\|FIXME" --include="*.js" --include="*.ts" --include="*.jsx" --include="*.tsx" . | grep -v "node_modules" | grep -v ".git" | grep -v "docs/" || true)
+          
+          if [ -n "$TODOS" ]; then
+            echo "::warning::Found TODO/FIXME comments:"
+            echo "$TODOS" | while IFS= read -r line; do
+              echo "  $line"
+            done
+            echo ""
+            echo "Consider addressing these TODOs/FIXMEs or creating issues to track them."
+          else
+            echo "✅ No TODO/FIXME comments found"
+          fi
+        continue-on-error: true
+      
+      - name: Summary
+        run: |
+          echo "## Code Quality Check Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Code quality checks completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** These checks are non-blocking. Review the warnings above and address them as needed." >> $GITHUB_STEP_SUMMARY
