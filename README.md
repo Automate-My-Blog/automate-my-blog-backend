@@ -95,3 +95,22 @@ vercel
 - Puppeteer for web scraping
 - Cheerio for HTML parsing
 - CORS and rate limiting
+
+## CI/CD
+
+This project uses GitHub Actions for continuous integration:
+
+- **Security Scanning** - Dependency vulnerability checks
+- **Code Quality** - Automated code quality checks
+- **Testing** - Automated test suite execution
+- **Environment Validation** - Ensures required env vars are documented
+- **PR Size Check** - Warns about large pull requests
+- **Dependency Updates** - Weekly checks for outdated packages
+- **Schema Diff** - Shows database changes in PR comments
+- **Stale Issues** - Automatic issue management
+
+See [docs/github-actions-quick-wins.md](./docs/github-actions-quick-wins.md) for details on all workflows.
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for guidelines.

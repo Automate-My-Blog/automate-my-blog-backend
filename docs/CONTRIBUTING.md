@@ -84,6 +84,19 @@ Before opening a PR, make sure:
 - [ ] **Database migrations:** Checked migration number doesn't conflict
 - [ ] **File conflicts:** No other PRs modifying same files
 
+## CI/CD Checks
+
+When you open a PR, the following automated checks will run:
+
+- ✅ **Security Scan** - Checks for dependency vulnerabilities (`npm audit`)
+- ✅ **Environment Variables** - Validates required env vars are documented in `.env.example`
+- ✅ **Code Quality** - Checks for console.log statements and TODO/FIXME comments
+- ✅ **Tests** - Runs the test suite (unit and integration tests)
+- ✅ **PR Size Check** - Warns if PR exceeds 500 lines (non-blocking)
+- ✅ **Schema Diff** - Shows database schema changes in PR comments (when database files change)
+
+All checks must pass before your PR can be merged. The PR size check is a warning only and won't block merging.
+
 ## Getting Help
 
 - Check existing issues and PRs for similar work
@@ -111,7 +124,22 @@ Issues are organized by category:
 - **Email**: SendGrid integration, email templates, preferences
 - **Reliability**: Error handling, retry logic, logging, monitoring
 - **Testing**: Test framework setup, test coverage
-- **CI/CD**: GitHub Actions workflows
+- **CI/CD**: GitHub Actions workflows (see [GitHub Actions Quick Wins](./github-actions-quick-wins.md) for implemented workflows)
 - **Tech Debt**: Code improvements, optimizations
 
 Pick issues that match your interests and skill level!
+
+## Automated Workflows
+
+This repository uses several automated GitHub Actions workflows:
+
+- **Security Scanning** - Runs on every PR to check for dependency vulnerabilities
+- **Environment Variable Validation** - Ensures required env vars are documented
+- **Code Quality Checks** - Flags console.log and TODO/FIXME comments
+- **Test Suite** - Runs automated tests on every PR
+- **PR Size Check** - Warns about large PRs (non-blocking)
+- **Dependency Update Check** - Weekly check for outdated packages (creates issues)
+- **Database Schema Diff** - Shows schema changes in PR comments
+- **Stale Issues** - Automatically manages stale issues
+
+See [GitHub Actions Quick Wins](./github-actions-quick-wins.md) for details on all workflows.
