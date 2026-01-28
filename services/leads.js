@@ -3,6 +3,7 @@ import db from './database.js';
 import organizationService from './organizations.js';
 import projectsService from './projects.js';
 import leadEmailTriggers from './leadEmailTriggers.js';
+import { deriveLeadSourceFromReferrer } from '../utils/lead-source.js';
 
 /**
  * Website Lead Management Service
@@ -116,25 +117,7 @@ class LeadService {
       const ipAddress = sessionInfo.ipAddress || null; // Use NULL instead of 'unknown' for inet type
       const userAgent = sessionInfo.userAgent || 'unknown';
       const referrer = sessionInfo.referrer || null;
-
-      // Determine lead source
-      let leadSource = 'website_analysis';
-      if (referrer) {
-        if (referrer.includes('google.com') || referrer.includes('bing.com')) {
-          leadSource = 'organic_search';
-        } else if (referrer.includes('facebook.com') || referrer.includes('linkedin.com')) {
-          leadSource = 'social';
-        } else if (referrer.includes('automatemyblog.com')) {
-          // Check for actual referral parameters
-          if (referrer.includes('?ref=') || referrer.includes('&ref=')) {
-            leadSource = 'referral';
-          } else {
-            leadSource = 'direct'; // From own domain without ref parameter
-          }
-        } else {
-          leadSource = 'referral'; // External domain
-        }
-      }
+      const leadSource = deriveLeadSourceFromReferrer(referrer);
 
       const websiteDomain = new URL(websiteUrl).hostname;
       

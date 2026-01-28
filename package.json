@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest",
+    "test:coverage": "NODE_ENV=test vitest run --coverage",
     "verify-db": "node verify-connection.js",
     "setup-db": "node setup-database.js",
     "test-db": "node test-db-connection.js",
@@ -44,5 +46,9 @@
     "stripe": "^20.2.0",
     "uuid": "^13.0.0",
     "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "vitest": "^4.0.18"
   }
 }
