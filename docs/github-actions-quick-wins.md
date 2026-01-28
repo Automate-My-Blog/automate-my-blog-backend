@@ -2,29 +2,48 @@
 
 Here are some GitHub Actions workflows that are easy to set up and provide real value. Most of these take 5-30 minutes to implement and will save you time in the long run.
 
+## ✅ Currently Implemented Workflows
+
+The following workflows are **already implemented** and running in this repository:
+
+- ✅ **Dependency Security Scanning** (`.github/workflows/security-scan.yml`) - Scans dependencies for vulnerabilities on every PR
+- ✅ **Environment Variable Validation** (`.github/workflows/env-var-validation.yml`) - Validates required env vars are documented
+- ✅ **Code Quality Checks** (`.github/workflows/code-quality.yml`) - Checks for console.log and TODO/FIXME comments
+- ✅ **PR Size Check** (`.github/workflows/pr-size-check.yml`) - Warns when PRs exceed 500 lines
+- ✅ **Dependency Update Check** (`.github/workflows/dependency-check.yml`) - Weekly check for outdated packages
+- ✅ **Database Schema Diff Check** (`.github/workflows/schema-diff.yml`) - Shows schema changes in PR comments
+- ✅ **Auto-Close Stale Issues** (`.github/workflows/stale-issues.yml`) - Automatically manages stale issues
+- ✅ **Test Suite** (`.github/workflows/test.yml`) - Runs test suite on PRs
+
 ---
 
-## 1. Dependency Security Scanning ⚡ (5 min)
+## 1. Dependency Security Scanning ⚡ (5 min) ✅ IMPLEMENTED
 
 This one's a no-brainer. Automatically scans your dependencies for known vulnerabilities on every PR. Takes 5 minutes to set up and catches security issues before they hit production. Once it's running, you don't have to think about it.
 
 The workflow runs `npm audit` on every PR and blocks merges if it finds moderate or higher severity vulnerabilities. Super simple and prevents a whole class of security issues.
 
+**Implementation:** `.github/workflows/security-scan.yml` - Runs on PRs and pushes to main, uses `npm audit` to check for vulnerabilities, blocks merges if moderate+ severity issues found.
+
 ---
 
-## 2. Environment Variable Validation ⚡ (10 min)
+## 2. Environment Variable Validation ⚡ (10 min) ✅ IMPLEMENTED
 
 How many times have you deployed something and it failed because a required env var wasn't set? This checks that required env vars are documented in `.env.example` when PRs touch code that uses them. It's a simple check but saves a lot of "works on my machine" headaches.
 
 The workflow verifies that `.env.example` exists and contains critical variables like `DATABASE_URL`, `OPENAI_API_KEY`, and `STRIPE_SECRET_KEY`. If any are missing, the PR gets blocked.
 
+**Implementation:** `.github/workflows/env-var-validation.yml` - Validates `.env.example` exists and contains required variables (DATABASE_URL, OPENAI_API_KEY, JWT_SECRET, JWT_REFRESH_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET), blocks PR if missing.
+
 ---
 
-## 3. Code Quality Checks ⚡ (15 min)
+## 3. Code Quality Checks ⚡ (15 min) ✅ IMPLEMENTED
 
 This runs basic code quality checks on PRs - things like catching console.log statements (which you probably don't want in production) and flagging TODO/FIXME comments. It's not a full linter setup, but it catches the obvious stuff before code review. Helps maintain consistency without being too opinionated.
 
 The workflow scans your code for console.log statements and flags TODO/FIXME comments. You can customize what it checks for - I included console.log and TODO checks, but you could add more rules based on your team's preferences.
+
+**Implementation:** `.github/workflows/code-quality.yml` - Checks for console.log statements (excluding test/debug files) and TODO/FIXME comments, outputs warnings (non-blocking), and provides summary in GitHub Actions output.
 
 ---
 
@@ -52,35 +71,43 @@ The workflow uses the Vercel GitHub Action to deploy to a preview environment wh
 
 ---
 
-## 7. PR Size Check ⚡ (5 min)
+## 7. PR Size Check ⚡ (5 min) ✅ IMPLEMENTED
 
 This warns when PRs are too large (I set it to 500+ lines). Large PRs are hard to review and more likely to have bugs. This doesn't block anything, just adds a comment warning that the PR might be too big. It's a gentle nudge to split things up.
 
 The workflow calculates the diff size and adds a warning comment if the PR exceeds your threshold. You can adjust the threshold based on your team's preferences.
 
+**Implementation:** `.github/workflows/pr-size-check.yml` - Runs on PR opened/synchronize/reopened events, calculates diff size, and posts a warning comment if PR exceeds 500 lines threshold.
+
 ---
 
-## 8. Dependency Update Check ⚡ (10 min)
+## 8. Dependency Update Check ⚡ (10 min) ✅ IMPLEMENTED
 
 This runs weekly (or on-demand) and checks if your dependencies are outdated. If they are, it creates a GitHub issue so you know about it. It's a good way to stay on top of updates without having to remember to check manually.
 
 The workflow runs `npm outdated` on a schedule (weekly by default) and creates a GitHub issue if it finds outdated packages. You can adjust the schedule or make it more sophisticated if you want - maybe only flag security updates, or create separate issues for major vs minor updates.
 
+**Implementation:** `.github/workflows/dependency-check.yml` - Runs weekly on Mondays, checks for outdated packages, creates/updates GitHub issue with categorized updates (major/minor/patch), and includes update instructions.
+
 ---
 
-## 9. Database Schema Diff Check ⚡ (15 min)
+## 9. Database Schema Diff Check ⚡ (15 min) ✅ IMPLEMENTED
 
 When someone changes database files, this shows a diff of what changed in the PR comments. It's helpful for reviewing schema changes - you can see exactly what tables/columns are being added/modified without having to dig through the SQL files. Simple but useful for visibility.
 
 The workflow only runs when database files are changed, calculates the diff, and posts it as a summary in the GitHub Actions output. Makes it easy to see schema changes at a glance during code review.
 
+**Implementation:** `.github/workflows/schema-diff.yml` - Runs when `database/**/*.sql` files are changed, calculates diff, posts PR comment with summary (files changed, lines added/deleted, key schema changes, full diff), and updates comment if PR is updated.
+
 ---
 
-## 10. Auto-Close Stale Issues 🔧 (5 min)
+## 10. Auto-Close Stale Issues 🔧 (5 min) ✅ IMPLEMENTED
 
 This automatically closes issues that haven't been updated in 60 days. It's optional - some teams like to keep all issues open, others prefer a cleaner tracker. If you want to keep things tidy, this helps.
 
 The workflow runs daily and uses GitHub's stale action to mark issues as stale after 60 days, then closes them 7 days later if there's no activity. It gives people a chance to re-open if the issue is still relevant.
+
+**Implementation:** `.github/workflows/stale-issues.yml` - Runs daily at 00:00 UTC, marks issues/PRs as stale after 60 days, closes them 7 days later if no activity, exempts 'pinned' and 'security' labels, and can be manually triggered.
 
 ---
 

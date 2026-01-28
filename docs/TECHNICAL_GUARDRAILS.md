@@ -2,6 +2,21 @@
 
 These are technical implementations to enforce the guardrails automatically.
 
+## ✅ Currently Implemented Automated Checks
+
+The following automated checks are **already implemented** via GitHub Actions:
+
+- ✅ **Security Scanning** (`.github/workflows/security-scan.yml`) - Checks for dependency vulnerabilities
+- ✅ **Environment Variable Validation** (`.github/workflows/env-var-validation.yml`) - Ensures required env vars are documented
+- ✅ **Code Quality Checks** (`.github/workflows/code-quality.yml`) - Flags console.log and TODO/FIXME comments
+- ✅ **Test Suite** (`.github/workflows/test.yml`) - Runs automated tests on PRs
+- ✅ **PR Size Check** (`.github/workflows/pr-size-check.yml`) - Warns about large PRs (500+ lines)
+- ✅ **Dependency Update Check** (`.github/workflows/dependency-check.yml`) - Weekly checks for outdated packages
+- ✅ **Database Schema Diff** (`.github/workflows/schema-diff.yml`) - Shows schema changes in PR comments
+- ✅ **Stale Issues** (`.github/workflows/stale-issues.yml`) - Automatically manages stale issues
+
+See [GitHub Actions Quick Wins](./github-actions-quick-wins.md) for details on all implemented workflows.
+
 ## 1. Branch Protection Rules (GitHub Settings)
 
 **Recommended settings:**
