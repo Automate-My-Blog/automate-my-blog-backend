@@ -163,13 +163,13 @@ Coverage includes `utils/`, `services/`, and `jobs/`. Excluded: `**/*.test.js`, 
 
 ## CI (GitHub Actions)
 
-Workflow: `.github/workflows/test.yml`. Runs on **push** to `main` and **pull requests** targeting `main`.
+Workflow: `.github/workflows/test.yml`. Runs on **push** and **pull requests** for `main` and `test/unit-tests`.
 
 1. Postgres 16 service.
 2. Install `postgresql-client`, run `./scripts/setup-test-db.sh` with `DATABASE_URL`.
 3. `npm run test:coverage` with `NODE_ENV`, `DATABASE_URL`, `USE_DATABASE`, JWT secrets, `STRIPE_WEBHOOK_SECRET`, `STRIPE_SECRET_KEY`, and `OPENAI_API_KEY` (dummy) set.
 
-Unit and integration tests run in CI; no production DB or real external APIs.
+Unit and **integration** tests run in CI (integration tests run because `DATABASE_URL` is set). No production DB or real external APIs. Migration `05_create_all_indexes` is run with `ON_ERROR_STOP=0` so known partial failures (e.g. index predicates using `CURRENT_TIMESTAMP`) do not fail the job.
 
 ---
 

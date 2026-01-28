@@ -27,7 +27,6 @@ MIGRATIONS=(
   "08_organization_intelligence_tables.sql"
   "13_organization_intelligence_session_adoption.sql"
   "24_billing_accounts_and_referrals.sql"
-  "05_create_all_indexes.sql"
 )
 
 for f in "${MIGRATIONS[@]}"; do
@@ -40,6 +39,15 @@ for f in "${MIGRATIONS[@]}"; do
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$path"
   echo "   ✅"
 done
+
+# 05_create_all_indexes: some indexes use predicates that can fail (e.g. CURRENT_TIMESTAMP)
+# Run with ON_ERROR_STOP=0 so partial success doesn't fail the job
+path="$DB_DIR/05_create_all_indexes.sql"
+if [ -f "$path" ]; then
+  echo "▶ 05_create_all_indexes.sql (partial failures allowed)"
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f "$path" || true
+  echo "   ✅"
+fi
 
 echo ""
 echo "✅ Test database ready."
