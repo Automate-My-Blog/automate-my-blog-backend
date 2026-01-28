@@ -1543,17 +1543,22 @@ Step 3: [M-N%] engage and read ([P-Q readers]) vs bouncing - [WHY based on their
 Step 4: [R-S%] click CTA ([T-U bookings]) - [WHY based on their search urgency]
 Step 5: Revenue of $[low]-$[high] monthly assuming $[realistic price]/consultation
 
+Use realistic conversion rates based on industry benchmarks:
+- Capture rate: 0.5-4% of total searches (depends on ranking position #1-10)
+- Engagement rate: 20-60% (inverse of bounce rate, higher for crisis content)
+- CTA conversion: 2-15% (higher for urgent/crisis-driven needs, lower for research)
+
 Example:
 Step 1: 3,500 people search monthly for "safe anxiety medication during pregnancy"
-Step 2: Your posts capture 2-5% (70-175 clicks) once SEO authority builds
-Step 3: 60-80% engage (42-140 readers) vs bouncing because they desperately need clinical guidance, not generic advice
-Step 4: 15-25% book (6-35 consultations) due to crisis-driven urgency and fear about harming baby
-Step 5: $3,000-$17,500/month at $500/consultation
+Step 2: Your posts capture 1-3% (35-105 clicks) once SEO authority builds over 6-12 months
+Step 3: 30-50% engage (11-53 readers) vs bouncing - they need clinical guidance but many bounce to check multiple sources
+Step 4: 5-12% book (1-6 consultations) due to crisis-driven urgency and fear about harming baby
+Step 5: $500-$3,000/month at $500/consultation
 
 Use their specific emotional state and urgency to justify rates. Plain text only, max 600 characters.`
             }
           ],
-          temperature: 0.3,
+          temperature: 0.2,
           max_tokens: 800
         });
 
