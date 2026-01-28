@@ -391,9 +391,9 @@ class EmailService {
 
     return {
       leadId: lead.id,
-      email: lead.email,
-      websiteUrl: lead.website_url,
-      leadSource: lead.lead_source,
+      email: lead.email || lead.contact_email || 'lead@example.com',
+      websiteUrl: lead.website_url || lead.url || 'https://example.com',
+      leadSource: lead.lead_source || lead.source || 'website',
       leadScore: lead.lead_score || 75,
       industryFitScore: lead.industry_fit_score || 80,
       urgencyScore: lead.urgency_score || 70,

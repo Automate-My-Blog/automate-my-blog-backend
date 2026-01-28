@@ -295,7 +295,11 @@ router.get('/send-to-me/:emailType', async (req, res) => {
       account_deactivation_warning: () => emailService.sendAccountDeactivationWarning(user.id, 7),
       account_reactivation: () => emailService.sendAccountReactivation(user.id),
       // Engagement
-      blog_post_completion: () => emailService.sendBlogPostCompletion(user.id, 'test-post-123'),
+      blog_post_completion: async () => {
+        const postResult = await db.query('SELECT id FROM blog_posts WHERE user_id = $1 LIMIT 1', [user.id]);
+        const postId = postResult.rows[0]?.id || user.id;
+        return emailService.sendBlogPostCompletion(user.id, postId);
+      },
       low_credit_warning: () => emailService.sendLowCreditWarning(user.id),
       usage_digest: () => emailService.sendUsageDigest(user.id),
       // Re-engagement
@@ -303,33 +307,69 @@ router.get('/send-to-me/:emailType', async (req, res) => {
       '14_day_reengagement': () => emailService.send14DayReengagement(user.id),
       // Lead nurturing
       high_lead_score_followup: async () => {
-        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
-        const leadId = leadResult.rows[0]?.id || user.id;
-        return emailService.sendHighLeadScoreFollowup(leadId);
+        const leadResult = await db.query('SELECT id FROM website_leads WHERE email IS NOT NULL LIMIT 1');
+        if (leadResult.rows.length === 0) {
+          // Create a temporary test lead if none exist
+          const testLead = await db.query(`
+            INSERT INTO website_leads (email, website_url, lead_source, session_id, ip_address)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [user.email, 'https://example.com', 'test', 'test-session', '127.0.0.1']);
+          return emailService.sendHighLeadScoreFollowup(testLead.rows[0].id);
+        }
+        return emailService.sendHighLeadScoreFollowup(leadResult.rows[0].id);
       },
       warm_lead_nurture: async () => {
-        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
-        const leadId = leadResult.rows[0]?.id || user.id;
-        return emailService.sendWarmLeadNurture(leadId);
+        const leadResult = await db.query('SELECT id FROM website_leads WHERE email IS NOT NULL LIMIT 1');
+        if (leadResult.rows.length === 0) {
+          const testLead = await db.query(`
+            INSERT INTO website_leads (email, website_url, lead_source, session_id, ip_address)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [user.email, 'https://example.com', 'test', 'test-session', '127.0.0.1']);
+          return emailService.sendWarmLeadNurture(testLead.rows[0].id);
+        }
+        return emailService.sendWarmLeadNurture(leadResult.rows[0].id);
       },
       cold_lead_reactivation: async () => {
-        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
-        const leadId = leadResult.rows[0]?.id || user.id;
-        return emailService.sendColdLeadReactivation(leadId);
+        const leadResult = await db.query('SELECT id FROM website_leads WHERE email IS NOT NULL LIMIT 1');
+        if (leadResult.rows.length === 0) {
+          const testLead = await db.query(`
+            INSERT INTO website_leads (email, website_url, lead_source, session_id, ip_address)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [user.email, 'https://example.com', 'test', 'test-session', '127.0.0.1']);
+          return emailService.sendColdLeadReactivation(testLead.rows[0].id);
+        }
+        return emailService.sendColdLeadReactivation(leadResult.rows[0].id);
       },
       lead_converted_celebration: async () => {
-        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
-        const leadId = leadResult.rows[0]?.id || user.id;
-        return emailService.sendLeadConvertedCelebration(user.id, leadId);
+        const leadResult = await db.query('SELECT id FROM website_leads WHERE email IS NOT NULL LIMIT 1');
+        if (leadResult.rows.length === 0) {
+          const testLead = await db.query(`
+            INSERT INTO website_leads (email, website_url, lead_source, session_id, ip_address)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [user.email, 'https://example.com', 'test', 'test-session', '127.0.0.1']);
+          return emailService.sendLeadConvertedCelebration(user.id, testLead.rows[0].id);
+        }
+        return emailService.sendLeadConvertedCelebration(user.id, leadResult.rows[0].id);
       },
       // Admin alerts
       new_user_signup_alert: () => emailService.sendNewUserSignupAlert(user.id),
       payment_failed_alert: () => emailService.sendPaymentFailedAlert(user.id, 'inv_123', 99),
       suspicious_activity_alert: () => emailService.sendSuspiciousActivityAlert(user.id, 'Multiple failed login attempts'),
       high_value_lead_notification: async () => {
-        const leadResult = await db.query('SELECT id FROM website_leads LIMIT 1');
-        const leadId = leadResult.rows[0]?.id || user.id;
-        return emailService.sendHighValueLeadNotification(leadId);
+        const leadResult = await db.query('SELECT id FROM website_leads WHERE email IS NOT NULL LIMIT 1');
+        if (leadResult.rows.length === 0) {
+          const testLead = await db.query(`
+            INSERT INTO website_leads (email, website_url, lead_source, session_id, ip_address)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id
+          `, [user.email, 'https://example.com', 'test', 'test-session', '127.0.0.1']);
+          return emailService.sendHighValueLeadNotification(testLead.rows[0].id);
+        }
+        return emailService.sendHighValueLeadNotification(leadResult.rows[0].id);
       },
       system_error_alert: () => emailService.sendSystemErrorAlert('Test critical error', { test: true }),
       monthly_revenue_summary: () => emailService.sendMonthlyRevenueSummary(),
