@@ -2,7 +2,7 @@
  * Integration tests: Stripe webhook (signature verification, checkout.session.completed).
  * Require DATABASE_URL, STRIPE_WEBHOOK_SECRET, test DB. Skip when not set.
  *
- * @see docs/testing-strategy.md — Should Have (Week 2)
+ * @see docs/testing-strategy.md — Should Have
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';

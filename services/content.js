@@ -191,18 +191,14 @@ class ContentService {
       paramIndex++;
     }
 
-    // Build query (word_count, business_context may be missing in older schemas; use NULL)
-    const allowedSort = ['created_at', 'updated_at', 'title', 'status'].includes(sortBy) ? sortBy : 'created_at';
-    const allowedOrder = /^desc$/i.test(order) ? 'DESC' : 'ASC';
+    // Build query
     const query = `
-      SELECT id, title, LEFT(content, 200) as content_preview,
-             status, export_count, created_at, updated_at,
-             topic_data,
-             NULL::integer as word_count,
-             NULL::jsonb as business_context
-      FROM blog_posts
+      SELECT id, title, LEFT(content, 200) as content_preview, 
+             status, word_count, export_count, created_at, updated_at,
+             topic_data, business_context
+      FROM blog_posts 
       ${whereClause}
-      ORDER BY ${allowedSort} ${allowedOrder}
+      ORDER BY ${sortBy} ${order}
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     
@@ -288,11 +284,9 @@ class ContentService {
     try {
       if (this.databaseAvailable && this.useDatabaseStorage) {
         const result = await db.query(`
-          SELECT id, title, content, status, export_count,
-                 topic_data, created_at, updated_at,
-                 (CASE WHEN content IS NULL OR TRIM(content) = '' THEN 0 ELSE (LENGTH(content) - LENGTH(REPLACE(content, ' ', '')) + 1) END)::integer as word_count,
-                 NULL::jsonb as business_context
-          FROM blog_posts
+          SELECT id, title, content, status, word_count, export_count,
+                 topic_data, business_context, created_at, updated_at
+          FROM blog_posts 
           WHERE id = $1 AND user_id = $2
         `, [postId, userId]);
 

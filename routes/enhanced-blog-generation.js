@@ -1,7 +1,6 @@
 import express from 'express';
 import enhancedBlogGenerationService from '../services/enhanced-blog-generation.js';
 import billingService from '../services/billing.js';
-import db from '../services/database.js';
 import { waitUntil } from '@vercel/functions';
 
 // Mock SEO analysis service for now
@@ -360,21 +359,6 @@ router.post('/analyze-and-improve', async (req, res) => {
 router.get('/context/:organizationId', async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const userId = req.user?.userId;
-
-    if (userId) {
-      const member = await db.query(
-        'SELECT 1 FROM organization_members WHERE user_id = $1 AND organization_id = $2 AND status = $3',
-        [userId, organizationId, 'active']
-      );
-      if (member.rows.length === 0) {
-        return res.status(403).json({
-          success: false,
-          error: 'Forbidden',
-          message: 'You do not have access to this organization',
-        });
-      }
-    }
 
     console.log(`📊 Loading context for organization: ${organizationId}`);
 

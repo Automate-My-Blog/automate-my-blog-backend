@@ -2,7 +2,7 @@
  * Integration tests: Database (multi-tenant, FKs, session adoption).
  * Require DATABASE_URL + test DB.
  *
- * @see docs/testing-strategy.md — Must Have (Week 1–2)
+ * @see docs/testing-strategy.md — Must Have
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';

@@ -2,7 +2,7 @@
  * API contract tests: response shapes, error handling, required fields.
  * Require DATABASE_URL (app loads DB). Skip when not set.
  *
- * @see docs/testing-strategy.md — Should Have (Week 2)
+ * @see docs/testing-strategy.md — Should Have
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';

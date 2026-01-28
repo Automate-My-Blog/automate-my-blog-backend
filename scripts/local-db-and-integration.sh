@@ -29,8 +29,15 @@ echo "▶ Running migrations..."
 docker exec "$CONTAINER" mkdir -p /tmp/migrations
 docker cp "$REPO_ROOT/database/." "$CONTAINER:/tmp/migrations/"
 for f in 01_core_tables 02_billing_tables 03_referral_analytics_tables 04_admin_security_tables 04_credit_system \
-         06_lead_generation_tables 07_add_website_to_organizations 08_organization_intelligence_tables \
-         13_organization_intelligence_session_adoption 24_billing_accounts_and_referrals; do
+         06_lead_generation_tables 07_add_website_to_organizations; do
+  echo "   ▶ $f.sql"
+  docker exec "$CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f "/tmp/migrations/${f}.sql" >/dev/null 2>&1 || true
+done
+echo "   ▶ 08_organization_intelligence_tables.sql (trigger errors ok)"
+docker exec "$CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=0 -f /tmp/migrations/08_organization_intelligence_tables.sql >/dev/null 2>&1 || true
+echo "   ▶ 25_fix_org_intelligence_triggers.sql"
+docker exec "$CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f /tmp/migrations/25_fix_org_intelligence_triggers.sql >/dev/null 2>&1 || true
+for f in 13_organization_intelligence_session_adoption 24_billing_accounts_and_referrals; do
   echo "   ▶ $f.sql"
   docker exec "$CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f "/tmp/migrations/${f}.sql" >/dev/null 2>&1 || true
 done

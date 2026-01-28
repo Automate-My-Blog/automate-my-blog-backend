@@ -16,7 +16,7 @@ echo "🔄 Setting up test database..."
 echo "   Migrations: $DB_DIR"
 echo ""
 
-MIGRATIONS=(
+MIGRATIONS_STRICT=(
   "01_core_tables.sql"
   "02_billing_tables.sql"
   "03_referral_analytics_tables.sql"
@@ -24,12 +24,36 @@ MIGRATIONS=(
   "04_credit_system.sql"
   "06_lead_generation_tables.sql"
   "07_add_website_to_organizations.sql"
-  "08_organization_intelligence_tables.sql"
-  "13_organization_intelligence_session_adoption.sql"
-  "24_billing_accounts_and_referrals.sql"
 )
 
-for f in "${MIGRATIONS[@]}"; do
+for f in "${MIGRATIONS_STRICT[@]}"; do
+  path="$DB_DIR/$f"
+  if [ ! -f "$path" ]; then
+    echo "⚠️  Skip $f (not found)"
+    continue
+  fi
+  echo "▶ $f"
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$path"
+  echo "   ✅"
+done
+
+# 08: uses CREATE TRIGGER IF NOT EXISTS (unsupported in Postgres). Run with ON_ERROR_STOP=0,
+# then 25 fixes the triggers. Do not edit 08 so migration history stays unchanged.
+path="$DB_DIR/08_organization_intelligence_tables.sql"
+if [ -f "$path" ]; then
+  echo "▶ 08_organization_intelligence_tables.sql (trigger errors allowed; 25 fixes them)"
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=0 -f "$path" || true
+  echo "   ✅"
+fi
+
+path="$DB_DIR/25_fix_org_intelligence_triggers.sql"
+if [ -f "$path" ]; then
+  echo "▶ 25_fix_org_intelligence_triggers.sql"
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$path"
+  echo "   ✅"
+fi
+
+for f in "13_organization_intelligence_session_adoption.sql" "24_billing_accounts_and_referrals.sql"; do
   path="$DB_DIR/$f"
   if [ ! -f "$path" ]; then
     echo "⚠️  Skip $f (not found)"
@@ -41,7 +65,6 @@ for f in "${MIGRATIONS[@]}"; do
 done
 
 # 05_create_all_indexes: some indexes use predicates that can fail (e.g. CURRENT_TIMESTAMP)
-# Run with ON_ERROR_STOP=0 so partial success doesn't fail the job
 path="$DB_DIR/05_create_all_indexes.sql"
 if [ -f "$path" ]; then
   echo "▶ 05_create_all_indexes.sql (partial failures allowed)"
