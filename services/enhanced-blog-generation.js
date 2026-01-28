@@ -3,6 +3,7 @@ import db from './database.js';
 import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
 import grokTweetSearch from './grok-tweet-search.js';
+import emailService from './email.js';
 
 /**
  * Enhanced Blog Generation Service
@@ -2109,6 +2110,12 @@ CRITICAL REQUIREMENTS:
       ]);
 
       console.log(`✅ Enhanced blog post saved: ${postId}`);
+
+      // Send blog post completion email (async, don't block)
+      emailService.sendBlogPostCompletion(userId, postId)
+        .then(() => console.log(`✅ Blog post completion email sent to user ${userId}`))
+        .catch(err => console.error('❌ Failed to send blog post completion email:', err));
+
       return result.rows[0];
 
     } catch (error) {

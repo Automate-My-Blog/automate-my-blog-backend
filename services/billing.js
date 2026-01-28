@@ -1,4 +1,5 @@
 import db from './database.js';
+import emailService from './email.js';
 
 /**
  * Billing and Usage Management Service
@@ -161,6 +162,16 @@ class BillingService {
       }
 
       console.log(`✅ Used ${credit.source_type} credit for user ${userId}`);
+
+      // Check remaining credits and send low credit warning if needed
+      const remainingCredits = await this.getAvailableCredits(userId);
+      if (remainingCredits.availableCredits <= 2 && remainingCredits.availableCredits > 0) {
+        // Send low credit warning (async, don't block)
+        emailService.sendLowCreditWarning(userId)
+          .then(() => console.log(`✅ Low credit warning sent to user ${userId} (${remainingCredits.availableCredits} credits remaining)`))
+          .catch(err => console.error('❌ Failed to send low credit warning:', err));
+      }
+
       return { success: true, creditId: credit.id, sourceType: credit.source_type };
 
     } catch (error) {

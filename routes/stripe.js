@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import leadsService from '../services/leads.js';
+import emailService from '../services/email.js';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -457,7 +458,19 @@ async function handleCheckoutCompleted(session) {
         console.error(`⚠️ Failed to track analytics event:`, eventError.message);
         // Don't throw - analytics failure shouldn't block subscription processing
       }
+
+      // Send subscription confirmation email (async, don't block)
+      emailService.sendSubscriptionConfirmation(userId, session.subscription)
+        .then(() => console.log(`✅ Subscription confirmation email sent to user ${userId}`))
+        .catch(err => console.error('❌ Failed to send subscription confirmation email:', err));
     }
+
+    // Send payment received email for all purchases (one-time or subscription)
+    const amount = session.amount_total ? (session.amount_total / 100) : 0; // Convert from cents
+    emailService.sendPaymentReceived(userId, amount, session.id)
+      .then(() => console.log(`✅ Payment received email sent to user ${userId}`))
+      .catch(err => console.error('❌ Failed to send payment received email:', err));
+
   } catch (error) {
     console.error('❌ Error handling checkout completion:', error);
   }
@@ -476,7 +489,46 @@ async function handleSubscriptionCreated(subscription) {
  */
 async function handleSubscriptionUpdated(subscription) {
   console.log(`📋 Subscription updated: ${subscription.id}`);
-  // Handle plan changes, etc.
+
+  try {
+    // Get current subscription from database to detect plan changes
+    const currentSubResult = await db.query(`
+      SELECT user_id, plan_name
+      FROM subscriptions
+      WHERE stripe_subscription_id = $1
+    `, [subscription.id]);
+
+    if (currentSubResult.rows.length > 0) {
+      const userId = currentSubResult.rows[0].user_id;
+      const oldPlan = currentSubResult.rows[0].plan_name;
+
+      // Get new plan name from Stripe subscription
+      const newPriceId = subscription.items.data[0]?.price.id;
+      const newPlan = getPlanNameFromPriceId(newPriceId);
+
+      // If plan changed, send upgrade email
+      if (oldPlan !== newPlan && newPlan !== 'Unknown') {
+        emailService.sendSubscriptionUpgraded(userId, oldPlan, newPlan)
+          .then(() => console.log(`✅ Subscription upgraded email sent to user ${userId}`))
+          .catch(err => console.error('❌ Failed to send subscription upgraded email:', err));
+      }
+
+      // Update subscription in database
+      await db.query(`
+        UPDATE subscriptions
+        SET
+          plan_name = $1,
+          current_period_start = to_timestamp($2),
+          current_period_end = to_timestamp($3),
+          updated_at = NOW()
+        WHERE stripe_subscription_id = $4
+      `, [newPlan, subscription.current_period_start, subscription.current_period_end, subscription.id]);
+
+      console.log(`✅ Updated subscription in database: ${subscription.id}`);
+    }
+  } catch (error) {
+    console.error('❌ Error handling subscription update:', error);
+  }
 }
 
 /**
@@ -486,6 +538,14 @@ async function handleSubscriptionDeleted(subscription) {
   console.log(`❌ Subscription deleted: ${subscription.id}`);
 
   try {
+    // Get userId before marking as cancelled
+    const subResult = await db.query(`
+      SELECT user_id FROM subscriptions
+      WHERE stripe_subscription_id = $1
+    `, [subscription.id]);
+
+    const userId = subResult.rows[0]?.user_id;
+
     // Mark subscription as cancelled in database
     await db.query(`
       UPDATE subscriptions
@@ -496,6 +556,14 @@ async function handleSubscriptionDeleted(subscription) {
     `, [subscription.id]);
 
     console.log(`✅ Marked subscription as cancelled: ${subscription.id}`);
+
+    // Send cancellation confirmation email
+    if (userId) {
+      const reason = subscription.cancellation_details?.reason || 'user_cancelled';
+      emailService.sendSubscriptionCancelled(userId, reason)
+        .then(() => console.log(`✅ Subscription cancelled email sent to user ${userId}`))
+        .catch(err => console.error('❌ Failed to send subscription cancelled email:', err));
+    }
   } catch (error) {
     console.error('❌ Error handling subscription deletion:', error);
   }
@@ -506,7 +574,29 @@ async function handleSubscriptionDeleted(subscription) {
  */
 async function handlePaymentSucceeded(invoice) {
   console.log(`💰 Payment succeeded: ${invoice.id}`);
-  // Additional handling if needed (e.g., send receipt email)
+
+  try {
+    // Get user ID from Stripe customer
+    if (invoice.customer) {
+      const subResult = await db.query(`
+        SELECT user_id FROM subscriptions
+        WHERE stripe_customer_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [invoice.customer]);
+
+      const userId = subResult.rows[0]?.user_id;
+
+      if (userId) {
+        const amount = invoice.amount_paid ? (invoice.amount_paid / 100) : 0; // Convert from cents
+        emailService.sendPaymentReceived(userId, amount, invoice.id)
+          .then(() => console.log(`✅ Payment received email sent to user ${userId}`))
+          .catch(err => console.error('❌ Failed to send payment received email:', err));
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error handling payment succeeded:', error);
+  }
 }
 
 /**
@@ -514,7 +604,31 @@ async function handlePaymentSucceeded(invoice) {
  */
 async function handlePaymentFailed(invoice) {
   console.log(`⚠️ Payment failed: ${invoice.id}`);
-  // Handle payment failure (e.g., send notification email)
+
+  try {
+    // Get user ID from Stripe customer
+    if (invoice.customer) {
+      const subResult = await db.query(`
+        SELECT user_id FROM subscriptions
+        WHERE stripe_customer_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `, [invoice.customer]);
+
+      const userId = subResult.rows[0]?.user_id;
+
+      if (userId) {
+        const amount = invoice.amount_due ? (invoice.amount_due / 100) : 0; // Convert from cents
+
+        // Send alert to admin
+        emailService.sendPaymentFailedAlert(userId, invoice.id, amount)
+          .then(() => console.log(`✅ Payment failed alert sent to admin for user ${userId}`))
+          .catch(err => console.error('❌ Failed to send payment failed alert:', err));
+      }
+    }
+  } catch (error) {
+    console.error('❌ Error handling payment failed:', error);
+  }
 }
 
 /**

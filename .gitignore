@@ -9,6 +9,7 @@ yarn-error.log*
 .env.local
 .env.development.local
 .env.test.local
+.env.production
 .env.production.local
 
 # Logs
@@ -56,4 +57,7 @@ jspm_packages/
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db.env.vercel
+Thumbs.db
+
+# Vercel environment file (contains secrets)
+.env.vercel
