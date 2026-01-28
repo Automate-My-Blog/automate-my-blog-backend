@@ -161,12 +161,14 @@ CREATE INDEX IF NOT EXISTS idx_organization_intelligence_created ON organization
 -- TRIGGERS FOR UPDATED_AT TIMESTAMPS
 -- =============================================================================
 
-CREATE TRIGGER IF NOT EXISTS update_organization_contacts_updated_at 
+DROP TRIGGER IF EXISTS update_organization_contacts_updated_at ON organization_contacts;
+CREATE TRIGGER update_organization_contacts_updated_at
     BEFORE UPDATE ON organization_contacts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_organization_intelligence_updated_at 
-    BEFORE UPDATE ON organization_intelligence  
+DROP TRIGGER IF EXISTS update_organization_intelligence_updated_at ON organization_intelligence;
+CREATE TRIGGER update_organization_intelligence_updated_at
+    BEFORE UPDATE ON organization_intelligence
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =============================================================================

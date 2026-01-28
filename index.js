@@ -3290,19 +3290,20 @@ app.use((req, res) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 AutoBlog API server running on port ${PORT} (v2.0 - auth fix deployed)`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
-  console.log(`🔗 API base: http://localhost:${PORT}/api`);
+// Start server (skip when NODE_ENV=test for integration tests using supertest)
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🚀 AutoBlog API server running on port ${PORT} (v2.0 - auth fix deployed)`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`🔗 API base: http://localhost:${PORT}/api`);
 
-  // Start email campaign scheduler (includes credit expiration)
-  // Note: Set EMAIL_SCHEDULER_ENABLED=false in .env to disable
-  if (process.env.EMAIL_SCHEDULER_ENABLED !== 'false') {
-    startEmailScheduler();
-  } else {
-    console.log('⏰ Email scheduler disabled (EMAIL_SCHEDULER_ENABLED=false)');
-  }
-});
+    // Start email campaign scheduler (includes credit expiration)
+    if (process.env.EMAIL_SCHEDULER_ENABLED !== 'false') {
+      startEmailScheduler();
+    } else {
+      console.log('⏰ Email scheduler disabled (EMAIL_SCHEDULER_ENABLED=false)');
+    }
+  });
+}
 
 export default app;
