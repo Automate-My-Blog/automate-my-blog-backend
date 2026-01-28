@@ -779,12 +779,51 @@ class EmailService {
   // =====================================================
 
   /**
+   * Send new lead alert to admin
+   * @param {object} leadData - Lead data
+   * @returns {Promise<object>} Send result
+   */
+  async sendNewLeadAlert(leadData) {
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
+
+    const context = {
+      leadId: leadData.leadId,
+      websiteUrl: leadData.websiteUrl,
+      businessName: leadData.businessName,
+      businessType: leadData.businessType,
+      leadScore: leadData.leadScore,
+      leadSource: leadData.leadSource,
+      timestamp: new Date().toISOString()
+    };
+
+    return this.send('new_lead_alert', adminEmail, context);
+  }
+
+  /**
+   * Send lead preview activity alert to admin
+   * @param {object} previewData - Preview activity data
+   * @returns {Promise<object>} Send result
+   */
+  async sendLeadPreviewAlert(previewData) {
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
+
+    const context = {
+      websiteUrl: previewData.websiteUrl,
+      businessName: previewData.businessName,
+      topic: previewData.topic,
+      timestamp: new Date().toISOString()
+    };
+
+    return this.send('lead_preview_alert', adminEmail, context);
+  }
+
+  /**
    * Send new user signup alert to admin
    * @param {string} userId - New user ID
    * @returns {Promise<object>} Send result
    */
   async sendNewUserSignupAlert(userId) {
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@automatemyblog.com';
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@frankel.tv';
     const user = await this.getUserContext(userId);
 
     const context = {
@@ -793,7 +832,6 @@ class EmailService {
       firstName: user.firstName,
       lastName: user.lastName,
       planTier: user.planTier,
-      businessType: user.businessType,
       signupDate: user.createdAt
     };
 

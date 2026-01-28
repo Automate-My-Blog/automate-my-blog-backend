@@ -421,9 +421,9 @@ router.post('/preview', async (req, res) => {
       topic,
       organizationContext: context,
       predictedQuality: {
-        expectedSEOScore: context.completenessScore > 60 ? '90-95' : 
+        expectedSEOScore: context.completenessScore > 60 ? '90-95' :
                          context.completenessScore > 30 ? '80-90' : '70-85',
-        enhancementLevel: context.completenessScore > 60 ? 'high' : 
+        enhancementLevel: context.completenessScore > 60 ? 'high' :
                          context.completenessScore > 30 ? 'medium' : 'basic',
         dataCompleteness: context.completenessScore
       },
@@ -432,6 +432,14 @@ router.post('/preview', async (req, res) => {
       estimatedLength: '1200-1800 words',
       estimatedReadTime: '6-9 minutes'
     };
+
+    // Send admin alert for preview activity (async, don't block response)
+    const emailService = (await import('../services/email.js')).default;
+    emailService.sendLeadPreviewAlert({
+      websiteUrl: context.websiteUrl || businessInfo.websiteUrl || 'Unknown',
+      businessName: context.businessName || businessInfo.businessName || 'Unknown Business',
+      topic: topic.title
+    }).catch(err => console.error('Failed to send preview alert:', err));
 
     res.json({
       success: true,

@@ -212,6 +212,17 @@ class LeadService {
         })
         .catch(err => console.error(`❌ [${requestId}] Failed to queue lead nurture email:`, err.message));
 
+      // Send admin alert for new lead (async, don't block)
+      const emailService = (await import('./email.js')).default;
+      emailService.sendNewLeadAlert({
+        leadId: lead.id,
+        websiteUrl,
+        businessName: analysisData.businessName || 'Unknown Business',
+        businessType: analysisData.businessType || 'unknown',
+        leadScore,
+        leadSource
+      }).catch(err => console.error(`❌ [${requestId}] Failed to send admin alert:`, err.message));
+
       // Step 6: Track conversion step
       console.log(`📈 [${requestId}] Step 6: Tracking conversion step...`);
       const conversionStart = Date.now();

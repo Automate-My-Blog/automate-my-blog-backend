@@ -376,6 +376,13 @@ app.post('/api/v1/auth/register', async (req, res) => {
       organizationName: organizationName.trim()
     });
 
+    // Send welcome and admin alert emails (async, don't block response)
+    const emailService = (await import('./services/email.js')).default;
+    emailService.sendWelcomeEmail(result.user.id)
+      .catch(err => console.error('Failed to send welcome email:', err));
+    emailService.sendNewUserSignupAlert(result.user.id)
+      .catch(err => console.error('Failed to send admin signup alert:', err));
+
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
