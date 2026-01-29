@@ -465,15 +465,26 @@ router.post('/', async (req, res) => {
       business_value: safeStringify(business_value, 'business_value'),
       priority,
       pitch,
-      image_url: image_url || null
+      image_url: image_url || null,
+      // Profit metrics (extracted by OpenAI service)
+      projected_revenue_low: req.body.projected_revenue_low || null,
+      projected_revenue_high: req.body.projected_revenue_high || null,
+      projected_profit_low: req.body.projected_profit_low || null,
+      projected_profit_high: req.body.projected_profit_high || null,
+      profit_margin_percent: req.body.profit_margin_percent || null,
+      price_per_unit: req.body.price_per_unit || null,
+      unit_type: req.body.unit_type || 'consultation'
     };
 
     const result = await db.query(`
       INSERT INTO audiences (
         user_id, session_id, project_id, organization_intelligence_id,
         target_segment, customer_problem, customer_language,
-        conversion_path, business_value, priority, pitch, image_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        conversion_path, business_value, priority, pitch, image_url,
+        projected_revenue_low, projected_revenue_high,
+        projected_profit_low, projected_profit_high,
+        profit_margin_percent, price_per_unit, unit_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *
     `, [
       audienceData.user_id,
@@ -487,7 +498,14 @@ router.post('/', async (req, res) => {
       audienceData.business_value,
       audienceData.priority,
       audienceData.pitch,
-      audienceData.image_url
+      audienceData.image_url,
+      audienceData.projected_revenue_low,
+      audienceData.projected_revenue_high,
+      audienceData.projected_profit_low,
+      audienceData.projected_profit_high,
+      audienceData.profit_margin_percent,
+      audienceData.price_per_unit,
+      audienceData.unit_type
     ]);
 
     const audience = result.rows[0];

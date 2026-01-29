@@ -1592,9 +1592,13 @@ Use their specific emotional state and urgency to justify rates. Plain text only
 
         const pitch = completion.choices[0].message.content.trim();
 
+        // Extract profit metrics from Step 5 for database storage
+        const metrics = this.extractProfitMetrics(pitch);
+
         return {
           ...scenario,
-          pitch
+          pitch,
+          ...metrics
         };
       });
 
@@ -1606,6 +1610,68 @@ Use their specific emotional state and urgency to justify rates. Plain text only
     } catch (error) {
       console.error('❌ Failed to generate pitches:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Extract profit metrics from pitch Step 5 for database storage
+   * @param {String} pitch - The generated pitch text
+   * @returns {Object} Extracted metrics (revenue, profit, margin, price)
+   */
+  extractProfitMetrics(pitch) {
+    const metrics = {
+      projected_revenue_low: null,
+      projected_revenue_high: null,
+      projected_profit_low: null,
+      projected_profit_high: null,
+      profit_margin_percent: null,
+      price_per_unit: null,
+      unit_type: 'consultation'
+    };
+
+    try {
+      // Extract profit from Step 5
+      const profitMatch = pitch.match(
+        /Step 5:[^\$]*(?:Profit|profit)\s+of\s*\$([0-9,]+)-\$([0-9,]+)\s*(?:\/month|\/mo|monthly)/i
+      );
+
+      if (profitMatch) {
+        metrics.projected_profit_low = parseInt(profitMatch[1].replace(/,/g, ''), 10);
+        metrics.projected_profit_high = parseInt(profitMatch[2].replace(/,/g, ''), 10);
+      }
+
+      // Extract revenue
+      const revenueMatch = pitch.match(/\$([0-9,]+)-\$([0-9,]+)\s+revenue/i);
+      if (revenueMatch) {
+        metrics.projected_revenue_low = parseInt(revenueMatch[1].replace(/,/g, ''), 10);
+        metrics.projected_revenue_high = parseInt(revenueMatch[2].replace(/,/g, ''), 10);
+      }
+
+      // Extract margin
+      const marginMatch = pitch.match(/(\d+)%\s+margin/i);
+      if (marginMatch) {
+        metrics.profit_margin_percent = parseFloat(marginMatch[1]);
+      }
+
+      // Extract price per unit
+      const priceMatch = pitch.match(/\$([0-9,]+)\/(?:consultation|session|product|unit)/i);
+      if (priceMatch) {
+        metrics.price_per_unit = parseInt(priceMatch[1].replace(/,/g, ''), 10);
+      }
+
+      // Determine unit type
+      if (pitch.toLowerCase().includes('session')) {
+        metrics.unit_type = 'session';
+      } else if (pitch.toLowerCase().includes('product')) {
+        metrics.unit_type = 'product';
+      }
+
+      console.log('📊 Extracted metrics from pitch:', metrics);
+      return metrics;
+
+    } catch (error) {
+      console.warn('⚠️ Failed to extract profit metrics from pitch:', error.message);
+      return metrics;
     }
   }
 }
