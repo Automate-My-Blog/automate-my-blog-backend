@@ -35,6 +35,7 @@ import leadsRoutes from './routes/leads.js';
 import emailTestRoutes from './routes/email-test.js';
 import schedulerRoutes from './routes/scheduler.js';
 import emailPreferencesRoutes from './routes/email-preferences.js';
+import founderEmailRoutes from './routes/founderEmails.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 
@@ -135,6 +136,9 @@ app.use('/api/v1/scheduler', authService.optionalAuthMiddleware.bind(authService
 
 // Email preferences and unsubscribe routes (no auth required for unsubscribe token)
 app.use('/api/v1/email-preferences', emailPreferencesRoutes);
+
+// Founder Email Routes (Admin only - should add auth middleware)
+app.use(founderEmailRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
