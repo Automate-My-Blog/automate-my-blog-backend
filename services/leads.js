@@ -195,16 +195,45 @@ class LeadService {
         })
         .catch(err => console.error(`❌ [${requestId}] Failed to queue lead nurture email:`, err.message));
 
-      // Send admin alert for new lead (async, don't block)
+      // Send admin alert for new lead (async, don't block) - with deduplication
       const emailService = (await import('./email.js')).default;
-      emailService.sendNewLeadAlert({
-        leadId: lead.id,
-        websiteUrl,
-        businessName: analysisData.businessName || 'Unknown Business',
-        businessType: analysisData.businessType || 'unknown',
-        leadScore,
-        leadSource
-      }).catch(err => console.error(`❌ [${requestId}] Failed to send admin alert:`, err.message));
+
+      // Check if we've already sent a notification for this domain in the last 24 hours (deduplication)
+      const recentNotification = await db.query(`
+        SELECT id, notification_sent_at FROM website_leads
+        WHERE website_url = $1
+          AND notification_sent_at IS NOT NULL
+          AND notification_sent_at > NOW() - INTERVAL '24 hours'
+          AND id != $2
+        ORDER BY notification_sent_at DESC
+        LIMIT 1
+      `, [websiteUrl, lead.id]);
+
+      if (recentNotification.rows.length > 0) {
+        const lastNotified = recentNotification.rows[0].notification_sent_at;
+        console.log(`📧 [${requestId}] Skipping admin alert - domain already notified at ${lastNotified} (deduplication)`);
+      } else {
+        // No recent notification for this domain - send alert
+        emailService.sendNewLeadAlert({
+          leadId: lead.id,
+          websiteUrl,
+          businessName: analysisData.businessName || 'Unknown Business',
+          businessType: analysisData.businessType || 'unknown',
+          leadScore,
+          leadSource
+        })
+        .then(() => {
+          // Mark this lead as notified
+          db.query(`
+            UPDATE website_leads
+            SET notification_sent_at = NOW()
+            WHERE id = $1
+          `, [lead.id])
+          .catch(err => console.error(`❌ [${requestId}] Failed to update notification timestamp:`, err.message));
+          console.log(`✅ [${requestId}] Admin alert sent and marked as notified`);
+        })
+        .catch(err => console.error(`❌ [${requestId}] Failed to send admin alert:`, err.message));
+      }
 
       // Step 6: Track conversion step
       console.log(`📈 [${requestId}] Step 6: Tracking conversion step...`);
