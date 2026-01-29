@@ -46,31 +46,18 @@ router.post('/track-conversion', async (req, res) => {
       const lead = await leadsService.getLeadBySessionId(sessionId);
       if (lead) {
         actualLeadId = lead.id;
-      } else {
-        // Auto-create a lead if it doesn't exist
-        console.log(`📝 Auto-creating lead for session: ${sessionId}`);
-        const websiteUrl = stepData.website_url || 'https://unknown.com';
-
-        // Create minimal session info (no IP to avoid inet type errors)
-        const sessionInfo = {
-          sessionId,
-          requestId: `auto_${Date.now()}`,
-          ipAddress: null, // Explicitly set to null to avoid inet errors
-          userAgent: req.headers['user-agent'] || null,
-          referrer: req.headers['referer'] || null
-        };
-
-        const leadRecord = await leadsService.captureLead(websiteUrl, {}, sessionInfo);
-        actualLeadId = leadRecord.leadId;
-        console.log(`✅ Auto-created lead: ${actualLeadId}`);
       }
     }
 
-    // If still no leadId, return error
+    // If still no leadId, this is just web traffic (not a lead)
+    // These events are already tracked in user_activity_events table via analytics
+    // Only track conversion steps for actual leads (users who entered a website URL)
     if (!actualLeadId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Either leadId or sessionId must be provided'
+      console.log(`ℹ️ No lead found for session ${sessionId} - treating as web traffic (not creating lead)`);
+      return res.json({
+        success: true,
+        message: 'Event tracked as web traffic (no lead associated)',
+        isWebTraffic: true
       });
     }
 
