@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import leadsService from '../services/leads.js';
 import emailService from '../services/email.js';
+import strategyWebhooks from '../services/strategy-subscription-webhooks.js';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -134,6 +135,13 @@ router.post('/webhook', async (req, res) => {
  */
 async function handleCheckoutCompleted(session) {
   console.log(`✅ Checkout completed: ${session.id}`);
+
+  // Check if this is a strategy subscription (individual or bundle)
+  if (strategyWebhooks.isStrategySubscription(session)) {
+    console.log('🎯 Strategy subscription detected, delegating to strategy webhook handler');
+    await strategyWebhooks.handleStrategyCheckoutCompleted(session);
+    return; // Early return - strategy subscriptions handled separately
+  }
 
   const userId = session.metadata.userId;
   const priceId = session.metadata.priceId;
@@ -490,6 +498,9 @@ async function handleSubscriptionCreated(subscription) {
 async function handleSubscriptionUpdated(subscription) {
   console.log(`📋 Subscription updated: ${subscription.id}`);
 
+  // Handle strategy subscription updates (quota resets on renewal)
+  await strategyWebhooks.handleStrategySubscriptionUpdated(subscription);
+
   try {
     // Get current subscription from database to detect plan changes
     const currentSubResult = await db.query(`
@@ -536,6 +547,9 @@ async function handleSubscriptionUpdated(subscription) {
  */
 async function handleSubscriptionDeleted(subscription) {
   console.log(`❌ Subscription deleted: ${subscription.id}`);
+
+  // Handle strategy subscription cancellations
+  await strategyWebhooks.handleStrategySubscriptionDeleted(subscription);
 
   try {
     // Get userId before marking as cancelled

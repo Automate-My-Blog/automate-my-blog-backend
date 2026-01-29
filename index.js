@@ -36,6 +36,8 @@ import emailTestRoutes from './routes/email-test.js';
 import schedulerRoutes from './routes/scheduler.js';
 import emailPreferencesRoutes from './routes/email-preferences.js';
 import founderEmailRoutes from './routes/founderEmails.js';
+import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
+import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 
@@ -124,6 +126,11 @@ app.use('/api/v1/stripe', (req, res, next) => {
   // All other Stripe endpoints require authentication
   authService.authMiddleware.bind(authService)(req, res, next);
 }, stripeRoutes);
+
+// Strategy subscription routes - all require authentication
+// Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
+app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
+app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), strategySubscriptionRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
