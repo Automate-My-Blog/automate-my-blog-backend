@@ -1,0 +1,70 @@
+name: Environment Variable Validation
+
+on:
+  pull_request:
+    branches: [main, test/unit-tests]
+  push:
+    branches: [main, test/unit-tests]
+
+jobs:
+  validate-env-vars:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Check .env.example exists
+        run: |
+          if [ ! -f .env.example ]; then
+            echo "::error::.env.example file is missing! Please create it with all required environment variables."
+            exit 1
+          fi
+          echo "✅ .env.example file exists"
+      
+      - name: Validate required environment variables
+        run: |
+          echo "Checking for required environment variables in .env.example..."
+          
+          # Critical environment variables that must be documented
+          REQUIRED_VARS=(
+            "DATABASE_URL"
+            "OPENAI_API_KEY"
+            "JWT_SECRET"
+            "JWT_REFRESH_SECRET"
+            "STRIPE_SECRET_KEY"
+            "STRIPE_WEBHOOK_SECRET"
+          )
+          
+          MISSING_VARS=()
+          
+          # Read .env.example content
+          ENV_EXAMPLE_CONTENT=$(cat .env.example)
+          
+          # Check each required variable
+          for VAR in "${REQUIRED_VARS[@]}"; do
+            if ! echo "$ENV_EXAMPLE_CONTENT" | grep -q "^${VAR}=" && ! echo "$ENV_EXAMPLE_CONTENT" | grep -q "^# ${VAR}"; then
+              MISSING_VARS+=("$VAR")
+            fi
+          done
+          
+          # Check for database connection alternatives (DB_USER, DB_HOST, etc.)
+          if echo "$ENV_EXAMPLE_CONTENT" | grep -q "^DATABASE_URL=" || \
+             (echo "$ENV_EXAMPLE_CONTENT" | grep -q "^DB_USER=" && \
+              echo "$ENV_EXAMPLE_CONTENT" | grep -q "^DB_HOST=" && \
+              echo "$ENV_EXAMPLE_CONTENT" | grep -q "^DB_NAME="); then
+            # DATABASE_URL or individual DB params are present, remove DATABASE_URL from missing if it was there
+            MISSING_VARS=("${MISSING_VARS[@]/DATABASE_URL}")
+          fi
+          
+          # Report results
+          if [ ${#MISSING_VARS[@]} -gt 0 ]; then
+            echo "::error::Missing required environment variables in .env.example:"
+            for VAR in "${MISSING_VARS[@]}"; do
+              echo "  - $VAR"
+            done
+            echo ""
+            echo "Please add these variables to .env.example with placeholder values."
+            exit 1
+          else
+            echo "✅ All required environment variables are documented in .env.example"
+          fi
+        continue-on-error: false

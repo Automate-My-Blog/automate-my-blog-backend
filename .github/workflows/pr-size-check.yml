@@ -1,0 +1,100 @@
+name: PR Size Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-size-check:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history to calculate diff
+      
+      - name: Calculate PR size
+        id: pr-size
+        run: |
+          # Get the base and head commits
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          # Calculate diff statistics
+          DIFF_STATS=$(git diff --shortstat $BASE_SHA..$HEAD_SHA)
+          
+          # Extract the number of lines changed (insertions + deletions)
+          # Format: "X files changed, Y insertions(+), Z deletions(-)"
+          LINES_CHANGED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ insertions' | grep -oE '[0-9]+' || echo "0")
+          LINES_DELETED=$(echo "$DIFF_STATS" | grep -oE '[0-9]+ deletions' | grep -oE '[0-9]+' || echo "0")
+          
+          # Calculate total lines changed
+          TOTAL_LINES=$((LINES_CHANGED + LINES_DELETED))
+          
+          echo "lines_changed=$LINES_CHANGED" >> $GITHUB_OUTPUT
+          echo "lines_deleted=$LINES_DELETED" >> $GITHUB_OUTPUT
+          echo "total_lines=$TOTAL_LINES" >> $GITHUB_OUTPUT
+          
+          echo "PR Size Statistics:"
+          echo "  Files changed: $(echo "$DIFF_STATS" | grep -oE '[0-9]+ files' | grep -oE '[0-9]+' || echo "0")"
+          echo "  Lines added: $LINES_CHANGED"
+          echo "  Lines deleted: $LINES_DELETED"
+          echo "  Total lines changed: $TOTAL_LINES"
+      
+      - name: Check PR size threshold
+        id: check-threshold
+        run: |
+          THRESHOLD=${INPUT_THRESHOLD:-500}
+          TOTAL_LINES="${{ steps.pr-size.outputs.total_lines }}"
+          
+          if [ "$TOTAL_LINES" -gt "$THRESHOLD" ]; then
+            echo "exceeds_threshold=true" >> $GITHUB_OUTPUT
+            echo "⚠️ PR size exceeds threshold of $THRESHOLD lines (current: $TOTAL_LINES lines)"
+          else
+            echo "exceeds_threshold=false" >> $GITHUB_OUTPUT
+            echo "✅ PR size is within threshold ($TOTAL_LINES lines)"
+          fi
+        env:
+          INPUT_THRESHOLD: 500
+      
+      - name: Comment on PR if size exceeds threshold
+        if: steps.check-threshold.outputs.exceeds_threshold == 'true'
+        uses: actions/github-script@v7
+        env:
+          THRESHOLD: 500
+          TOTAL_LINES: ${{ steps.pr-size.outputs.total_lines }}
+          LINES_CHANGED: ${{ steps.pr-size.outputs.lines_changed }}
+          LINES_DELETED: ${{ steps.pr-size.outputs.lines_deleted }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const threshold = parseInt(process.env.THRESHOLD);
+            const totalLines = parseInt(process.env.TOTAL_LINES);
+            const linesChanged = parseInt(process.env.LINES_CHANGED);
+            const linesDeleted = parseInt(process.env.LINES_DELETED);
+            
+            const comment = `## ⚠️ PR Size Warning
+            
+            This PR exceeds the recommended size threshold of **${threshold} lines**.
+            
+            **PR Statistics:**
+            - Total lines changed: **${totalLines}** (${linesChanged} additions, ${linesDeleted} deletions)
+            - Threshold: ${threshold} lines
+            
+            **Recommendation:**
+            Consider splitting this PR into smaller, more focused changes. Smaller PRs are:
+            - Easier to review
+            - Less likely to introduce bugs
+            - Faster to merge
+            
+            This is a non-blocking warning. You can still merge this PR if needed.
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });

@@ -1,0 +1,30 @@
+name: Dependency Security Scan
+
+on:
+  pull_request:
+    branches: [main, test/unit-tests]
+  push:
+    branches: [main, test/unit-tests]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check for vulnerabilities
+        run: |
+          echo "Checking for security vulnerabilities..."
+          npm audit --audit-level=moderate || {
+            echo "::error::Security vulnerabilities found! Run 'npm audit fix' locally and commit the changes."
+            exit 1
+          }
+        continue-on-error: false

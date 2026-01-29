@@ -21,7 +21,7 @@ The risk here is obvious - if we make changes without tests, we could break prod
 
 I'd prioritize tests in this order:
 
-### 1. Critical Path Tests (Week 1)
+### 1. Critical Path Tests
 
 These are the core flows that absolutely cannot break. If any of these fail, the product doesn't work or you lose money.
 
@@ -36,19 +36,19 @@ Money stuff. Test Stripe webhook handling, subscription creation/updates, and cr
 
 Why these first? They're the money-making features. Auth breaks = users can't log in. Generation breaks = product doesn't work. Billing breaks = you lose revenue.
 
-### 2. Data Integrity Tests (Week 1-2)
+### 2. Data Integrity Tests
 
 Test database operations - multi-tenant isolation (users can't see other orgs' data), foreign key constraints, session adoption (anonymous → authenticated), and referral system data consistency.
 
 The audit found potential issues with data access boundaries, so we need to verify org/user filtering actually works. This is important for security and data integrity.
 
-### 3. API Contract Tests (Week 2)
+### 3. API Contract Tests
 
 Test that endpoints return what they're supposed to - request/response schemas, error handling (400, 401, 404, 500), required vs optional fields, rate limiting behavior.
 
 When we add analytics tracking and SendGrid, we'll be touching a lot of endpoints. These tests ensure we're not breaking existing API contracts that the frontend depends on.
 
-### 4. Integration Tests (Week 2-3)
+### 4. Integration Tests
 
 Test external services - OpenAI API calls (with mocks), Stripe webhook processing, database connection handling, web scraping (with test URLs).
 
@@ -87,7 +87,7 @@ Start with unit and integration tests. E2E tests are nice but they're slow and f
 
 Before making changes, at minimum you need:
 
-**Must Have (Week 1):**
+**Must Have:**
 
 1. **Auth Tests** - Registration creates user and organization, login returns valid JWT, protected routes require auth, users can only access their own data. This is critical - if auth breaks, everything breaks.
 
@@ -95,7 +95,7 @@ Before making changes, at minimum you need:
 
 3. **Database Tests** - Multi-tenant isolation works, foreign keys prevent orphaned records, session adoption doesn't break data. The audit found potential issues here, so verify it works.
 
-**Should Have (Week 2):**
+**Should Have:**
 
 4. **API Contract Tests** - All endpoints return expected structure, error responses are consistent, required fields are validated. When we add new features, these ensure we don't break existing contracts.
 
@@ -105,18 +105,18 @@ Before making changes, at minimum you need:
 
 ## Implementation Plan
 
-### Week 1: Foundation
+### Foundation
 
-**Days 1-2: Setup**
+**Setup**
 Install Jest and testing dependencies, set up a test database (separate from production), create test utilities (helpers, mocks), configure test scripts in package.json. This is the boring infrastructure work, but it's necessary.
 
-**Days 3-4: Critical Path Tests**
+**Critical Path Tests**
 Write auth tests (registration, login, JWT), write content generation smoke tests, write database isolation tests. These are the most important ones - get these working first.
 
-**Day 5: CI Integration**
+**CI Integration**
 Add test step to GitHub Actions, set up test database in CI, ensure tests run on PRs. Once this is done, tests run automatically and catch issues before merge.
 
-### Week 2: Coverage Expansion
+### Coverage Expansion
 
 Add API contract tests for all endpoints, integration tests for external services, error handling tests, edge case tests. Expand coverage gradually - don't try to test everything at once.
 
@@ -188,11 +188,6 @@ Yes, build tests first. Here's why:
 3. **Speed** - Tests actually speed up development long-term. You can make changes faster when you know tests will catch mistakes.
 
 4. **Documentation** - Tests serve as living documentation of how the system works. New developers can read tests to understand the codebase.
-
-**Suggested Order:**
-1. Week 1: Set up Jest + write critical path tests (auth, generation)
-2. Week 2: Add API contract tests + integration tests
-3. Week 3: Start implementing analytics/growth features (with tests protecting you)
 
 **Minimum:** At least get auth and content generation tests in place before touching those areas. Those are the highest-risk changes - if you break auth, users can't log in. If you break generation, the product doesn't work.
 

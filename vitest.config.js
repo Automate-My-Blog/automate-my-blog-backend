@@ -1,0 +1,45 @@
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    globals: false,
+    environment: 'node',
+    setupFiles: ['tests/setup.js'],
+    include: ['tests/**/*.test.js'],
+    exclude: ['**/node_modules/**', '**/test-*.js', '**/*-test.js'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'html'],
+      include: [
+        'utils/**/*.js',
+        'services/**/*.js',
+        'jobs/**/*.js',
+      ],
+      exclude: [
+        '**/*.test.js',
+        '**/test-*.js',
+        '**/index.js',
+        'tests/**',
+        'services/database.js',
+        'services/auth-database.js',
+        'services/analytics.js',
+        'services/email.js',
+        'services/emailContentGenerator.js',
+        'services/enhanced-blog-generation.js',
+        'services/grok-tweet-search.js',
+        'services/leadEmailTriggers.js',
+        'services/leads.js',
+        'services/openai.js',
+        'services/organizations.js',
+        'services/referrals.js',
+        'services/visual-content-generation.js',
+        'services/webscraper.js',
+        'jobs/scheduler.js',
+        'jobs/emailCampaigns.js',
+      ],
+    },
+    testTimeout: 5000,
+    hookTimeout: 5000,
+    isolate: true,
+  },
+});

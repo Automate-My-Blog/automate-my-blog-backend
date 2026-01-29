@@ -1,0 +1,178 @@
+name: Database Schema Diff Check
+
+on:
+  pull_request:
+    paths:
+      - 'database/**/*.sql'
+    types: [opened, synchronize, reopened]
+
+jobs:
+  schema-diff:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch full history to calculate diff
+      
+      - name: Check for database file changes
+        id: check-changes
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          # Get list of changed database files
+          CHANGED_FILES=$(git diff --name-only --diff-filter=ACMR $BASE_SHA..$HEAD_SHA | grep -E '^database/.*\.sql$' || true)
+          
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No database files changed in this PR"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "changed_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGED_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "Found database file changes:"
+            echo "$CHANGED_FILES"
+          fi
+      
+      - name: Generate schema diff
+        if: steps.check-changes.outputs.changed == 'true'
+        id: generate-diff
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          
+          # Get diff for all database files
+          SCHEMA_DIFF=$(git diff $BASE_SHA..$HEAD_SHA -- 'database/**/*.sql' || true)
+          
+          # Count statistics
+          FILES_CHANGED=$(echo "${{ steps.check-changes.outputs.changed_files }}" | wc -l | tr -d ' ')
+          LINES_ADDED=$(echo "$SCHEMA_DIFF" | grep -c '^+' | tr -d ' ' || echo "0")
+          LINES_DELETED=$(echo "$SCHEMA_DIFF" | grep -c '^-' | tr -d ' ' || echo "0")
+          
+          # Extract key schema changes (CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.)
+          KEY_CHANGES=$(echo "$SCHEMA_DIFF" | grep -E '^\+.*(CREATE|ALTER|DROP|ADD|MODIFY|INDEX|TABLE|COLUMN|CONSTRAINT)' | head -50 || true)
+          
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          echo "lines_added=$LINES_ADDED" >> $GITHUB_OUTPUT
+          echo "lines_deleted=$LINES_DELETED" >> $GITHUB_OUTPUT
+          
+          # Save diff to file for comment
+          echo "$SCHEMA_DIFF" > schema-diff.txt
+          
+          # Save key changes summary
+          echo "$KEY_CHANGES" > key-changes.txt
+          
+          echo "Schema diff generated:"
+          echo "  Files changed: $FILES_CHANGED"
+          echo "  Lines added: $LINES_ADDED"
+          echo "  Lines deleted: $LINES_DELETED"
+      
+      - name: Post schema diff summary
+        if: steps.check-changes.outputs.changed == 'true'
+        uses: actions/github-script@v7
+        env:
+          FILES_CHANGED: ${{ steps.generate-diff.outputs.files_changed }}
+          LINES_ADDED: ${{ steps.generate-diff.outputs.lines_added }}
+          LINES_DELETED: ${{ steps.generate-diff.outputs.lines_deleted }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const changedFiles = `${{ steps.check-changes.outputs.changed_files }}`.trim().split('\n').filter(Boolean);
+            const keyChanges = fs.readFileSync('key-changes.txt', 'utf8').trim();
+            const fullDiff = fs.readFileSync('schema-diff.txt', 'utf8');
+            
+            const filesChanged = parseInt(process.env.FILES_CHANGED);
+            const linesAdded = parseInt(process.env.LINES_ADDED);
+            const linesDeleted = parseInt(process.env.LINES_DELETED);
+            
+            // Check if a comment already exists
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100
+            });
+            
+            const existingComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('## 📊 Database Schema Changes')
+            );
+            
+            let body = `## 📊 Database Schema Changes\n\n`;
+            body += `This PR includes changes to database schema files.\n\n`;
+            body += `**Summary:**\n`;
+            body += `- Files changed: **${filesChanged}**\n`;
+            body += `- Lines added: **${linesAdded}**\n`;
+            body += `- Lines deleted: **${linesDeleted}**\n\n`;
+            
+            body += `**Changed Files:**\n`;
+            changedFiles.forEach(file => {
+              body += `- \`${file}\`\n`;
+            });
+            body += `\n`;
+            
+            if (keyChanges) {
+              body += `**Key Schema Changes:**\n`;
+              body += `\`\`\`sql\n`;
+              // Limit key changes to first 30 lines to keep comment manageable
+              const keyChangesLines = keyChanges.split('\n').slice(0, 30);
+              body += keyChangesLines.join('\n');
+              if (keyChanges.split('\n').length > 30) {
+                body += `\n... (showing first 30 key changes)\n`;
+              }
+              body += `\`\`\`\n\n`;
+            }
+            
+            body += `**Full Diff:**\n`;
+            body += `<details>\n<summary>Click to expand full diff</summary>\n\n`;
+            body += `\`\`\`diff\n`;
+            // Limit diff to 5000 characters to avoid hitting GitHub API limits
+            const truncatedDiff = fullDiff.length > 5000 
+              ? fullDiff.substring(0, 5000) + '\n... (diff truncated, view full diff in Files Changed tab)'
+              : fullDiff;
+            body += truncatedDiff;
+            body += `\n\`\`\`\n\n`;
+            body += `</details>\n\n`;
+            body += `---\n`;
+            body += `*This summary is automatically generated when database files are changed.*\n`;
+            
+            if (existingComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: body
+              });
+              console.log(`Updated existing schema diff comment`);
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+              console.log(`Created schema diff comment`);
+            }
+      
+      - name: Output schema diff summary
+        if: steps.check-changes.outputs.changed == 'true'
+        run: |
+          echo "## Database Schema Changes Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Files Changed:** ${{ steps.generate-diff.outputs.files_changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Lines Added:** ${{ steps.generate-diff.outputs.lines_added }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Lines Deleted:** ${{ steps.generate-diff.outputs.lines_deleted }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Changed Files:**" >> $GITHUB_STEP_SUMMARY
+          echo '${{ steps.check-changes.outputs.changed_files }}' | while IFS= read -r file; do
+            echo "- \`$file\`" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📝 See PR comment for detailed diff and key schema changes." >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,250 @@
+name: Dependency Update Check
+
+on:
+  schedule:
+    # Run weekly on Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check for outdated dependencies
+        id: check-outdated
+        run: |
+          echo "Checking for outdated dependencies..."
+          
+          # Run npm outdated and capture output
+          # npm outdated returns exit code 1 if outdated packages found, so we use || true
+          OUTDATED_OUTPUT=$(npm outdated --json || true)
+          
+          # Check if there are any outdated packages
+          if [ "$OUTDATED_OUTPUT" != "{}" ] && [ -n "$OUTDATED_OUTPUT" ]; then
+            echo "outdated_found=true" >> $GITHUB_OUTPUT
+            echo "$OUTDATED_OUTPUT" > outdated-packages.json
+            
+            # Count outdated packages
+            PACKAGE_COUNT=$(echo "$OUTDATED_OUTPUT" | python3 -c "import sys, json; data = json.load(sys.stdin); print(len(data))" 2>/dev/null || echo "0")
+            echo "package_count=$PACKAGE_COUNT" >> $GITHUB_OUTPUT
+            
+            echo "Found $PACKAGE_COUNT outdated package(s)"
+            echo "$OUTDATED_OUTPUT" | python3 -m json.tool || echo "$OUTDATED_OUTPUT"
+          else
+            echo "outdated_found=false" >> $GITHUB_OUTPUT
+            echo "✅ All dependencies are up to date"
+          fi
+      
+      - name: Create issue for outdated dependencies
+        if: steps.check-outdated.outputs.outdated_found == 'true'
+        uses: actions/github-script@v7
+        env:
+          PACKAGE_COUNT: ${{ steps.check-outdated.outputs.package_count }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const outdatedData = JSON.parse(fs.readFileSync('outdated-packages.json', 'utf8'));
+            
+            // Check if an issue already exists for dependency updates
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'dependencies,automated',
+              per_page: 10
+            });
+            
+            // Check if there's already an open issue about dependency updates
+            const existingIssue = issues.find(issue => 
+              issue.title.includes('Outdated Dependencies') || 
+              issue.title.includes('Dependency Update')
+            );
+            
+            if (existingIssue) {
+              console.log(`Issue #${existingIssue.number} already exists for dependency updates. Updating it...`);
+              
+              // Update existing issue
+              const packageCount = parseInt(process.env.PACKAGE_COUNT);
+              const packages = Object.entries(outdatedData);
+              
+              // Separate major, minor, and patch updates
+              const majorUpdates = [];
+              const minorUpdates = [];
+              const patchUpdates = [];
+              
+              packages.forEach(([name, info]) => {
+                const current = info.current || 'unknown';
+                const wanted = info.wanted || 'unknown';
+                const latest = info.latest || 'unknown';
+                const location = info.location || '';
+                
+                // Determine update type
+                const currentMajor = current.split('.')[0];
+                const latestMajor = latest.split('.')[0];
+                
+                if (currentMajor !== latestMajor) {
+                  majorUpdates.push({ name, current, wanted, latest, location });
+                } else if (current !== latest) {
+                  const currentMinor = current.split('.')[1];
+                  const latestMinor = latest.split('.')[1];
+                  if (currentMinor !== latestMinor) {
+                    minorUpdates.push({ name, current, wanted, latest, location });
+                  } else {
+                    patchUpdates.push({ name, current, wanted, latest, location });
+                  }
+                }
+              });
+              
+              let body = `## 🔄 Dependency Update Check\n\n`;
+              body += `Found **${packageCount}** outdated package(s) as of ${new Date().toISOString().split('T')[0]}.\n\n`;
+              
+              if (majorUpdates.length > 0) {
+                body += `### ⚠️ Major Updates (${majorUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                majorUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n⚠️ **Note:** Major updates may include breaking changes. Review changelogs before updating.\n\n`;
+              }
+              
+              if (minorUpdates.length > 0) {
+                body += `### 📦 Minor Updates (${minorUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                minorUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n`;
+              }
+              
+              if (patchUpdates.length > 0) {
+                body += `### 🔧 Patch Updates (${patchUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                patchUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n`;
+              }
+              
+              body += `---\n\n`;
+              body += `**To update dependencies:**\n`;
+              body += `\`\`\`bash\n`;
+              body += `npm update\n`;
+              body += `\`\`\`\n\n`;
+              body += `**To update to latest versions (including major):**\n`;
+              body += `\`\`\`bash\n`;
+              body += `npm install package@latest\n`;
+              body += `\`\`\`\n\n`;
+              body += `*This issue is automatically updated weekly. Last checked: ${new Date().toISOString()}*\n`;
+              
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: body
+              });
+              
+              console.log(`Updated issue #${existingIssue.number}`);
+            } else {
+              // Create new issue
+              const packageCount = parseInt(process.env.PACKAGE_COUNT);
+              const packages = Object.entries(outdatedData);
+              
+              // Separate major, minor, and patch updates
+              const majorUpdates = [];
+              const minorUpdates = [];
+              const patchUpdates = [];
+              
+              packages.forEach(([name, info]) => {
+                const current = info.current || 'unknown';
+                const wanted = info.wanted || 'unknown';
+                const latest = info.latest || 'unknown';
+                const location = info.location || '';
+                
+                // Determine update type
+                const currentMajor = current.split('.')[0];
+                const latestMajor = latest.split('.')[0];
+                
+                if (currentMajor !== latestMajor) {
+                  majorUpdates.push({ name, current, wanted, latest, location });
+                } else if (current !== latest) {
+                  const currentMinor = current.split('.')[1];
+                  const latestMinor = latest.split('.')[1];
+                  if (currentMinor !== latestMinor) {
+                    minorUpdates.push({ name, current, wanted, latest, location });
+                  } else {
+                    patchUpdates.push({ name, current, wanted, latest, location });
+                  }
+                }
+              });
+              
+              let body = `## 🔄 Dependency Update Check\n\n`;
+              body += `Found **${packageCount}** outdated package(s) as of ${new Date().toISOString().split('T')[0]}.\n\n`;
+              
+              if (majorUpdates.length > 0) {
+                body += `### ⚠️ Major Updates (${majorUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                majorUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n⚠️ **Note:** Major updates may include breaking changes. Review changelogs before updating.\n\n`;
+              }
+              
+              if (minorUpdates.length > 0) {
+                body += `### 📦 Minor Updates (${minorUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                minorUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n`;
+              }
+              
+              if (patchUpdates.length > 0) {
+                body += `### 🔧 Patch Updates (${patchUpdates.length})\n\n`;
+                body += `| Package | Current | Wanted | Latest |\n`;
+                body += `|---------|---------|--------|--------|\n`;
+                patchUpdates.forEach(pkg => {
+                  body += `| \`${pkg.name}\` | ${pkg.current} | ${pkg.wanted} | **${pkg.latest}** |\n`;
+                });
+                body += `\n`;
+              }
+              
+              body += `---\n\n`;
+              body += `**To update dependencies:**\n`;
+              body += `\`\`\`bash\n`;
+              body += `npm update\n`;
+              body += `\`\`\`\n\n`;
+              body += `**To update to latest versions (including major):**\n`;
+              body += `\`\`\`bash\n`;
+              body += `npm install package@latest\n`;
+              body += `\`\`\`\n\n`;
+              body += `*This issue is automatically created/updated weekly. Last checked: ${new Date().toISOString()}*\n`;
+              
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `🔄 Outdated Dependencies (${packageCount} packages)`,
+                body: body,
+                labels: ['dependencies', 'automated', 'maintenance']
+              });
+              
+              console.log(`Created issue #${issue.number} for ${packageCount} outdated packages`);
+            }
