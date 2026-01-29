@@ -241,6 +241,155 @@ class AnalyticsService {
   }
 
   /**
+   * Get engagement metrics for navigation and interaction events (PR #28)
+   * @param {String} timeRange - Time range filter (7d, 30d, 90d, all)
+   * @returns {Promise<Object>} Engagement metrics
+   */
+  async getEngagementMetrics(timeRange = '30d') {
+    try {
+      console.log(`📊 Analytics: Getting engagement metrics for ${timeRange}`);
+
+      const timeFilter = this._getTimeFilter(timeRange);
+
+      // Page views by page
+      const pageViewsResult = await db.query(`
+        SELECT
+          page_url,
+          COUNT(*) as view_count,
+          COUNT(DISTINCT user_id) as unique_users,
+          COUNT(DISTINCT session_id) as unique_sessions
+        FROM user_activity_events
+        WHERE event_type = 'page_view'
+          ${timeFilter}
+        GROUP BY page_url
+        ORDER BY view_count DESC
+        LIMIT 20
+      `);
+
+      // Tab switches (dashboard navigation)
+      const tabSwitchesResult = await db.query(`
+        SELECT
+          event_data->>'tab' as tab_name,
+          COUNT(*) as switch_count,
+          COUNT(DISTINCT user_id) as unique_users
+        FROM user_activity_events
+        WHERE event_type = 'tab_switched'
+          ${timeFilter}
+        GROUP BY event_data->>'tab'
+        ORDER BY switch_count DESC
+      `);
+
+      // Topic selection distribution
+      const topicSelectionResult = await db.query(`
+        SELECT
+          event_data->>'topic' as topic,
+          COUNT(*) as selection_count,
+          COUNT(DISTINCT user_id) as unique_users
+        FROM user_activity_events
+        WHERE event_type = 'topic_selected'
+          ${timeFilter}
+        GROUP BY event_data->>'topic'
+        ORDER BY selection_count DESC
+        LIMIT 10
+      `);
+
+      // Export activity
+      const exportActivityResult = await db.query(`
+        SELECT
+          event_data->>'format' as export_format,
+          COUNT(*) as export_count,
+          COUNT(DISTINCT user_id) as unique_users
+        FROM user_activity_events
+        WHERE event_type IN ('export_initiated', 'content_exported')
+          ${timeFilter}
+        GROUP BY event_data->>'format'
+        ORDER BY export_count DESC
+      `);
+
+      // User session metrics
+      const sessionMetricsResult = await db.query(`
+        SELECT
+          AVG(event_count) as avg_events_per_session,
+          AVG(session_duration_minutes) as avg_session_duration
+        FROM (
+          SELECT
+            session_id,
+            COUNT(*) as event_count,
+            EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp)))/60 as session_duration_minutes
+          FROM user_activity_events
+          WHERE timestamp > NOW() - INTERVAL '${timeRange === 'all' ? '1 year' : timeRange}'
+          GROUP BY session_id
+          HAVING COUNT(*) > 1
+        ) sessions
+      `);
+
+      // Logout tracking
+      const logoutResult = await db.query(`
+        SELECT
+          COUNT(*) as logout_count,
+          COUNT(DISTINCT user_id) as users_who_logged_out
+        FROM user_activity_events
+        WHERE event_type = 'logout'
+          ${timeFilter}
+      `);
+
+      const pageViewTotal = pageViewsResult.rows.reduce((sum, row) => sum + parseInt(row.view_count || 0), 0);
+      const tabSwitchTotal = tabSwitchesResult.rows.reduce((sum, row) => sum + parseInt(row.switch_count || 0), 0);
+      const topicSelTotal = topicSelectionResult.rows.reduce((sum, row) => sum + parseInt(row.selection_count || 0), 0);
+      const exportTotal = exportActivityResult.rows.reduce((sum, row) => sum + parseInt(row.export_count || 0), 0);
+
+      console.log(`✅ Analytics: Engagement metrics - ${pageViewTotal} page views, ${tabSwitchTotal} tab switches, ${topicSelTotal} topics selected, ${exportTotal} exports`);
+
+      return {
+        pageViews: {
+          byPage: pageViewsResult.rows,
+          total: pageViewTotal
+        },
+        tabSwitches: {
+          byTab: tabSwitchesResult.rows,
+          total: tabSwitchTotal
+        },
+        topicSelection: {
+          byTopic: topicSelectionResult.rows,
+          total: topicSelTotal
+        },
+        exportActivity: {
+          byFormat: exportActivityResult.rows,
+          total: exportTotal
+        },
+        sessionMetrics: sessionMetricsResult.rows[0] || { avg_events_per_session: 0, avg_session_duration: 0 },
+        logout: logoutResult.rows[0] || { logout_count: 0, users_who_logged_out: 0 }
+      };
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get engagement metrics - ${error.message}`);
+      return {
+        pageViews: { byPage: [], total: 0 },
+        tabSwitches: { byTab: [], total: 0 },
+        topicSelection: { byTopic: [], total: 0 },
+        exportActivity: { byFormat: [], total: 0 },
+        sessionMetrics: { avg_events_per_session: 0, avg_session_duration: 0 },
+        logout: { logout_count: 0, users_who_logged_out: 0 }
+      };
+    }
+  }
+
+  /**
+   * Helper: Get time filter SQL clause
+   * @private
+   */
+  _getTimeFilter(timeRange) {
+    const intervals = {
+      '7d': '7 days',
+      '30d': '30 days',
+      '90d': '90 days',
+      'all': null
+    };
+
+    const interval = intervals[timeRange] || intervals['30d'];
+    return interval ? `AND timestamp > NOW() - INTERVAL '${interval}'` : '';
+  }
+
+  /**
    * Get users at a specific funnel stage
    * @param {String} funnelStep - Funnel step (signed_up, email_verified, first_login, etc.)
    * @param {String} startDate - Start date
@@ -458,10 +607,50 @@ class AnalyticsService {
         LIMIT $2
       `, [userId, limit]);
 
-      return result.rows;
+      const events = result.rows;
+
+      // Categorize events by type for better visualization
+      const categorizedEvents = {
+        authentication: events.filter(e =>
+          ['signup_started', 'signup_completed', 'login_completed', 'logout'].includes(e.event_type)
+        ),
+        navigation: events.filter(e =>
+          ['page_view', 'tab_switched'].includes(e.event_type)
+        ),
+        workflow: events.filter(e =>
+          ['analysis_started', 'analysis_completed', 'topic_selected', 'content_generated', 'export_initiated', 'content_exported'].includes(e.event_type)
+        ),
+        business: events.filter(e =>
+          ['revenue', 'purchase', 'payment_success'].includes(e.event_type)
+        ),
+        other: events.filter(e =>
+          !['signup_started', 'signup_completed', 'login_completed', 'logout',
+            'page_view', 'tab_switched',
+            'analysis_started', 'analysis_completed', 'topic_selected', 'content_generated', 'export_initiated', 'content_exported',
+            'revenue', 'purchase', 'payment_success'].includes(e.event_type)
+        )
+      };
+
+      return {
+        userId,
+        totalEvents: events.length,
+        events, // Raw chronological events
+        categorizedEvents // Grouped by category for frontend display
+      };
     } catch (error) {
       console.error(`⚠️ Analytics: Failed to get user journey - ${error.message}`);
-      return [];
+      return {
+        userId,
+        totalEvents: 0,
+        events: [],
+        categorizedEvents: {
+          authentication: [],
+          navigation: [],
+          workflow: [],
+          business: [],
+          other: []
+        }
+      };
     }
   }
 

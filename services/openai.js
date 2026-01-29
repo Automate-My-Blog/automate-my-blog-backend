@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import analyticsService from './analytics.js';
 
 dotenv.config();
 
@@ -1291,6 +1292,9 @@ Be SPECIFIC - use actual user names, emails, last activity dates, and exact expe
     try {
       console.log('🛠️ OpenAI: Generating product insights');
 
+      // Fetch engagement metrics
+      const engagementMetrics = await analyticsService.getEngagementMetrics('30d');
+
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{
@@ -1305,6 +1309,17 @@ Be SPECIFIC - use actual user names, emails, last activity dates, and exact expe
 - Active Users (30d): ${metrics?.active_users || 0} (${((metrics?.active_users / metrics?.total_users) * 100).toFixed(1)}% activation rate)
 - New Users (30d): ${metrics?.new_users || 0}
 - Average Posts per Active User: ${metrics?.active_users > 0 ? ((metrics?.total_posts || 0) / metrics?.active_users).toFixed(1) : 0}
+
+**Engagement & Navigation Metrics (30d):**
+- Page Views: ${engagementMetrics?.pageViews?.total || 0}
+- Most Visited Page: ${engagementMetrics?.pageViews?.byPage?.[0]?.page_url || 'N/A'} (${engagementMetrics?.pageViews?.byPage?.[0]?.view_count || 0} views)
+- Tab Switches: ${engagementMetrics?.tabSwitches?.total || 0}
+- Most Used Tab: ${engagementMetrics?.tabSwitches?.byTab?.[0]?.tab_name || 'N/A'} (${engagementMetrics?.tabSwitches?.byTab?.[0]?.switch_count || 0} switches)
+- Topic Selections: ${engagementMetrics?.topicSelection?.total || 0}
+- Most Popular Topic: ${engagementMetrics?.topicSelection?.byTopic?.[0]?.topic || 'N/A'} (${engagementMetrics?.topicSelection?.byTopic?.[0]?.selection_count || 0} selections)
+- Export Activity: ${engagementMetrics?.exportActivity?.total || 0}
+- Avg Session Duration: ${engagementMetrics?.sessionMetrics?.avg_session_duration ? parseFloat(engagementMetrics.sessionMetrics.avg_session_duration).toFixed(1) : 0} minutes
+- Logout Events: ${engagementMetrics?.logout?.logout_count || 0} by ${engagementMetrics?.logout?.users_who_logged_out || 0} users
 
 **Feature Adoption Gaps:**
 - Referral Program: ${metrics?.successful_referrals || 0}/${metrics?.total_referrals || 0} conversion (${metrics?.referral_conversion_rate || 0}%)
@@ -1328,8 +1343,9 @@ Focus on:
 2. Funnel steps with high dropoff (>50% dropoff rate)
 3. Onboarding improvements for new user activation
 4. Product changes to increase engagement frequency
+5. Navigation patterns and user behavior insights (use engagement metrics to identify friction points)
 
-Be SPECIFIC - use actual percentages, user counts, and measurable expected outcomes. Provide concrete implementation ideas.`
+Be SPECIFIC - use actual percentages, user counts, and measurable expected outcomes. Provide concrete implementation ideas based on engagement data.`
         }],
         temperature: 0.5,
         max_tokens: 2000
@@ -1541,7 +1557,19 @@ Step 1: [search volume number] people search monthly for "${scenario.seoKeywords
 Step 2: Your blog posts capture [X-Y%] ([A-B clicks]) once SEO builds over 6-12 months
 Step 3: [M-N%] engage and read ([P-Q readers]) vs bouncing - [WHY based on their emotional state]
 Step 4: [R-S%] click CTA ([T-U bookings]) - [WHY based on their search urgency]
-Step 5: Revenue of $[low]-$[high] monthly assuming $[realistic price]/consultation
+Step 5: CRITICAL - Calculate PROFIT (not just revenue):
+  First determine appropriate profit margin for this business type:
+  - Consulting/coaching/therapy services: 70-85% margin (low overhead, expertise-based)
+  - Digital products/courses: 80-95% margin (once created, minimal fulfillment cost)
+  - Physical products/ecommerce: 30-50% margin (inventory, shipping, overhead)
+  - Professional services (legal, accounting): 60-75% margin
+
+  Then calculate:
+  - Revenue: $[low]-$[high]/month at $[price]/[unit] ([conversions] bookings from Step 4)
+  - Profit margin: [appropriate % based on business type]
+  - Profit: $[revenue × margin]-$[revenue × margin]/month
+
+  Format: "Profit of $X-$Y monthly ($A-$B revenue, Z% margin at $C/consultation)"
 
 Use realistic conversion rates based on industry benchmarks:
 - Capture rate: 0.5-4% of total searches (depends on ranking position #1-10)
@@ -1553,7 +1581,7 @@ Step 1: 3,500 people search monthly for "safe anxiety medication during pregnanc
 Step 2: Your posts capture 1-3% (35-105 clicks) once SEO authority builds over 6-12 months
 Step 3: 30-50% engage (11-53 readers) vs bouncing - they need clinical guidance but many bounce to check multiple sources
 Step 4: 5-12% book (1-6 consultations) due to crisis-driven urgency and fear about harming baby
-Step 5: $500-$3,000/month at $500/consultation
+Step 5: Profit of $400-$2,400 monthly ($500-$3,000 revenue, 80% margin at $500/consultation)
 
 Use their specific emotional state and urgency to justify rates. Plain text only, max 600 characters.`
             }

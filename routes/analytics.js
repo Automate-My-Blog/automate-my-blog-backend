@@ -235,7 +235,7 @@ router.get('/users/:userId/journey',
 
       res.json({
         success: true,
-        events: journey,
+        ...journey, // Spreads: userId, totalEvents, events, categorizedEvents
         revenue
       });
     } catch (error) {
@@ -662,6 +662,33 @@ router.get('/revenue-over-time',
     } catch (error) {
       console.error('Failed to get revenue over time:', error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  }
+);
+
+/**
+ * Get engagement metrics (page views, tab switches, topic selection, exports, sessions)
+ * GET /api/v1/analytics/engagement-metrics
+ */
+router.get('/engagement-metrics',
+  authService.authMiddleware.bind(authService),
+  requireSuperAdmin,
+  async (req, res) => {
+    try {
+      const { timeRange = '30d' } = req.query;
+
+      const metrics = await analyticsService.getEngagementMetrics(timeRange);
+
+      res.json({
+        success: true,
+        metrics
+      });
+    } catch (error) {
+      console.error('Failed to get engagement metrics:', error);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 );
