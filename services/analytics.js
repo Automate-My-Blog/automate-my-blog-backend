@@ -90,12 +90,48 @@ class AnalyticsService {
    */
   async getFunnelData(startDate, endDate) {
     try {
-      console.log(`📈 Analytics: Getting funnel data from ${startDate} to ${endDate}`);
+      console.log(`📈 Analytics: Getting MERGED funnel data (leads + users) from ${startDate} to ${endDate}`);
 
-      // Calculate funnel based on actual user actions and data
-      // Use DATE() to properly compare date strings with timestamp columns
+      // MERGED FUNNEL: Anonymous Visitors → Leads → Registered Users → Paying Customers
       const result = await db.query(`
-        WITH user_base AS (
+        WITH
+        -- LEAD FUNNEL (Anonymous Visitors)
+        total_leads AS (
+          SELECT COUNT(DISTINCT id) as count
+          FROM website_leads
+          WHERE DATE(created_at) >= DATE($1)
+            AND DATE(created_at) <= DATE($2)
+        ),
+        analysis_started AS (
+          SELECT COUNT(DISTINCT session_id) as count
+          FROM user_activity_events
+          WHERE event_type = 'analysis_started'
+            AND DATE(timestamp) >= DATE($1)
+            AND DATE(timestamp) <= DATE($2)
+        ),
+        analysis_completed AS (
+          SELECT COUNT(DISTINCT session_id) as count
+          FROM user_activity_events
+          WHERE event_type = 'analysis_completed'
+            AND DATE(timestamp) >= DATE($1)
+            AND DATE(timestamp) <= DATE($2)
+        ),
+        topic_selected AS (
+          SELECT COUNT(DISTINCT COALESCE(user_id::text, session_id)) as count
+          FROM user_activity_events
+          WHERE event_type = 'topic_selected'
+            AND DATE(timestamp) >= DATE($1)
+            AND DATE(timestamp) <= DATE($2)
+        ),
+        signup_started AS (
+          SELECT COUNT(DISTINCT session_id) as count
+          FROM user_activity_events
+          WHERE event_type = 'signup_started'
+            AND DATE(timestamp) >= DATE($1)
+            AND DATE(timestamp) <= DATE($2)
+        ),
+        -- USER FUNNEL (Registered Users)
+        user_base AS (
           SELECT DISTINCT u.id, u.email, u.created_at, u.email_verified_at
           FROM users u
           WHERE DATE(u.created_at) >= DATE($1)
@@ -104,7 +140,7 @@ class AnalyticsService {
         user_logins AS (
           SELECT DISTINCT user_id
           FROM user_activity_events
-          WHERE event_type IN ('login', 'user_login', 'session_start')
+          WHERE event_type IN ('login', 'user_login', 'session_start', 'login_completed')
             AND DATE(timestamp) >= DATE($1)
         ),
         user_generations AS (
@@ -124,6 +160,13 @@ class AnalyticsService {
             AND DATE(created_at) >= DATE($1)
         )
         SELECT
+          -- Lead funnel counts
+          (SELECT count FROM total_leads) as total_leads,
+          (SELECT count FROM analysis_started) as analysis_started,
+          (SELECT count FROM analysis_completed) as analysis_completed,
+          (SELECT count FROM topic_selected) as topic_selected,
+          (SELECT count FROM signup_started) as signup_started,
+          -- User funnel counts
           (SELECT COUNT(*) FROM user_base) as signed_up,
           (SELECT COUNT(*) FROM user_base WHERE email_verified_at IS NOT NULL) as email_verified,
           (SELECT COUNT(DISTINCT ul.user_id) FROM user_logins ul INNER JOIN user_base ub ON ul.user_id = ub.id) as first_login,
@@ -135,32 +178,64 @@ class AnalyticsService {
 
       const counts = result.rows[0];
 
-      console.log(`📊 Analytics: Funnel counts - signed_up: ${counts.signed_up}, email_verified: ${counts.email_verified}, first_login: ${counts.first_login}, first_generation: ${counts.first_generation}`);
+      console.log(`📊 Analytics: MERGED Funnel counts - total_leads: ${counts.total_leads}, analysis_started: ${counts.analysis_started}, signed_up: ${counts.signed_up}, first_generation: ${counts.first_generation}`);
 
-      // Build steps array with conversion rates
+      // Build MERGED steps array (anonymous → registered → paying)
       const steps = [
-        { step: 'signed_up', name: 'Signed Up', count: parseInt(counts.signed_up) || 0, conversion_rate: 100 },
-        { step: 'email_verified', name: 'Email Verified', count: parseInt(counts.email_verified) || 0, conversion_rate: 0 },
-        { step: 'first_login', name: 'First Login', count: parseInt(counts.first_login) || 0, conversion_rate: 0 },
-        { step: 'first_generation', name: 'First Generation', count: parseInt(counts.first_generation) || 0, conversion_rate: 0 },
-        { step: 'payment_success', name: 'Payment Success', count: parseInt(counts.payment_success) || 0, conversion_rate: 0 },
-        { step: 'active_subscriber', name: 'Active Subscriber', count: parseInt(counts.active_subscriber) || 0, conversion_rate: 0 },
-        { step: 'upsell', name: 'Upsell', count: parseInt(counts.upsell) || 0, conversion_rate: 0 }
+        // LEAD STAGE (Anonymous Visitors)
+        { step: 'total_leads', name: 'Website Visitors', count: parseInt(counts.total_leads) || 0, conversion_rate: 100, stage: 'lead' },
+        { step: 'analysis_started', name: 'Started Analysis', count: parseInt(counts.analysis_started) || 0, conversion_rate: 0, stage: 'lead' },
+        { step: 'analysis_completed', name: 'Completed Analysis', count: parseInt(counts.analysis_completed) || 0, conversion_rate: 0, stage: 'lead' },
+        { step: 'topic_selected', name: 'Selected Topic', count: parseInt(counts.topic_selected) || 0, conversion_rate: 0, stage: 'lead' },
+        { step: 'signup_started', name: 'Started Signup', count: parseInt(counts.signup_started) || 0, conversion_rate: 0, stage: 'lead' },
+        // USER STAGE (Registered Users)
+        { step: 'signed_up', name: 'Registered', count: parseInt(counts.signed_up) || 0, conversion_rate: 0, stage: 'user' },
+        { step: 'email_verified', name: 'Email Verified', count: parseInt(counts.email_verified) || 0, conversion_rate: 0, stage: 'user' },
+        { step: 'first_login', name: 'First Login', count: parseInt(counts.first_login) || 0, conversion_rate: 0, stage: 'user' },
+        { step: 'first_generation', name: 'Generated Content', count: parseInt(counts.first_generation) || 0, conversion_rate: 0, stage: 'user' },
+        // REVENUE STAGE (Paying Customers)
+        { step: 'payment_success', name: 'First Payment', count: parseInt(counts.payment_success) || 0, conversion_rate: 0, stage: 'revenue' },
+        { step: 'active_subscriber', name: 'Active Subscriber', count: parseInt(counts.active_subscriber) || 0, conversion_rate: 0, stage: 'revenue' },
+        { step: 'upsell', name: 'Upgraded to Pro', count: parseInt(counts.upsell) || 0, conversion_rate: 0, stage: 'revenue' }
       ];
 
       // Calculate conversion rates (percentage of previous step)
       for (let i = 1; i < steps.length; i++) {
         const prevCount = steps[i - 1].count;
         if (prevCount > 0) {
-          steps[i].conversion_rate = (steps[i].count / prevCount) * 100;
+          steps[i].conversion_rate = ((steps[i].count / prevCount) * 100).toFixed(2);
         }
       }
 
-      console.log(`✅ Analytics: Returning ${steps.length} funnel steps`);
-      return { steps, conversions: {} };
+      console.log(`✅ Analytics: Returning ${steps.length} MERGED funnel steps (${steps.filter(s => s.stage === 'lead').length} lead + ${steps.filter(s => s.stage === 'user').length} user + ${steps.filter(s => s.stage === 'revenue').length} revenue)`);
+      return { steps, conversions: {}, stages: { lead: 5, user: 4, revenue: 3 } };
     } catch (error) {
-      console.error(`⚠️ Analytics: Failed to get funnel data - ${error.message}`);
+      console.error(`⚠️ Analytics: Failed to get merged funnel data - ${error.message}`);
       console.error(`⚠️ Analytics: Stack trace - ${error.stack}`);
+      return { steps: [], conversions: {}, stages: {} };
+    }
+  }
+
+  /**
+   * Get lead funnel data (backward compatibility - now merged into main funnel)
+   * @param {String} startDate - Start date (YYYY-MM-DD)
+   * @param {String} endDate - End date (YYYY-MM-DD)
+   * @returns {Promise<Object>} Funnel data filtered to show only lead stages
+   */
+  async getLeadFunnelData(startDate, endDate) {
+    try {
+      console.log(`📈 Analytics: Getting lead funnel data (calls merged funnel) from ${startDate} to ${endDate}`);
+
+      // Call the merged funnel and filter to lead stages only
+      const mergedFunnel = await this.getFunnelData(startDate, endDate);
+
+      // Filter to show only lead-stage steps
+      const leadSteps = mergedFunnel.steps.filter(step => step.stage === 'lead');
+
+      console.log(`✅ Analytics: Returning ${leadSteps.length} lead funnel steps`);
+      return { steps: leadSteps, conversions: mergedFunnel.conversions };
+    } catch (error) {
+      console.error(`⚠️ Analytics: Failed to get lead funnel data - ${error.message}`);
       return { steps: [], conversions: {} };
     }
   }
@@ -1044,7 +1119,12 @@ class AnalyticsService {
           event_type
         FROM user_activity_events
         WHERE timestamp >= $1 AND timestamp <= $2
-          AND event_type IN ('click', 'page_view', 'button_click', 'post_generated', 'payment_success')
+          AND event_type IN (
+            'click', 'page_view', 'button_click', 'post_generated', 'payment_success',
+            'signup_started', 'signup_completed', 'login_completed', 'logout',
+            'tab_switched', 'topic_selected', 'export_initiated', 'funnel_progress',
+            'analysis_started', 'analysis_completed', 'content_generated'
+          )
         GROUP BY DATE_TRUNC('${truncFunc}', timestamp), event_type
         ORDER BY period ASC
       `, [startDate, endDate]);
