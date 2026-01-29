@@ -7,7 +7,8 @@ import {
   sendWeeklyUsageDigests,
   sendNewUserSignupAlerts,
   sendHighValueLeadNotifications,
-  sendMonthlyRevenueSummary
+  sendMonthlyRevenueSummary,
+  generateFounderWelcomeEmails
 } from './emailCampaigns.js';
 import { expireOldCredits } from './expireCredits.js';
 
@@ -95,6 +96,21 @@ export function startEmailScheduler() {
   });
   scheduledJobs.push({ name: 'New User Signup Alerts', schedule: 'Every hour', job: newUserAlertsJob });
 
+  // Job 6.5: Founder welcome generation - Every 10 minutes
+  const founderWelcomeJob = cron.schedule('*/10 * * * *', async () => {
+    console.log('\n⏰ [SCHEDULED] Founder Welcome Email Generation (24-min)');
+    try {
+      await generateFounderWelcomeEmails();
+    } catch (error) {
+      console.error('❌ Founder welcome generation job failed:', error);
+    }
+  });
+  scheduledJobs.push({
+    name: 'Founder Welcome Generation (24-min)',
+    schedule: 'Every 10 minutes',
+    job: founderWelcomeJob
+  });
+
   // Job 7: High-value lead notifications - Every hour
   const highValueLeadAlertsJob = cron.schedule('0 * * * *', async () => {
     console.log('\n⏰ [SCHEDULED] High-Value Lead Notifications');
@@ -176,7 +192,8 @@ export async function runJob(jobName) {
     'new_user_alerts': sendNewUserSignupAlerts,
     'high_value_leads': sendHighValueLeadNotifications,
     'expire_credits': expireOldCredits,
-    'monthly_revenue': sendMonthlyRevenueSummary
+    'monthly_revenue': sendMonthlyRevenueSummary,
+    'founder_welcome': generateFounderWelcomeEmails
   };
 
   const job = jobMap[jobName];

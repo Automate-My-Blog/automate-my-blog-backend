@@ -1,5 +1,6 @@
 import db from '../services/database.js';
 import emailService from '../services/email.js';
+import founderEmailGenerator from '../services/founderEmailGenerator.js';
 
 /**
  * Email Campaign Jobs
@@ -524,5 +525,118 @@ export async function sendMonthlyRevenueSummary() {
   } catch (error) {
     console.error('❌ Error in monthly revenue summary job:', error);
     throw error;
+  }
+}
+
+/**
+ * Generate founder welcome email drafts for users 24 minutes after first login
+ * Notifies James to review and manually send
+ * Run every 10 minutes to catch users in the 20-30 minute window
+ */
+export async function generateFounderWelcomeEmails() {
+  try {
+    console.log('📧 Running founder welcome email generation job...');
+
+    // Find users who:
+    // - Had their first login between 20-30 minutes ago (10-minute window)
+    // - Don't already have a pending founder email
+    const result = await db.query(`
+      SELECT
+        u.id,
+        u.email,
+        u.first_name,
+        u.first_login_at
+      FROM users u
+      WHERE u.first_login_at BETWEEN NOW() - INTERVAL '30 minutes' AND NOW() - INTERVAL '20 minutes'
+        AND u.first_login_at IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM pending_founder_emails pfe
+          WHERE pfe.user_id = u.id
+        )
+      LIMIT 50
+    `);
+
+    console.log(`📊 Found ${result.rows.length} users for founder welcome generation (24 min window)`);
+
+    let generatedCount = 0;
+    let failedCount = 0;
+    const generatedEmails = [];
+
+    for (const user of result.rows) {
+      try {
+        const email = await founderEmailGenerator.generateWelcomeEmail(user.id);
+        generatedEmails.push(email);
+        generatedCount++;
+
+        const minutesSinceLogin = Math.round(
+          (Date.now() - new Date(user.first_login_at).getTime()) / 60000
+        );
+        console.log(`  ✅ Generated draft for ${user.email} (${minutesSinceLogin} min after first login)`);
+      } catch (error) {
+        failedCount++;
+        console.error(`  ❌ Failed for ${user.email}:`, error.message);
+      }
+    }
+
+    // Notify James if any emails were generated
+    if (generatedEmails.length > 0) {
+      await notifyJamesOfPendingEmails(generatedEmails);
+    }
+
+    console.log(`✅ Founder welcome drafts: ${generatedCount} generated, ${failedCount} failed`);
+    return { generated: generatedCount, failed: failedCount };
+
+  } catch (error) {
+    console.error('❌ Error in founder welcome generation job:', error);
+    throw error;
+  }
+}
+
+/**
+ * Notify James about pending founder emails to review
+ * @param {Array} emails - Array of generated email objects
+ */
+async function notifyJamesOfPendingEmails(emails) {
+  try {
+    const adminEmail = process.env.ADMIN_EMAIL || 'james@automatemyblog.com';
+
+    // Build email summary
+    const emailList = emails.map(e => {
+      return `- ${e.recipientEmail} (${e.hasGeneratedPost ? 'generated a post' : 'no post yet'})
+  Subject: "${e.subject}"
+  Review: ${process.env.FRONTEND_URL}/admin/pending-emails/${e.id}`;
+    }).join('\n\n');
+
+    const subject = `${emails.length} new welcome ${emails.length === 1 ? 'email' : 'emails'} to review`;
+    const body = `Hey James,
+
+You have ${emails.length} new founder welcome ${emails.length === 1 ? 'email draft' : 'email drafts'} ready for review:
+
+${emailList}
+
+Review and send: ${process.env.FRONTEND_URL}/admin/pending-emails
+
+These were triggered 24 minutes after users' first login.`;
+
+    // Send notification email to James
+    await emailService.send('admin_notification', adminEmail, {
+      subject,
+      body,
+      priority: 'normal'
+    });
+
+    // Mark as notified
+    const emailIds = emails.map(e => e.id);
+    await db.query(`
+      UPDATE pending_founder_emails
+      SET notification_sent_at = NOW()
+      WHERE id = ANY($1)
+    `, [emailIds]);
+
+    console.log(`📬 Notified James about ${emails.length} pending founder emails`);
+
+  } catch (error) {
+    console.error('❌ Failed to notify James:', error);
+    // Don't throw - email generation succeeded even if notification failed
   }
 }

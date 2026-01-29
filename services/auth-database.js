@@ -547,8 +547,8 @@ class DatabaseAuthService {
       });
     }
 
-    // Update last login
-    await db.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+    // Update last login and set first_login_at if this is the first login
+    await db.query('UPDATE users SET last_login_at = NOW(), first_login_at = COALESCE(first_login_at, NOW()) WHERE id = $1', [user.id]);
 
     // Create session record
     const sessionId = uuidv4();
