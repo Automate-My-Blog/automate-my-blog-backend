@@ -223,8 +223,24 @@ router.post('/:id/subscribe',  async (req, res) => {
  * Get all subscribed strategies for the current user
  */
 router.get('/subscribed',  async (req, res) => {
+  console.log('📊 GET /subscribed - Request received:', {
+    hasUser: !!req.user,
+    userId: req.user?.userId,
+    userKeys: req.user ? Object.keys(req.user) : []
+  });
+
+  // Verify user is authenticated (should be set by upstream middleware)
+  if (!req.user || !req.user.userId) {
+    console.error('❌ GET /subscribed - Auth failed:', {
+      hasUser: !!req.user,
+      user: req.user
+    });
+    return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+  }
+
   try {
     const userId = req.user.userId;
+    console.log('📊 Fetching subscriptions for user:', userId);
 
     const result = await db.query(
       `SELECT
@@ -243,6 +259,11 @@ router.get('/subscribed',  async (req, res) => {
       ORDER BY sp.created_at DESC`,
       [userId]
     );
+
+    console.log('📊 Query completed:', {
+      rowCount: result.rows.length,
+      subscriptions: result.rows.map(r => ({ id: r.id, strategyId: r.strategy_id }))
+    });
 
     const subscriptions = result.rows.map(row => ({
       id: row.id,
@@ -267,10 +288,15 @@ router.get('/subscribed',  async (req, res) => {
       }
     }));
 
+    console.log('✅ Returning subscriptions:', subscriptions.length);
     res.json({ subscriptions });
 
   } catch (error) {
-    console.error('Error fetching subscribed strategies:', error);
+    console.error('❌ Error fetching subscribed strategies:', {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?.userId
+    });
     res.status(500).json({ error: 'Failed to fetch subscriptions' });
   }
 });
