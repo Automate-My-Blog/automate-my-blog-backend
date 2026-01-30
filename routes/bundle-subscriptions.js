@@ -2,9 +2,11 @@ import express from 'express';
 import db from '../services/database.js';
 import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
+import OpenAI from 'openai';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /**
  * Middleware to authenticate requests
@@ -15,6 +17,103 @@ const authenticateToken = (req, res, next) => {
   }
   next();
 };
+
+/**
+ * Generate outcome-focused bundle overview using OpenAI
+ */
+async function generateBundleOverview(strategies) {
+  try {
+    // Extract key information from each strategy
+    const strategySummaries = strategies.map((strategy, index) => {
+      const targetSegment = typeof strategy.target_segment === 'string'
+        ? JSON.parse(strategy.target_segment)
+        : strategy.target_segment;
+
+      const demographics = targetSegment?.demographics || 'Unknown audience';
+
+      // Extract search volume from keywords
+      const keywords = strategy.keywords || [];
+      const totalSearchVolume = keywords.reduce((sum, kw) => {
+        return sum + (kw.search_volume || 0);
+      }, 0);
+
+      // Extract profit projection from pitch
+      const profitMatch = strategy.pitch?.match(/Profit of \$([0-9,]+)-\$([0-9,]+)/);
+      const profitLow = profitMatch ? parseInt(profitMatch[1].replace(/,/g, '')) : null;
+      const profitHigh = profitMatch ? parseInt(profitMatch[2].replace(/,/g, '')) : null;
+
+      return {
+        audience: demographics,
+        searchVolume: totalSearchVolume,
+        profitLow,
+        profitHigh,
+        customerProblem: strategy.customer_problem
+      };
+    });
+
+    const prompt = `You are a strategic SEO consultant. Create a compelling, outcome-focused overview for a comprehensive SEO plan that targets multiple audience segments.
+
+Here are the audience strategies included:
+${strategySummaries.map((s, i) => `
+${i + 1}. ${s.audience}
+   - Monthly search volume: ${s.searchVolume.toLocaleString()}
+   - Projected monthly profit: $${s.profitLow?.toLocaleString() || 'N/A'}-$${s.profitHigh?.toLocaleString() || 'N/A'}
+   - Problem they're solving: ${s.customerProblem}
+`).join('\n')}
+
+Write a compelling 2-3 sentence overview that:
+1. Describes the comprehensive strategy and how these audiences work together
+2. Emphasizes the OUTCOMES (total traffic potential, revenue opportunity, market coverage)
+3. Makes it clear this is a complete SEO solution, not just separate strategies
+
+Format your response as JSON with these fields:
+{
+  "overview": "The compelling 2-3 sentence overview",
+  "totalMonthlySearches": <total search volume across all audiences>,
+  "projectedMonthlyProfit": {
+    "low": <sum of all low profit projections>,
+    "high": <sum of all high profit projections>
+  },
+  "audienceCount": ${strategies.length},
+  "keyBenefits": ["benefit 1", "benefit 2", "benefit 3"]
+}
+
+Make it outcome-focused, not feature-focused. Focus on business results, not just "N strategies" or "X posts".`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: 'You are a strategic SEO consultant who writes compelling, outcome-focused marketing copy.' },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.7
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content);
+
+    // Add the strategy summaries for display
+    result.strategies = strategySummaries;
+
+    return result;
+  } catch (error) {
+    console.error('Error generating bundle overview:', error);
+    // Return fallback
+    return {
+      overview: `Reach ${strategies.length} high-value audience segments with one comprehensive SEO strategy. Maximize your market coverage and revenue potential across multiple customer profiles.`,
+      audienceCount: strategies.length,
+      strategies: strategies.map(s => {
+        const targetSegment = typeof s.target_segment === 'string' ? JSON.parse(s.target_segment) : s.target_segment;
+        return {
+          audience: targetSegment?.demographics || 'Target audience',
+          searchVolume: 0,
+          profitLow: null,
+          profitHigh: null
+        };
+      })
+    };
+  }
+}
 
 /**
  * GET /api/v1/strategies/bundle/calculate
@@ -49,8 +148,12 @@ router.get('/calculate',  async (req, res) => {
       });
     }
 
+    // Generate outcome-focused bundle overview using AI
+    const bundleOverview = await generateBundleOverview(strategies);
+
     res.json({
       bundlePricing,
+      bundleOverview,
       message: pricingCalculator.formatBundlePricingMessage(bundlePricing)
     });
 
