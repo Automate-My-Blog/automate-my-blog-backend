@@ -182,8 +182,8 @@ router.post('/:id/subscribe',  async (req, res) => {
     // Sanitize URL
     frontendUrl = frontendUrl.trim().replace(/\/+$/, '');
 
-    const successUrl = `${frontendUrl}/dashboard?strategy_subscribed=${strategyId}`;
-    const cancelUrl = `${frontendUrl}/dashboard?tab=audience`;
+    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}`;
+    const cancelUrl = `${frontendUrl}/dashboard?tab=audience-segments`;
 
     console.log('🔗 Stripe Checkout URLs:', {
       requestOrigin,
