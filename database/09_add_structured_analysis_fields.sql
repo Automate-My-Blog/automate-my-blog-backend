@@ -1,22 +1,21 @@
 -- Migration: Add structured analysis fields to projects table
 -- This migration extracts key OpenAI analysis data from JSONB to dedicated columns for better querying and display
 
--- Add structured fields for OpenAI analysis data
-ALTER TABLE projects 
-ADD COLUMN keywords JSONB,
-ADD COLUMN description TEXT,
-ADD COLUMN decision_makers TEXT,
-ADD COLUMN end_users TEXT,
-ADD COLUMN business_model TEXT,
-ADD COLUMN website_goals TEXT,
-ADD COLUMN blog_strategy TEXT,
-ADD COLUMN search_behavior TEXT,
-ADD COLUMN connection_message TEXT;
+-- Add structured fields for OpenAI analysis data (IF NOT EXISTS for idempotent runs)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS keywords JSONB;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS decision_makers TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS end_users TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS business_model TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS website_goals TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS blog_strategy TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS search_behavior TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS connection_message TEXT;
 
 -- Add indexes for better query performance
-CREATE INDEX idx_projects_keywords ON projects USING GIN(keywords) WHERE keywords IS NOT NULL;
-CREATE INDEX idx_projects_business_model ON projects(business_model) WHERE business_model IS NOT NULL;
-CREATE INDEX idx_projects_decision_makers ON projects(decision_makers) WHERE decision_makers IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_keywords ON projects USING GIN(keywords) WHERE keywords IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_business_model ON projects(business_model) WHERE business_model IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_projects_decision_makers ON projects(decision_makers) WHERE decision_makers IS NOT NULL;
 
 -- Migrate existing data from business_analysis JSONB to structured columns
 UPDATE projects 
