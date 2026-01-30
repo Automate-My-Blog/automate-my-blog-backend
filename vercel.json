@@ -1,5 +1,11 @@
 {
   "version": 2,
+  "git": {
+    "deploymentEnabled": {
+      "main": true,
+      "*": false
+    }
+  },
   "functions": {
     "index.js": {
       "maxDuration": 60
