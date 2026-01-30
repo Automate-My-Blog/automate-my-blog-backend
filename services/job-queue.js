@@ -1,0 +1,211 @@
+/**
+ * Job queue service (BullMQ + Redis)
+ * Create jobs, get status, retry, cancel. Worker updates DB directly.
+ */
+
+import { Queue } from 'bullmq';
+import IORedis from 'ioredis';
+import { v4 as uuidv4 } from 'uuid';
+import db from './database.js';
+
+const QUEUE_NAME = 'amb-jobs';
+const JOB_TYPES = ['website_analysis', 'content_generation'];
+
+let _connection = null;
+let _queue = null;
+
+function getConnection() {
+  const url = process.env.REDIS_URL;
+  if (!url) return null;
+  if (!_connection) {
+    _connection = new IORedis(url, { maxRetriesPerRequest: null });
+  }
+  return _connection;
+}
+
+function getQueue() {
+  const conn = getConnection();
+  if (!conn) return null;
+  if (!_queue) {
+    _queue = new Queue(QUEUE_NAME, {
+      connection: conn,
+      defaultJobOptions: { removeOnComplete: { count: 1000 }, removeOnFail: false }
+    });
+  }
+  return _queue;
+}
+
+function ensureRedis() {
+  if (!getConnection()) throw new Error('REDIS_URL is required for job queue');
+}
+
+/**
+ * Ownership: user_id match XOR session_id match. 404 if no match.
+ */
+async function getJobForAccess(jobId, { userId, sessionId }) {
+  const q = await db.query(
+    `SELECT * FROM jobs WHERE id = $1`,
+    [jobId]
+  );
+  const row = q.rows[0];
+  if (!row) return null;
+  const ownByUser = userId && row.user_id && row.user_id === userId;
+  const ownBySession = sessionId && row.session_id && row.session_id === sessionId;
+  if (!ownByUser && !ownBySession) return null;
+  return row;
+}
+
+function rowToStatus(row) {
+  return {
+    jobId: row.id,
+    status: row.status,
+    progress: row.progress ?? 0,
+    currentStep: row.current_step ?? null,
+    estimatedTimeRemaining: row.estimated_seconds_remaining ?? null,
+    error: row.error ?? null,
+    errorCode: row.error_code ?? null,
+    result: row.result ?? null,
+    createdAt: row.created_at != null ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at != null ? new Date(row.updated_at).toISOString() : null
+  };
+}
+
+/**
+ * Create a job, enqueue it, return jobId.
+ * @param {string} type - 'website_analysis' | 'content_generation'
+ * @param {object} input - Job payload (stored for retry)
+ * @param {object} context - { userId?, sessionId?, tenantId? }
+ * @returns {Promise<{ jobId: string }>}
+ */
+export async function createJob(type, input, context = {}) {
+  if (!JOB_TYPES.includes(type)) throw new Error(`Invalid job type: ${type}`);
+  const { userId, sessionId, tenantId } = context;
+  if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
+
+  ensureRedis();
+  const jobId = uuidv4();
+
+  await db.query(
+    `INSERT INTO jobs (id, tenant_id, user_id, session_id, type, status, input, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'queued', $6, NOW())`,
+    [jobId, tenantId || null, userId || null, sessionId || null, type, JSON.stringify(input)]
+  );
+
+  const queue = getQueue();
+  await queue.add(type, { jobId }, { jobId });
+
+  return { jobId };
+}
+
+/**
+ * Get job status. 404 if not found or not owned.
+ * @returns {Promise<object|null>} Status object or null
+ */
+export async function getJobStatus(jobId, context) {
+  const row = await getJobForAccess(jobId, context);
+  if (!row) return null;
+  return rowToStatus(row);
+}
+
+/**
+ * Retry a failed job. Re-enqueues same job id.
+ * @returns {Promise<{ jobId: string }>} Same jobId
+ * @throws 400 if not failed, 404 if not found
+ */
+export async function retryJob(jobId, context) {
+  ensureRedis();
+  const row = await getJobForAccess(jobId, context);
+  if (!row) return null;
+  if (row.status !== 'failed') {
+    const err = new Error('Job is not in failed state');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await db.query(
+    `UPDATE jobs SET status = 'queued', progress = 0, current_step = NULL, error = NULL, result = NULL,
+      cancelled_at = NULL, started_at = NULL, finished_at = NULL, updated_at = NOW()
+     WHERE id = $1`,
+    [jobId]
+  );
+
+  const queue = getQueue();
+  await queue.add(row.type, { jobId }, { jobId });
+
+  return { jobId };
+}
+
+/**
+ * Request cancellation. Sets cancelled_at. Worker checks and marks failed with "Cancelled".
+ * @returns {Promise<{ cancelled: true }|null>} null if not found
+ */
+export async function cancelJob(jobId, context) {
+  const row = await getJobForAccess(jobId, context);
+  if (!row) return null;
+  if (row.status !== 'queued' && row.status !== 'running') {
+    const err = new Error('Job is not cancellable');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  await db.query(
+    `UPDATE jobs SET cancelled_at = NOW(), updated_at = NOW() WHERE id = $1`,
+    [jobId]
+  );
+  return { cancelled: true };
+}
+
+/**
+ * Update job progress (used by worker).
+ */
+export async function updateJobProgress(jobId, updates) {
+  const {
+    status,
+    progress,
+    current_step,
+    estimated_seconds_remaining,
+    result,
+    error,
+    error_code,
+    started_at,
+    finished_at
+  } = updates;
+
+  const sets = ['updated_at = NOW()'];
+  const values = [];
+  let i = 1;
+
+  if (status != null) { sets.push(`status = $${i++}`); values.push(status); }
+  if (progress != null) { sets.push(`progress = $${i++}`); values.push(progress); }
+  if (current_step !== undefined) { sets.push(`current_step = $${i++}`); values.push(current_step); }
+  if (estimated_seconds_remaining !== undefined) { sets.push(`estimated_seconds_remaining = $${i++}`); values.push(estimated_seconds_remaining); }
+  if (result !== undefined) { sets.push(`result = $${i++}`); values.push(result); }
+  if (error !== undefined) { sets.push(`error = $${i++}`); values.push(error); }
+  if (error_code !== undefined) { sets.push(`error_code = $${i++}`); values.push(error_code); }
+  if (started_at !== undefined) { sets.push(`started_at = $${i++}`); values.push(started_at); }
+  if (finished_at !== undefined) { sets.push(`finished_at = $${i++}`); values.push(finished_at); }
+
+  values.push(jobId);
+  await db.query(
+    `UPDATE jobs SET ${sets.join(', ')} WHERE id = $${i}`,
+    values
+  );
+}
+
+/**
+ * Check if job was cancelled (worker uses this).
+ */
+export async function isJobCancelled(jobId) {
+  const r = await db.query(`SELECT cancelled_at FROM jobs WHERE id = $1`, [jobId]);
+  return r.rows[0]?.cancelled_at != null;
+}
+
+/**
+ * Get job row by id (worker uses this).
+ */
+export async function getJobRow(jobId) {
+  const r = await db.query(`SELECT * FROM jobs WHERE id = $1`, [jobId]);
+  return r.rows[0] || null;
+}
+
+export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME };

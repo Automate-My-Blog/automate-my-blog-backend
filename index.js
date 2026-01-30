@@ -38,6 +38,7 @@ import emailPreferencesRoutes from './routes/email-preferences.js';
 import founderEmailRoutes from './routes/founderEmails.js';
 import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
+import jobsRoutes from './routes/jobs.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 
@@ -109,6 +110,7 @@ app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService)
 app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
+app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
 app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
@@ -310,6 +312,11 @@ app.get('/api', (req, res) => {
       'POST /api/v1/auth/refresh': 'Refresh access token',
       'POST /api/v1/auth/logout': 'Logout user',
       'POST /api/analyze-website': 'Analyze website content and extract business information',
+      'POST /api/v1/jobs/website-analysis': 'Start async website analysis job (returns jobId)',
+      'POST /api/v1/jobs/content-generation': 'Start async content generation job (returns jobId)',
+      'GET /api/v1/jobs/:jobId/status': 'Get job status, progress, and result',
+      'POST /api/v1/jobs/:jobId/retry': 'Retry a failed job',
+      'POST /api/v1/jobs/:jobId/cancel': 'Cancel a queued or running job',
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
       'POST /api/generate-content': 'Generate complete blog post content',
       'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',
