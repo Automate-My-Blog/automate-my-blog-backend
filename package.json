@@ -14,7 +14,8 @@
     "verify-db": "node verify-connection.js",
     "setup-db": "node setup-database.js",
     "test-db": "node test-db-connection.js",
-    "test-auth": "node test-auth-service.js"
+    "test-auth": "node test-auth-service.js",
+    "worker": "node jobs/job-worker.js"
   },
   "keywords": [
     "autoblog",
@@ -32,11 +33,13 @@
     "@vercel/functions": "^3.3.6",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.67.2",
     "cheerio": "^1.1.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
+    "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
