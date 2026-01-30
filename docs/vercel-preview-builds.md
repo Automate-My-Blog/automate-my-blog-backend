@@ -1,26 +1,26 @@
-# Vercel: Only Build Main (Skip PR / Branch Builds)
+# Vercel: Only Build Production
 
-We only deploy from `main`. `vercel.json` has `deploymentEnabled: { "main": true, "*": false }`, but Vercel can still **run a build** for PRs and post a GitHub check. If that build fails or is skipped, the check shows "Vercel — Deployment has failed" and blocks the PR.
+We only deploy from `main`. Vercel can still run a build for every PR and branch. When that build is skipped or fails, the PR shows "Vercel — Deployment has failed" and blocks merge.
 
-**Fix:** Use Vercel’s **Ignore Build Step** so non-main branches (and PRs) don’t run a build at all. Then the Vercel check won’t run or will show as skipped.
+Use the **Ignore Build Step** in Vercel so only production builds run. PRs and other branches skip the build.
 
 ## Setup (one-time)
 
 1. Open [Vercel Dashboard](https://vercel.com) → your project.
-2. **Settings** → **Git**.
+2. Go to **Settings** → **Git**.
 3. Under **Build & Development Settings**, find **Ignore Build Step**.
-4. Set the command to:
+4. Paste this command:
+
    ```bash
-   bash scripts/vercel-ignore-build.sh
+   if [ "$VERCEL_ENV" == "production" ]; then exit 1; else exit 0; fi
    ```
-   (Or use the inline form: `[ "$VERCEL_GIT_COMMIT_REF" = "main" ]` — that exits 0 for non-main so the build is skipped.)
 
-5. Save. New PRs and non-main pushes will skip the build; only `main` will build and deploy.
+   Exit 1 = build runs. Exit 0 = build is skipped. So only production builds run.
 
-## Script
+5. Save.
 
-`scripts/vercel-ignore-build.sh` exits **0** (skip build) for any ref that isn’t `main`, and **1** (run build) for `main`. Vercel runs this from the repo root.
+PRs and non-production branches will skip the build. Only production (e.g. pushes to `main`) will build and deploy.
 
-## If you can’t change the dashboard
+## Alternative
 
-- In **GitHub** → repo **Settings** → **Branches** → branch protection for `main` → **Require status checks** → **uncheck** the "Vercel" check. Then PRs can merge without that check (other CI still runs).
+If you can't change Vercel: in GitHub go to **Settings** → **Branches** → edit the rule for `main` → under **Require status checks**, uncheck **Vercel**. Then PRs can merge without that check.

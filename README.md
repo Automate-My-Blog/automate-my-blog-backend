@@ -107,9 +107,11 @@ This project uses GitHub Actions for continuous integration:
 - **PR Size Check** - Warns about large pull requests
 - **Dependency Updates** - Weekly checks for outdated packages
 - **Schema Diff** - Shows database changes in PR comments
+- **Migration Validation** - Runs all database migrations on PRs that touch `database/`
+- **Smoke Test** - Starts the server and hits `/health` on every push and PR
 - **Stale Issues** - Automatic issue management
 
-See [docs/github-actions-quick-wins.md](./docs/github-actions-quick-wins.md) for details on all workflows.
+See [docs/github-actions-quick-wins.md](./docs/github-actions-quick-wins.md) for details on all workflows. For Vercel (only build production), see [docs/vercel-preview-builds.md](./docs/vercel-preview-builds.md). Recent changes are summarized in [docs/RECENT_UPDATES.md](./docs/RECENT_UPDATES.md).
 
 ## Contributing
 
