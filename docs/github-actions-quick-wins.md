@@ -12,6 +12,7 @@ The following workflows are **already implemented** and running in this reposito
 - ✅ **PR Size Check** (`.github/workflows/pr-size-check.yml`) - Warns when PRs exceed 500 lines
 - ✅ **Dependency Update Check** (`.github/workflows/dependency-check.yml`) - Weekly check for outdated packages
 - ✅ **Database Schema Diff Check** (`.github/workflows/schema-diff.yml`) - Shows schema changes in PR comments
+- ✅ **Database Migration Validation** (`.github/workflows/migration-validation.yml`) - Validates SQL syntax and migration order on PRs that touch `database/`
 - ✅ **Auto-Close Stale Issues** (`.github/workflows/stale-issues.yml`) - Automatically manages stale issues
 - ✅ **Test Suite** (`.github/workflows/test.yml`) - Runs test suite on PRs
 
@@ -47,11 +48,13 @@ The workflow scans your code for console.log statements and flags TODO/FIXME com
 
 ---
 
-## 4. Database Migration Validation ⚡ (20 min)
+## 4. Database Migration Validation ⚡ (20 min) ✅ IMPLEMENTED
 
 This one's important if you're doing database migrations. It validates SQL syntax on PRs that touch the `database/` directory. Broken migrations are a pain to fix in production, so catching syntax errors early is worth the setup time.
 
 The workflow spins up a test Postgres instance and validates all SQL files in your database directory. It only runs when migration files are changed, so it doesn't slow down other PRs.
+
+**Implementation:** `.github/workflows/migration-validation.yml` - Runs on PRs and pushes to main when `database/**/*.sql` changes; spins up Postgres 16, installs `postgresql-client` (cached), runs `scripts/setup-test-db.sh` to apply all `database/*.sql` and `database/migrations/*.sql` in order; fails the job if any SQL has syntax errors or fails to apply.
 
 ---
 
@@ -163,7 +166,7 @@ Here's a quick breakdown:
 | Security Scan | 5 min | High | ⭐⭐⭐ |
 | Env Var Check | 10 min | High | ⭐⭐⭐ |
 | Code Quality | 15 min | Medium | ⭐⭐ |
-| Migration Check | 20 min | High | ⭐⭐⭐ |
+| Migration Validation | 20 min | High | ⭐⭐⭐ ✅ |
 | Smoke Tests | 30 min | Medium | ⭐⭐ |
 | Auto-Deploy | 20 min | High | ⭐⭐⭐ |
 | PR Size Check | 5 min | Low | ⭐ |

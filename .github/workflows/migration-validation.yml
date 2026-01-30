@@ -1,0 +1,52 @@
+# Validate SQL syntax and migration order when database/ files change.
+# Spins up Postgres, runs all database/*.sql and database/migrations/*.sql in order.
+# Fails the PR if any SQL has syntax errors or fails to apply.
+name: Migration Validation
+
+on:
+  pull_request:
+    paths:
+      - 'database/**/*.sql'
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+    paths:
+      - 'database/**/*.sql'
+
+jobs:
+  validate-migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.0
+        with:
+          packages: postgresql-client
+          version: 1
+
+      - name: Validate database migrations
+        run: bash scripts/setup-test-db.sh
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+      - name: Migration validation summary
+        run: |
+          echo "## Database migration validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All SQL files in \`database/\` and \`database/migrations/\` were applied successfully against Postgres 16." >> $GITHUB_STEP_SUMMARY
+          echo "No syntax or apply errors found." >> $GITHUB_STEP_SUMMARY
