@@ -64,10 +64,11 @@ for f in "13_organization_intelligence_session_adoption.sql" "20_email_system.sq
   echo "   ✅"
 done
 
-# Migrations in database/migrations/ (first_login_at, etc.)
+# Migrations in database/migrations/ (only those that don't require audiences table).
+# Skip 028_strategy_subscriptions, 029, 030, 031 — they reference audiences (from 11_audience_persistence_tables.sql, not run in test setup).
 MIGRATIONS_DIR="$DB_DIR/migrations"
 if [ -d "$MIGRATIONS_DIR" ]; then
-  for f in 026_add_first_login_tracking.sql 027_pending_founder_emails.sql 028_add_lead_notification_tracking.sql 028_strategy_subscriptions.sql 029_enhance_audiences_pricing.sql 030_strategy_usage_log.sql 031_add_profit_metrics.sql; do
+  for f in 026_add_first_login_tracking.sql 027_pending_founder_emails.sql 028_add_lead_notification_tracking.sql; do
     path="$MIGRATIONS_DIR/$f"
     if [ -f "$path" ]; then
       echo "▶ migrations/$f"
