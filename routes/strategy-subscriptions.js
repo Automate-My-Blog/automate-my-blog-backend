@@ -164,13 +164,30 @@ router.post('/:id/subscribe',  async (req, res) => {
       }
     });
 
-    // Build URLs (trim any whitespace and remove trailing slashes)
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').trim().replace(/\/+$/, '');
+    // Build URLs - dynamically detect frontend URL from request origin
+    // This allows local development to work correctly (localhost → localhost)
+    // while production still works (prod → prod)
+    const requestOrigin = req.headers.origin || req.headers.referer;
+    let frontendUrl;
+
+    if (requestOrigin) {
+      // Extract origin from referer if needed
+      const originMatch = requestOrigin.match(/^https?:\/\/[^\/]+/);
+      frontendUrl = originMatch ? originMatch[0] : (process.env.FRONTEND_URL || 'http://localhost:3000');
+    } else {
+      // Fallback to environment variable
+      frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000');
+    }
+
+    // Sanitize URL
+    frontendUrl = frontendUrl.trim().replace(/\/+$/, '');
+
     const successUrl = `${frontendUrl}/dashboard?strategy_subscribed=${strategyId}`;
     const cancelUrl = `${frontendUrl}/dashboard?tab=audience`;
 
     console.log('🔗 Stripe Checkout URLs:', {
-      frontendUrl,
+      requestOrigin,
+      detectedFrontendUrl: frontendUrl,
       successUrl,
       cancelUrl
     });
