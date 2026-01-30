@@ -81,10 +81,10 @@ COMMENT ON COLUMN comprehensive_seo_analyses.content_freshness IS 'Analysis of e
 COMMENT ON COLUMN comprehensive_seo_analyses.competitive_differentiation IS 'Analysis of unique value adds, content gap analysis, competitive advantages, and market positioning';
 
 -- Insert initial schema version tracking
-INSERT INTO schema_versions (version, description, applied_at) 
+INSERT INTO schema_versions (version, description, applied_at)
 VALUES (14, 'Comprehensive SEO Analysis System', NOW())
 ON CONFLICT (version) DO NOTHING;
 
--- Grant permissions (assuming standard user roles exist)
+-- Grant permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON comprehensive_seo_analyses TO authenticated_user;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;

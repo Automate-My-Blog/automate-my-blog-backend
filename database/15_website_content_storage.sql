@@ -252,25 +252,31 @@ CREATE INDEX IF NOT EXISTS idx_manual_uploads_user ON manual_content_uploads(upl
 
 -- =============================================================================
 -- TRIGGERS FOR UPDATED_AT TIMESTAMPS
+-- (PostgreSQL does not support CREATE TRIGGER IF NOT EXISTS; use DROP IF EXISTS first.)
 -- =============================================================================
 
-CREATE TRIGGER IF NOT EXISTS update_website_pages_updated_at 
+DROP TRIGGER IF EXISTS update_website_pages_updated_at ON website_pages;
+CREATE TRIGGER update_website_pages_updated_at
     BEFORE UPDATE ON website_pages
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_cta_analysis_updated_at 
+DROP TRIGGER IF EXISTS update_cta_analysis_updated_at ON cta_analysis;
+CREATE TRIGGER update_cta_analysis_updated_at
     BEFORE UPDATE ON cta_analysis
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_internal_linking_analysis_updated_at 
+DROP TRIGGER IF EXISTS update_internal_linking_analysis_updated_at ON internal_linking_analysis;
+CREATE TRIGGER update_internal_linking_analysis_updated_at
     BEFORE UPDATE ON internal_linking_analysis
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_content_analysis_results_updated_at 
+DROP TRIGGER IF EXISTS update_content_analysis_results_updated_at ON content_analysis_results;
+CREATE TRIGGER update_content_analysis_results_updated_at
     BEFORE UPDATE ON content_analysis_results
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_manual_content_uploads_updated_at 
+DROP TRIGGER IF EXISTS update_manual_content_uploads_updated_at ON manual_content_uploads;
+CREATE TRIGGER update_manual_content_uploads_updated_at
     BEFORE UPDATE ON manual_content_uploads
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -403,7 +409,7 @@ COMMENT ON COLUMN content_analysis_results.analysis_completeness IS 'Percentage 
 -- GRANT PERMISSIONS
 -- =============================================================================
 
--- Grant permissions (assuming standard user roles exist)
+-- Grant permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON website_pages TO authenticated_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON cta_analysis TO authenticated_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON internal_linking_analysis TO authenticated_user;
@@ -416,7 +422,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
 -- INSERT SCHEMA VERSION TRACKING
 -- =============================================================================
 
-INSERT INTO schema_versions (version, description, applied_at) 
+INSERT INTO schema_versions (version, description, applied_at)
 VALUES (15, 'Website Content Storage & Analysis Tables', NOW())
 ON CONFLICT (version) DO NOTHING;
 

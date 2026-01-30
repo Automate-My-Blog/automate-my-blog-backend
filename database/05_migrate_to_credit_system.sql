@@ -59,6 +59,7 @@ DO $$
 DECLARE
     migrated_count INTEGER;
     referral_count INTEGER;
+    rec RECORD;
 BEGIN
     -- Count migrated records
     SELECT COUNT(*) INTO migrated_count FROM user_credits WHERE source_type = 'referral';

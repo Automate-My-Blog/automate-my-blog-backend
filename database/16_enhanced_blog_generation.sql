@@ -136,13 +136,16 @@ CREATE INDEX IF NOT EXISTS idx_organizations_blog_settings ON organizations USIN
 
 -- =============================================================================
 -- TRIGGERS FOR UPDATED_AT TIMESTAMPS
+-- (PostgreSQL does not support CREATE TRIGGER IF NOT EXISTS; use DROP IF EXISTS first.)
 -- =============================================================================
 
-CREATE TRIGGER IF NOT EXISTS update_user_manual_inputs_updated_at 
+DROP TRIGGER IF EXISTS update_user_manual_inputs_updated_at ON user_manual_inputs;
+CREATE TRIGGER update_user_manual_inputs_updated_at
     BEFORE UPDATE ON user_manual_inputs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_generated_visual_content_updated_at 
+DROP TRIGGER IF EXISTS update_generated_visual_content_updated_at ON generated_visual_content;
+CREATE TRIGGER update_generated_visual_content_updated_at
     BEFORE UPDATE ON generated_visual_content
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -312,7 +315,7 @@ COMMENT ON COLUMN organizations.blog_generation_settings IS 'User preferences fo
 -- GRANT PERMISSIONS
 -- =============================================================================
 
--- Grant permissions (assuming standard user roles exist)
+-- Grant permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON user_manual_inputs TO authenticated_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON generated_visual_content TO authenticated_user;
 GRANT SELECT ON enhanced_organization_view TO authenticated_user;
@@ -322,7 +325,7 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
 -- INSERT SCHEMA VERSION TRACKING
 -- =============================================================================
 
-INSERT INTO schema_versions (version, description, applied_at) 
+INSERT INTO schema_versions (version, description, applied_at)
 VALUES (16, 'Enhanced Blog Generation: Manual Inputs & Visual Content', NOW())
 ON CONFLICT (version) DO NOTHING;
 
