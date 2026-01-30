@@ -80,10 +80,13 @@ COMMENT ON COLUMN comprehensive_seo_analyses.social_sharing IS 'Analysis of shar
 COMMENT ON COLUMN comprehensive_seo_analyses.content_freshness IS 'Analysis of evergreen potential, update requirements, seasonal relevance, and content series potential';
 COMMENT ON COLUMN comprehensive_seo_analyses.competitive_differentiation IS 'Analysis of unique value adds, content gap analysis, competitive advantages, and market positioning';
 
--- Insert initial schema version tracking
-INSERT INTO schema_versions (version, description, applied_at) 
-VALUES (14, 'Comprehensive SEO Analysis System', NOW())
-ON CONFLICT (version) DO NOTHING;
+-- Insert initial schema version tracking (skip if schema_versions table does not exist, e.g. test DB)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_versions') THEN
+    INSERT INTO schema_versions (version, description, applied_at) VALUES (14, 'Comprehensive SEO Analysis System', NOW()) ON CONFLICT (version) DO NOTHING;
+  END IF;
+END $$;
 
 -- Grant permissions (assuming standard user roles exist)
 GRANT SELECT, INSERT, UPDATE, DELETE ON comprehensive_seo_analyses TO authenticated_user;

@@ -322,9 +322,13 @@ GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
 -- INSERT SCHEMA VERSION TRACKING
 -- =============================================================================
 
-INSERT INTO schema_versions (version, description, applied_at) 
-VALUES (16, 'Enhanced Blog Generation: Manual Inputs & Visual Content', NOW())
-ON CONFLICT (version) DO NOTHING;
+-- Schema version tracking (skip if schema_versions table does not exist, e.g. test DB)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_versions') THEN
+    INSERT INTO schema_versions (version, description, applied_at) VALUES (16, 'Enhanced Blog Generation: Manual Inputs & Visual Content', NOW()) ON CONFLICT (version) DO NOTHING;
+  END IF;
+END $$;
 
 -- =============================================================================
 -- LOG COMPLETION
