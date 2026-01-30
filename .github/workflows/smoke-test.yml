@@ -1,0 +1,91 @@
+# Smoke test: start server and hit /health to catch startup and basic endpoint failures.
+name: Smoke Test
+
+on:
+  push:
+    branches: [main, test/unit-tests]
+  pull_request:
+    branches: [main, test/unit-tests]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Install PostgreSQL client (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.0
+        with:
+          packages: postgresql-client
+          version: 1
+
+      - name: Setup test database
+        run: bash scripts/setup-test-db.sh
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+      - name: Start server
+        run: |
+          npm start &
+          echo $! > server.pid
+        env:
+          PORT: 3001
+          NODE_ENV: development
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          JWT_SECRET: test-jwt-secret-do-not-use-in-production
+          JWT_REFRESH_SECRET: test-refresh-secret
+          STRIPE_WEBHOOK_SECRET: whsec_test_secret
+          STRIPE_SECRET_KEY: sk_test_dummy
+          OPENAI_API_KEY: sk-dummy-for-tests
+
+      - name: Wait for server
+        run: |
+          echo "Waiting for server (DB init can take 30+ seconds)..."
+          sleep 15
+          for i in $(seq 1 45); do
+            if curl -sf http://localhost:3001/health > /dev/null; then
+              echo "Server ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Server did not become ready within 60s"
+          exit 1
+
+      - name: Smoke test /health
+        run: |
+          curl -sf -o health.json http://localhost:3001/health
+          echo "Health response:"
+          head -20 health.json
+
+      - name: Stop server
+        if: always()
+        run: |
+          [ -f server.pid ] && kill $(cat server.pid) 2>/dev/null || true
+
+      - name: Smoke test summary
+        run: |
+          echo "## Smoke test" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Server started and \`GET /health\` returned 200." >> $GITHUB_STEP_SUMMARY
