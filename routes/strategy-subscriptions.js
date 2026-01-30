@@ -164,6 +164,17 @@ router.post('/:id/subscribe',  async (req, res) => {
       }
     });
 
+    // Build URLs (trim any whitespace and remove trailing slashes)
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').trim().replace(/\/+$/, '');
+    const successUrl = `${frontendUrl}/dashboard?strategy_subscribed=${strategyId}`;
+    const cancelUrl = `${frontendUrl}/dashboard?tab=audience`;
+
+    console.log('🔗 Stripe Checkout URLs:', {
+      frontendUrl,
+      successUrl,
+      cancelUrl
+    });
+
     // Create Checkout Session
     const session = await stripe.checkout.sessions.create({
       customer_email: req.user.email,
@@ -172,8 +183,8 @@ router.post('/:id/subscribe',  async (req, res) => {
         quantity: 1
       }],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?strategy_subscribed=${strategyId}`,
-      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?tab=audience`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
       metadata: {
         user_id: userId.toString(),
         strategy_id: strategyId.toString(),
