@@ -146,13 +146,13 @@ router.post('/:id/subscribe',  async (req, res) => {
         interval: billingInterval === 'annual' ? 'year' : 'month'
       },
       product_data: {
-        name: `${demographics.substring(0, 80)} - SEO Strategy`,
-        description: `${pricing.posts.recommended}-${pricing.posts.maximum} posts/month. Projected profit: $${pricing.projectedLow}-$${pricing.projectedHigh}/month`,
+        name: `${demographics.substring(0, 80)} - SEO Strategy (${pricing.posts.recommended}-${pricing.posts.maximum} posts/mo)`,
         metadata: {
           strategy_id: strategyId.toString(),
           user_id: userId.toString(),
           projected_profit_low: pricing.projectedLow?.toString() || '0',
-          projected_profit_high: pricing.projectedHigh?.toString() || '0'
+          projected_profit_high: pricing.projectedHigh?.toString() || '0',
+          description: `${pricing.posts.recommended}-${pricing.posts.maximum} posts/month. Projected profit: $${pricing.projectedLow}-$${pricing.projectedHigh}/month`
         }
       },
       metadata: {
@@ -190,8 +190,20 @@ router.post('/:id/subscribe',  async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating strategy subscription:', error);
-    res.status(500).json({ error: 'Failed to create subscription' });
+    console.error('❌ Error creating strategy subscription:', {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.statusCode,
+      stack: error.stack
+    });
+
+    // Return detailed error for debugging
+    res.status(500).json({
+      error: 'Failed to create subscription',
+      message: error.message,
+      details: error.type || error.code || 'Unknown error'
+    });
   }
 });
 
