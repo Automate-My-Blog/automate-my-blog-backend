@@ -136,13 +136,16 @@ CREATE INDEX IF NOT EXISTS idx_organizations_blog_settings ON organizations USIN
 
 -- =============================================================================
 -- TRIGGERS FOR UPDATED_AT TIMESTAMPS
+-- (PostgreSQL does not support CREATE TRIGGER IF NOT EXISTS; use DROP IF EXISTS first.)
 -- =============================================================================
 
-CREATE TRIGGER IF NOT EXISTS update_user_manual_inputs_updated_at 
+DROP TRIGGER IF EXISTS update_user_manual_inputs_updated_at ON user_manual_inputs;
+CREATE TRIGGER update_user_manual_inputs_updated_at
     BEFORE UPDATE ON user_manual_inputs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_generated_visual_content_updated_at 
+DROP TRIGGER IF EXISTS update_generated_visual_content_updated_at ON generated_visual_content;
+CREATE TRIGGER update_generated_visual_content_updated_at
     BEFORE UPDATE ON generated_visual_content
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
