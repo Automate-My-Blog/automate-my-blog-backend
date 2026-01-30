@@ -1,0 +1,46 @@
+# Deploy via GitHub Actions: test → vercel build → vercel deploy --prebuilt.
+# Logs live in Actions for easier debugging. Disable Vercel "Deploy on Git push"
+# in Project Settings so only this workflow deploys.
+# Runs only on push to main; PRs are validated by the Build workflow (npm ci + npm run build).
+name: Deploy
+on:
+  push:
+    branches: [main]
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run tests
+        run: npm run build
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-jwt-secret-do-not-use-in-production
+          JWT_REFRESH_SECRET: test-refresh-secret
+          STRIPE_WEBHOOK_SECRET: whsec_test_secret
+          STRIPE_SECRET_KEY: sk_test_dummy
+          OPENAI_API_KEY: sk-dummy-for-tests
+
+      - name: Pull Vercel env
+        run: npx vercel@latest pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel build
+        run: npx vercel@latest build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Vercel deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npx vercel@latest deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
