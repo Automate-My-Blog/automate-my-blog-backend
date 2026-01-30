@@ -30,7 +30,7 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - name: Install PostgreSQL client (cached)
-        uses: awalsh128/cache-apt-pkgs-action@v1.3.1
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.0
         with:
           packages: postgresql-client
           version: 1
