@@ -13,6 +13,7 @@ The following workflows are **already implemented** and running in this reposito
 - ✅ **Dependency Update Check** (`.github/workflows/dependency-check.yml`) - Weekly check for outdated packages
 - ✅ **Database Schema Diff Check** (`.github/workflows/schema-diff.yml`) - Shows schema changes in PR comments
 - ✅ **Database Migration Validation** (`.github/workflows/migration-validation.yml`) - Validates SQL syntax and migration order on PRs that touch `database/`
+- ✅ **API Endpoint Smoke Test** (`.github/workflows/smoke-test.yml`) - Starts server and hits `/health` on PRs and pushes
 - ✅ **Auto-Close Stale Issues** (`.github/workflows/stale-issues.yml`) - Automatically manages stale issues
 - ✅ **Test Suite** (`.github/workflows/test.yml`) - Runs test suite on PRs
 
@@ -58,11 +59,13 @@ The workflow spins up a test Postgres instance and validates all SQL files in yo
 
 ---
 
-## 5. API Endpoint Smoke Tests ⚡ (30 min)
+## 5. API Endpoint Smoke Tests ⚡ (30 min) ✅ IMPLEMENTED
 
 This is a basic smoke test - it starts your server and hits the `/health` endpoint to make sure nothing's completely broken. It's not comprehensive testing, but it catches server startup issues and basic endpoint failures. Good for catching "oops, I broke the server" moments before merge.
 
 The workflow installs dependencies, starts the server, waits for it to be ready, and then tests the health endpoint. You can extend this to test more endpoints, but starting with the health check is a good baseline.
+
+**Implementation:** `.github/workflows/smoke-test.yml` - Runs on push and PR to main/test/unit-tests; spins up Postgres 16, runs `setup-test-db.sh`, starts the app with test env, waits for server (curl loop), then `curl -sf http://localhost:3001/health`; fails the job if server doesn't start or health returns non-2xx.
 
 ---
 
@@ -167,7 +170,7 @@ Here's a quick breakdown:
 | Env Var Check | 10 min | High | ⭐⭐⭐ |
 | Code Quality | 15 min | Medium | ⭐⭐ |
 | Migration Validation | 20 min | High | ⭐⭐⭐ ✅ |
-| Smoke Tests | 30 min | Medium | ⭐⭐ |
+| Smoke Tests | 30 min | Medium | ⭐⭐ ✅ |
 | Auto-Deploy | 20 min | High | ⭐⭐⭐ |
 | PR Size Check | 5 min | Low | ⭐ |
 | Dependency Check | 10 min | Medium | ⭐⭐ |
