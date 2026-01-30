@@ -1,3 +1,4 @@
+# Caching: setup-node cache: 'npm' (npm ci), cache-apt-pkgs (postgresql-client)
 name: Test
 on:
   push:
@@ -28,8 +29,11 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install PostgreSQL client (cached)
+        uses: awalsh128/cache-apt-pkgs-action@v1.6.0
+        with:
+          packages: postgresql-client
+          version: 1
       - name: Setup test database
         run: bash scripts/setup-test-db.sh
         env:
