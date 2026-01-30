@@ -119,6 +119,14 @@ router.post('/subscribe',  async (req, res) => {
       ? bundlePricing.bundleAnnual
       : bundlePricing.bundleMonthly;
 
+    console.log('💰 Creating bundle Stripe price:', {
+      amount,
+      billingInterval,
+      strategyCount: bundlePricing.strategyCount,
+      bundleMonthly: bundlePricing.bundleMonthly,
+      bundleAnnual: bundlePricing.bundleAnnual
+    });
+
     const bundlePrice = await stripe.prices.create({
       unit_amount: Math.round(amount * 100), // Convert to cents
       currency: 'usd',
@@ -140,7 +148,10 @@ router.post('/subscribe',  async (req, res) => {
       }
     });
 
+    console.log('✅ Bundle Stripe price created:', bundlePrice.id);
+
     // Create Checkout Session
+    console.log('🛒 Creating Stripe checkout session...');
     const session = await stripe.checkout.sessions.create({
       customer_email: req.user.email,
       line_items: [{
@@ -169,8 +180,20 @@ router.post('/subscribe',  async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating bundle subscription:', error);
-    res.status(500).json({ error: 'Failed to create bundle subscription' });
+    console.error('❌ Error creating bundle subscription:', {
+      message: error.message,
+      type: error.type,
+      code: error.code,
+      statusCode: error.statusCode,
+      stack: error.stack
+    });
+
+    // Return detailed error for debugging
+    res.status(500).json({
+      error: 'Failed to create bundle subscription',
+      message: error.message,
+      details: error.type || error.code || 'Unknown error'
+    });
   }
 });
 
