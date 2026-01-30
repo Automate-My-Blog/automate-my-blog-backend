@@ -249,7 +249,7 @@ router.get('/subscribed',  async (req, res) => {
         a.pitch,
         a.target_segment,
         a.customer_problem,
-        a.seo_keywords,
+        a.customer_language,
         a.image_url,
         a.pricing_monthly,
         a.pricing_annual
@@ -281,7 +281,7 @@ router.get('/subscribed',  async (req, res) => {
         pitch: row.pitch,
         targetSegment: typeof row.target_segment === 'string' ? JSON.parse(row.target_segment) : row.target_segment,
         customerProblem: row.customer_problem,
-        seoKeywords: row.seo_keywords,
+        customerLanguage: row.customer_language,
         imageUrl: row.image_url,
         pricingMonthly: row.pricing_monthly ? parseFloat(row.pricing_monthly) : null,
         pricingAnnual: row.pricing_annual ? parseFloat(row.pricing_annual) : null
