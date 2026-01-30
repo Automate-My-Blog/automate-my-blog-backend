@@ -312,28 +312,19 @@ COMMENT ON COLUMN organizations.blog_generation_settings IS 'User preferences fo
 -- GRANT PERMISSIONS
 -- =============================================================================
 
--- Grant permissions (skip if authenticated_user role does not exist, e.g. test DB)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated_user') THEN
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON user_manual_inputs TO authenticated_user';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON generated_visual_content TO authenticated_user';
-    EXECUTE 'GRANT SELECT ON enhanced_organization_view TO authenticated_user';
-    EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user';
-  END IF;
-END $$;
+-- Grant permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON user_manual_inputs TO authenticated_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON generated_visual_content TO authenticated_user;
+GRANT SELECT ON enhanced_organization_view TO authenticated_user;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
 
 -- =============================================================================
 -- INSERT SCHEMA VERSION TRACKING
 -- =============================================================================
 
--- Schema version tracking (skip if schema_versions table does not exist, e.g. test DB)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_versions') THEN
-    INSERT INTO schema_versions (version, description, applied_at) VALUES (16, 'Enhanced Blog Generation: Manual Inputs & Visual Content', NOW()) ON CONFLICT (version) DO NOTHING;
-  END IF;
-END $$;
+INSERT INTO schema_versions (version, description, applied_at)
+VALUES (16, 'Enhanced Blog Generation: Manual Inputs & Visual Content', NOW())
+ON CONFLICT (version) DO NOTHING;
 
 -- =============================================================================
 -- LOG COMPLETION

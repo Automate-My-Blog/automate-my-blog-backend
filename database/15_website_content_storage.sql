@@ -403,31 +403,22 @@ COMMENT ON COLUMN content_analysis_results.analysis_completeness IS 'Percentage 
 -- GRANT PERMISSIONS
 -- =============================================================================
 
--- Grant permissions (skip if authenticated_user role does not exist, e.g. test DB)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated_user') THEN
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON website_pages TO authenticated_user';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON cta_analysis TO authenticated_user';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON internal_linking_analysis TO authenticated_user';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON content_analysis_results TO authenticated_user';
-    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON manual_content_uploads TO authenticated_user';
-    EXECUTE 'GRANT SELECT ON comprehensive_website_analysis_view TO authenticated_user';
-    EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user';
-  END IF;
-END $$;
+-- Grant permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON website_pages TO authenticated_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON cta_analysis TO authenticated_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON internal_linking_analysis TO authenticated_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON content_analysis_results TO authenticated_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON manual_content_uploads TO authenticated_user;
+GRANT SELECT ON comprehensive_website_analysis_view TO authenticated_user;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
 
 -- =============================================================================
 -- INSERT SCHEMA VERSION TRACKING
 -- =============================================================================
 
--- Schema version tracking (skip if schema_versions table does not exist, e.g. test DB)
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_versions') THEN
-    INSERT INTO schema_versions (version, description, applied_at) VALUES (15, 'Website Content Storage & Analysis Tables', NOW()) ON CONFLICT (version) DO NOTHING;
-  END IF;
-END $$;
+INSERT INTO schema_versions (version, description, applied_at)
+VALUES (15, 'Website Content Storage & Analysis Tables', NOW())
+ON CONFLICT (version) DO NOTHING;
 
 -- =============================================================================
 -- LOG COMPLETION
