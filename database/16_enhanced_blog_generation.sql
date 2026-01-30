@@ -312,11 +312,16 @@ COMMENT ON COLUMN organizations.blog_generation_settings IS 'User preferences fo
 -- GRANT PERMISSIONS
 -- =============================================================================
 
--- Grant permissions (assuming standard user roles exist)
-GRANT SELECT, INSERT, UPDATE, DELETE ON user_manual_inputs TO authenticated_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON generated_visual_content TO authenticated_user;
-GRANT SELECT ON enhanced_organization_view TO authenticated_user;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
+-- Grant permissions (skip if authenticated_user role does not exist, e.g. test DB)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated_user') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON user_manual_inputs TO authenticated_user';
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON generated_visual_content TO authenticated_user';
+    EXECUTE 'GRANT SELECT ON enhanced_organization_view TO authenticated_user';
+    EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user';
+  END IF;
+END $$;
 
 -- =============================================================================
 -- INSERT SCHEMA VERSION TRACKING

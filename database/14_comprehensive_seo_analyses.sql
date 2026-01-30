@@ -88,6 +88,11 @@ BEGIN
   END IF;
 END $$;
 
--- Grant permissions (assuming standard user roles exist)
-GRANT SELECT, INSERT, UPDATE, DELETE ON comprehensive_seo_analyses TO authenticated_user;
-GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user;
+-- Grant permissions (skip if authenticated_user role does not exist, e.g. test DB)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated_user') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON comprehensive_seo_analyses TO authenticated_user';
+    EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated_user';
+  END IF;
+END $$;
