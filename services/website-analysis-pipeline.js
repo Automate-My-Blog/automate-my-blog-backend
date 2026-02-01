@@ -202,9 +202,95 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   const { organizationId, storedCTAs } = await persistAnalysis(url, analysis, scrapedContent, { userId, sessionId });
   report(0, PROGRESS_STEPS[0], 100, 0);
 
+  // Generate narrative analysis
+  try {
+    console.log('📝 Generating narrative analysis for organization:', organizationId);
+
+    // Get the intelligence data we just stored
+    const intelligenceResult = await db.query(
+      `SELECT customer_language_patterns, customer_scenarios, search_behavior_insights,
+              seo_opportunities, content_strategy_recommendations, business_value_assessment
+       FROM organization_intelligence
+       WHERE organization_id = $1 AND is_current = TRUE
+       LIMIT 1`,
+      [organizationId]
+    );
+
+    const intelligenceData = intelligenceResult.rows[0] || {};
+
+    // Generate narrative from all the data
+    const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
+      {
+        businessName: analysis.businessName || analysis.companyName,
+        businessType: analysis.businessType,
+        description: analysis.description,
+        businessModel: analysis.businessModel,
+        decisionMakers: analysis.decisionMakers,
+        endUsers: analysis.endUsers,
+        searchBehavior: analysis.searchBehavior,
+        contentFocus: analysis.contentFocus,
+        websiteGoals: analysis.websiteGoals,
+        blogStrategy: analysis.blogStrategy
+      },
+      intelligenceData,
+      storedCTAs
+    );
+
+    // Store narrative in database
+    await db.query(
+      `UPDATE organization_intelligence
+       SET narrative_analysis = $1,
+           narrative_confidence = $2,
+           key_insights = $3,
+           updated_at = NOW()
+       WHERE organization_id = $4 AND is_current = TRUE`,
+      [
+        narrativeAnalysis.narrative,
+        narrativeAnalysis.confidence,
+        JSON.stringify(narrativeAnalysis.keyInsights),
+        organizationId
+      ]
+    );
+
+    console.log('✅ Narrative analysis generated and stored successfully');
+  } catch (error) {
+    console.error('❌ Error generating narrative analysis:', error);
+    // Don't fail the whole pipeline if narrative generation fails
+  }
+
+  // Query existing audiences to avoid duplicates
+  let existingAudiences = [];
+  try {
+    let whereConditions = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    if (userId) {
+      whereConditions.push(`user_id = $${paramIndex}`);
+      queryParams.push(userId);
+      paramIndex++;
+    } else if (sessionId) {
+      whereConditions.push(`session_id = $${paramIndex}`);
+      queryParams.push(sessionId);
+      paramIndex++;
+    }
+
+    if (whereConditions.length > 0) {
+      const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+      const result = await db.query(
+        `SELECT target_segment, customer_problem FROM audiences ${whereClause} ORDER BY created_at DESC`,
+        queryParams
+      );
+      existingAudiences = result.rows;
+      console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', error.message);
+  }
+
   report(1, PROGRESS_STEPS[1], 0, 45);
   if (await checkCancelled()) throw new Error('Cancelled');
-  let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '');
+  let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
   report(1, PROGRESS_STEPS[1], 100, 0);
 
   const businessContext = {

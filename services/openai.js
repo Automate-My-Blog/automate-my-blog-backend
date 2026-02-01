@@ -318,6 +318,121 @@ VALIDATION RULES:
   }
 
   /**
+   * Generate narrative analysis from website analysis data
+   * Transforms field-by-field data into consultative narrative format
+   */
+  async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
+    console.log('📝 Generating narrative website analysis...');
+
+    const prompt = `You're a business consultant analyzing a client's website and market position. Write a consultative, narrative-driven analysis that helps them understand their business and opportunities.
+
+Here's what we discovered about their business:
+
+**Business Basics:**
+- Name: ${analysisData.businessName}
+- Type: ${analysisData.businessType}
+- Description: ${analysisData.description}
+- Business Model: ${analysisData.businessModel}
+
+**Customer Intelligence:**
+- Decision Makers: ${analysisData.decisionMakers}
+- End Users: ${analysisData.endUsers}
+- Search Behavior: ${analysisData.searchBehavior}
+- Content Focus: ${analysisData.contentFocus}
+${intelligenceData.customer_language_patterns ? `- Customer Language: ${JSON.stringify(intelligenceData.customer_language_patterns)}` : ''}
+${intelligenceData.customer_scenarios ? `- Customer Scenarios: ${JSON.stringify(intelligenceData.customer_scenarios)}` : ''}
+
+**Website & Conversion:**
+- Website Goals: ${analysisData.websiteGoals}
+- Blog Strategy: ${analysisData.blogStrategy}
+${ctaData && ctaData.length > 0 ? `- CTAs Found: ${ctaData.map(c => c.cta_text).join(', ')}` : ''}
+
+**Strategic Insights:**
+${intelligenceData.seo_opportunities ? `- SEO Opportunities: ${intelligenceData.seo_opportunities}` : ''}
+${intelligenceData.content_strategy_recommendations ? `- Content Recommendations: ${intelligenceData.content_strategy_recommendations}` : ''}
+${intelligenceData.business_value_assessment ? `- Value Assessment: ${intelligenceData.business_value_assessment}` : ''}
+
+Write a narrative analysis with this EXACT structure:
+
+**About Your Business:**
+[2-3 sentences showing deep understanding of what they do, who they serve, and what problems they solve. Reference specific facts from above.]
+
+**Customer Search Patterns:**
+[1-2 sentences about when/how customers search, then a bulleted list of 3-5 specific phrases customers use. Add 1 sentence about search urgency/intent.]
+
+**What We Found on Your Site:**
+[2-3 sentences about their conversion goals, CTAs, and how their blog/content can support these goals. Be specific about what we saw.]
+
+**Strategic Opportunity:**
+[2-3 sentences connecting customer scenarios to content opportunities. Reference specific high-value topics or scenarios. Show the connection between search behavior and business value.]
+
+**The Question:**
+[One strategic question that makes them think about conversion math and ROI. Similar to: "If content could bring you [X] of these searching customers per month, how many would need to convert to make this approach valuable to your business?"]
+
+TONE REQUIREMENTS:
+- Consultative and analytical (like a business advisor presenting findings)
+- Data-driven (reference specific facts we found)
+- Forward-looking (focus on opportunities, not problems)
+- Use phrases like "We found", "Your customers are", "This positions you"
+- NO sales language like "unlock potential", "maximize ROI", "game-changing"
+- Sound like you're presenting research findings, not selling
+
+FORMATTING REQUIREMENTS:
+- Use **bold** for section headers
+- Use bullet points (•) for lists
+- Use line breaks between sections for readability
+- Keep sentences concise and impactful
+
+Format your response as JSON:
+{
+  "narrative": "The full narrative with all sections formatted as specified above",
+  "confidence": <0-1 score based on data quality>,
+  "keyInsights": [
+    "Insight 1 (one sentence)",
+    "Insight 2 (one sentence)",
+    "Insight 3 (one sentence)"
+  ]
+}`;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a business consultant analyzing market data and presenting findings. You communicate in a data-driven, analytical style that builds trust through demonstrated understanding. You sound like you\'re presenting research findings, not selling.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.7
+      });
+
+      const result = JSON.parse(completion.choices[0].message.content);
+
+      console.log('✅ Successfully generated narrative analysis');
+
+      return {
+        narrative: result.narrative,
+        confidence: result.confidence || 0.8,
+        keyInsights: result.keyInsights || [],
+        isAIGenerated: true
+      };
+
+    } catch (error) {
+      console.error('❌ Error generating narrative:', error);
+
+      // Fallback to basic narrative
+      return {
+        narrative: `**About Your Business:**\n${analysisData.businessName} is a ${analysisData.businessType} serving ${analysisData.endUsers}. ${analysisData.description}\n\n**Customer Search Patterns:**\nYour customers search for solutions when ${analysisData.searchBehavior}.\n\n**Strategic Opportunity:**\nContent focused on ${analysisData.contentFocus} can help you reach customers at key decision moments.`,
+        confidence: 0.5,
+        keyInsights: [],
+        isAIGenerated: false
+      };
+    }
+  }
+
+  /**
    * Generate trending topics for a specific industry
    */
   async generateTrendingTopics(businessType, targetAudience, contentFocus) {
@@ -1440,24 +1555,64 @@ Be SPECIFIC - use actual percentages, user counts, and measurable expected outco
    * @param {Object} analysisData - Basic website analysis data
    * @param {String} webSearchData - Web search research data
    * @param {String} keywordData - Keyword research data
+   * @param {Array} existingAudiences - Existing audiences to avoid duplication
    * @returns {Promise<Array>} Array of scenarios without pitches
    */
-  async generateAudienceScenarios(analysisData, webSearchData = '', keywordData = '') {
+  async generateAudienceScenarios(analysisData, webSearchData = '', keywordData = '', existingAudiences = []) {
     try {
-      console.log('🎯 Generating audience scenarios (without pitches)...');
+      const isIncrementalAnalysis = existingAudiences.length > 0;
+      console.log(`🎯 Generating audience scenarios (${isIncrementalAnalysis ? 'INCREMENTAL' : 'INITIAL'})...`);
+      if (isIncrementalAnalysis) {
+        console.log(`📊 Deduplication: ${existingAudiences.length} existing audiences to avoid`);
+      } else {
+        console.log(`📊 Initial analysis: Generating comprehensive starting set`);
+      }
 
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+
+      // Format existing audiences for the prompt
+      let existingAudiencesText = '';
+      if (existingAudiences.length > 0) {
+        const audienceDescriptions = existingAudiences.map((aud, idx) => {
+          let demographics = 'Unknown demographics';
+          try {
+            const parsed = typeof aud.target_segment === 'string' ? JSON.parse(aud.target_segment) : aud.target_segment;
+            demographics = parsed?.demographics || 'Unknown demographics';
+          } catch (e) {
+            // Fallback if parsing fails
+          }
+          return `${idx + 1}. ${aud.customer_problem} - ${demographics}`;
+        }).join('\n');
+
+        existingAudiencesText = `
+
+EXISTING AUDIENCES (DO NOT DUPLICATE):
+You have already created ${existingAudiences.length} audience(s) for this user/website:
+${audienceDescriptions}
+
+CRITICAL: Generate ONLY net new audiences that are completely different from the above. Focus on different demographics, different customer problems, and different psychographic segments.`;
+      }
+
+      // Adjust instructions based on whether this is initial or incremental analysis
+      const systemPrompt = isIncrementalAnalysis
+        ? `You are a customer psychology expert focused on audience research and segmentation. Generate additional audience scenarios only when they represent genuine business opportunities. Quality over quantity - it's better to suggest 1-2 excellent incremental audiences than to force unnecessary ones. You must avoid duplicating existing audiences and only suggest new segments if they would genuinely benefit the business.`
+        : `You are a customer psychology expert focused on audience research and segmentation. Generate detailed audience scenarios for content marketing. This is an initial analysis, so provide a comprehensive starting set of 4-5 distinct, high-value audience opportunities.`;
+
+      const targetCount = isIncrementalAnalysis ? '1-2 additional' : '4-5';
+      const qualityNote = isIncrementalAnalysis
+        ? '- Generate 1-2 additional audience scenarios ONLY if they represent genuine, valuable opportunities beyond what already exists\n- Each audience must have strong business value and conversion potential\n- Do NOT force audiences just to reach a certain number\n- If no strong additional audiences exist beyond what\'s already covered, return fewer audiences or an empty array'
+        : '- Generate 4-5 distinct audience scenarios that represent the best opportunities for this business\n- Each audience must have strong business value and conversion potential\n- Cover the breadth of customer segments who would benefit from this business';
 
       const completion = await openai.chat.completions.create({
         model: model,
         messages: [
           {
             role: 'system',
-            content: `You are a customer psychology expert focused on audience research and segmentation. Generate detailed audience scenarios for content marketing.`
+            content: systemPrompt
           },
           {
             role: 'user',
-            content: `Based on this business analysis, generate 4-5 distinct audience scenarios:
+            content: `Based on this business analysis, identify ${targetCount} genuine audience opportunities:
 
 Business Context:
 - Business Type: ${analysisData.businessType}
@@ -1466,9 +1621,13 @@ Business Context:
 - Business Model: ${analysisData.businessModel}
 - Content Focus: ${analysisData.contentFocus}
 ${webSearchData}
-${keywordData}
+${keywordData}${existingAudiencesText}
 
-Generate scenarios as JSON array. Each scenario MUST have UNIQUE demographics (different age ranges, life stages, etc.):
+CRITICAL INSTRUCTIONS:
+${qualityNote}
+- Each scenario MUST have UNIQUE demographics (different age ranges, life stages, etc.)${isIncrementalAnalysis ? ' from existing audiences' : ''}
+
+Generate scenarios as JSON array:
 
 [
   {
@@ -1497,7 +1656,7 @@ Generate scenarios as JSON array. Each scenario MUST have UNIQUE demographics (d
   }
 ]
 
-CRITICAL: Each scenario must target DIFFERENT demographics. Order by priority (highest value first).`
+Return only audiences with strong business potential. If no strong additional audiences exist, return an empty array []. Each scenario must target DIFFERENT demographics from existing audiences. Order by priority (highest value first).`
           }
         ],
         temperature: 0.3,

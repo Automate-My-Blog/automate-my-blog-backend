@@ -146,7 +146,12 @@ router.post('/adopt-session', async (req, res) => {
         dataSources: intelData.data_sources,
         aiModelUsed: intelData.ai_model_used,
         rawOpenaiResponse: intelData.raw_openai_response,
-        isCurrent: intelData.is_current
+        isCurrent: intelData.is_current,
+
+        // Narrative analysis
+        narrative: intelData.narrative_analysis,
+        narrativeConfidence: intelData.narrative_confidence,
+        keyInsights: intelData.key_insights
       };
 
       // Format response following same pattern as other adoption endpoints
@@ -227,7 +232,10 @@ router.get('/recent', async (req, res) => {
         oi.ai_model_used,
         oi.raw_openai_response,
         oi.is_current,
-        oi.created_at as intelligence_created_at
+        oi.created_at as intelligence_created_at,
+        oi.narrative_analysis,
+        oi.narrative_confidence,
+        oi.key_insights
         
       FROM organizations o
       LEFT JOIN organization_intelligence oi ON o.id = oi.organization_id AND oi.is_current = TRUE
@@ -268,7 +276,12 @@ router.get('/recent', async (req, res) => {
       seoOpportunities: safeParse(record.seo_opportunities, 'seo_opportunities', record.org_id) || {},
       contentStrategyRecommendations: safeParse(record.content_strategy_recommendations, 'content_strategy_recommendations', record.org_id) || [],
       competitiveIntelligence: safeParse(record.competitive_intelligence, 'competitive_intelligence', record.org_id) || {},
-      
+
+      // Narrative analysis
+      narrative: record.narrative_analysis,
+      narrativeConfidence: record.narrative_confidence,
+      keyInsights: safeParse(record.key_insights, 'key_insights', record.org_id) || [],
+
       // Analysis metadata
       analysisConfidenceScore: record.analysis_confidence_score,
       dataSources: safeParse(record.data_sources, 'data_sources', record.org_id) || [],

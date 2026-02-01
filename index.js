@@ -52,9 +52,11 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', 1);
 
 // Rate limiting with Vercel-compatible configuration
+// Higher limits for development, stricter for production
+const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  max: isDevelopment ? 1000 : 100, // Higher limit for dev (1000), stricter for production (100)
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
@@ -1108,13 +1110,117 @@ app.post('/api/analyze-website', async (req, res) => {
       }
     }
 
+    // Generate narrative analysis
+    let narrativeData = {};
+    console.log('🔍 [NARRATIVE] Starting narrative generation check:', {
+      hasOrganizationId: !!foundOrganizationId,
+      organizationId: foundOrganizationId,
+      hasAnalysis: !!analysis,
+      businessName: analysis?.businessName || analysis?.companyName
+    });
+
+    if (foundOrganizationId) {
+      try {
+        console.log('📝 [NARRATIVE] Generating narrative analysis for organization:', foundOrganizationId);
+
+        // Get the intelligence data we just stored
+        const intelligenceResult = await db.query(
+          `SELECT customer_language_patterns, customer_scenarios, search_behavior_insights,
+                  seo_opportunities, content_strategy_recommendations, business_value_assessment
+           FROM organization_intelligence
+           WHERE organization_id = $1 AND is_current = TRUE
+           LIMIT 1`,
+          [foundOrganizationId]
+        );
+
+        const intelligenceData = intelligenceResult.rows[0] || {};
+        console.log('📊 [NARRATIVE] Intelligence data fetched:', {
+          hasData: !!intelligenceData,
+          hasLanguagePatterns: !!intelligenceData.customer_language_patterns,
+          hasScenarios: !!intelligenceData.customer_scenarios
+        });
+
+        const narrativeInput = {
+          businessName: analysis.businessName || analysis.companyName,
+          businessType: analysis.businessType,
+          description: analysis.description,
+          businessModel: analysis.businessModel,
+          decisionMakers: analysis.decisionMakers,
+          endUsers: analysis.endUsers,
+          searchBehavior: analysis.searchBehavior,
+          contentFocus: analysis.contentFocus,
+          websiteGoals: analysis.websiteGoals,
+          blogStrategy: analysis.blogStrategy
+        };
+
+        console.log('🎯 [NARRATIVE] Calling generateWebsiteAnalysisNarrative with:', {
+          businessName: narrativeInput.businessName,
+          businessType: narrativeInput.businessType,
+          ctaCount: storedCTAs.length
+        });
+
+        // Generate narrative from all the data
+        const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
+          narrativeInput,
+          intelligenceData,
+          storedCTAs
+        );
+
+        console.log('✨ [NARRATIVE] Narrative generated:', {
+          hasNarrative: !!narrativeAnalysis.narrative,
+          narrativeLength: narrativeAnalysis.narrative?.length || 0,
+          confidence: narrativeAnalysis.confidence,
+          keyInsightsCount: narrativeAnalysis.keyInsights?.length || 0,
+          narrativePreview: narrativeAnalysis.narrative?.substring(0, 100)
+        });
+
+        // Store narrative in database
+        await db.query(
+          `UPDATE organization_intelligence
+           SET narrative_analysis = $1,
+               narrative_confidence = $2,
+               key_insights = $3,
+               updated_at = NOW()
+           WHERE organization_id = $4 AND is_current = TRUE`,
+          [
+            narrativeAnalysis.narrative,
+            narrativeAnalysis.confidence,
+            JSON.stringify(narrativeAnalysis.keyInsights),
+            foundOrganizationId
+          ]
+        );
+
+        console.log('✅ [NARRATIVE] Narrative stored in database successfully');
+
+        // Add narrative to response
+        narrativeData = {
+          narrative: narrativeAnalysis.narrative,
+          narrativeConfidence: narrativeAnalysis.confidence,
+          keyInsights: narrativeAnalysis.keyInsights
+        };
+
+        console.log('📦 [NARRATIVE] Narrative data prepared for response:', {
+          hasNarrative: !!narrativeData.narrative,
+          hasConfidence: !!narrativeData.narrativeConfidence,
+          hasInsights: !!narrativeData.keyInsights
+        });
+      } catch (error) {
+        console.error('❌ [NARRATIVE] Error generating narrative analysis:', error.message);
+        console.error('❌ [NARRATIVE] Error stack:', error.stack);
+        // Don't fail the whole request if narrative generation fails
+      }
+    } else {
+      console.log('⚠️ [NARRATIVE] Skipping narrative generation - no organization ID');
+    }
+
     const response = {
       success: true,
       url,
       scrapedAt: scrapedContent.scrapedAt,
       analysis: {
         ...analysis,
-        organizationId: foundOrganizationId  // Add organizationId for frontend
+        organizationId: foundOrganizationId,  // Add organizationId for frontend
+        ...narrativeData  // Add narrative fields to analysis
       },
       metadata: {
         title: scrapedContent.title,
@@ -1128,6 +1234,13 @@ app.post('/api/analyze-website', async (req, res) => {
     console.log('📊 [CTA DEBUG] Sending response with CTAs:', {
       ctaCount: storedCTAs.length,
       hasOrganizationId: !!foundOrganizationId
+    });
+    console.log('📤 [NARRATIVE] Final response analysis object:', {
+      hasNarrative: !!response.analysis.narrative,
+      narrativeLength: response.analysis.narrative?.length || 0,
+      hasNarrativeConfidence: !!response.analysis.narrativeConfidence,
+      hasKeyInsights: !!response.analysis.keyInsights,
+      keyInsightsCount: response.analysis.keyInsights?.length || 0
     });
     console.log('Sending successful response');
     res.json(response);
@@ -1162,10 +1275,44 @@ app.post('/api/generate-audiences', async (req, res) => {
 
     console.log('Generating audience scenarios for:', analysisData.businessName);
 
+    // Query existing audiences to avoid duplicates
+    let existingAudiences = [];
+    try {
+      const sessionId = req.headers['x-session-id'];
+      const userId = req.user?.userId;
+
+      let whereConditions = [];
+      let queryParams = [];
+      let paramIndex = 1;
+
+      if (userId) {
+        whereConditions.push(`user_id = $${paramIndex}`);
+        queryParams.push(userId);
+        paramIndex++;
+      } else if (sessionId) {
+        whereConditions.push(`session_id = $${paramIndex}`);
+        queryParams.push(sessionId);
+        paramIndex++;
+      }
+
+      if (whereConditions.length > 0) {
+        const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+        const result = await db.query(
+          `SELECT target_segment, customer_problem FROM audiences ${whereClause} ORDER BY created_at DESC`,
+          queryParams
+        );
+        existingAudiences = result.rows;
+        console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', error.message);
+    }
+
     const scenarios = await openaiService.generateAudienceScenarios(
       analysisData,
       webSearchData || '',
-      keywordData || ''
+      keywordData || '',
+      existingAudiences
     );
 
     res.json({
