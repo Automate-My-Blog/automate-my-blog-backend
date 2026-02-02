@@ -1110,107 +1110,81 @@ app.post('/api/analyze-website', async (req, res) => {
       }
     }
 
-    // Generate narrative analysis
-    let narrativeData = {};
-    console.log('🔍 [NARRATIVE] Starting narrative generation check:', {
-      hasOrganizationId: !!foundOrganizationId,
-      organizationId: foundOrganizationId,
-      hasAnalysis: !!analysis,
-      businessName: analysis?.businessName || analysis?.companyName
-    });
+    // Generate narrative analysis ASYNC (fire and forget - don't block response)
+    let narrativeData = { narrativeGenerating: true };
 
     if (foundOrganizationId) {
-      try {
-        console.log('📝 [NARRATIVE] Generating narrative analysis for organization:', foundOrganizationId);
+      console.log('🔍 [NARRATIVE] Starting async narrative generation for:', foundOrganizationId);
 
-        // Get the intelligence data we just stored
-        const intelligenceResult = await db.query(
-          `SELECT customer_language_patterns, customer_scenarios, search_behavior_insights,
-                  seo_opportunities, content_strategy_recommendations, business_value_assessment
-           FROM organization_intelligence
-           WHERE organization_id = $1 AND is_current = TRUE
-           LIMIT 1`,
-          [foundOrganizationId]
-        );
+      // Fire and forget - don't await
+      (async () => {
+        try {
+          console.log('📝 [NARRATIVE] Generating narrative analysis asynchronously...');
 
-        const intelligenceData = intelligenceResult.rows[0] || {};
-        console.log('📊 [NARRATIVE] Intelligence data fetched:', {
-          hasData: !!intelligenceData,
-          hasLanguagePatterns: !!intelligenceData.customer_language_patterns,
-          hasScenarios: !!intelligenceData.customer_scenarios
-        });
+          // Get the intelligence data
+          const intelligenceResult = await db.query(
+            `SELECT customer_language_patterns, customer_scenarios, search_behavior_insights,
+                    seo_opportunities, content_strategy_recommendations, business_value_assessment
+             FROM organization_intelligence
+             WHERE organization_id = $1 AND is_current = TRUE
+             LIMIT 1`,
+            [foundOrganizationId]
+          );
 
-        const narrativeInput = {
-          businessName: analysis.businessName || analysis.companyName,
-          businessType: analysis.businessType,
-          description: analysis.description,
-          businessModel: analysis.businessModel,
-          decisionMakers: analysis.decisionMakers,
-          endUsers: analysis.endUsers,
-          searchBehavior: analysis.searchBehavior,
-          contentFocus: analysis.contentFocus,
-          websiteGoals: analysis.websiteGoals,
-          blogStrategy: analysis.blogStrategy
-        };
+          const intelligenceData = intelligenceResult.rows[0] || {};
 
-        console.log('🎯 [NARRATIVE] Calling generateWebsiteAnalysisNarrative with:', {
-          businessName: narrativeInput.businessName,
-          businessType: narrativeInput.businessType,
-          ctaCount: storedCTAs.length
-        });
+          const narrativeInput = {
+            businessName: analysis.businessName || analysis.companyName,
+            businessType: analysis.businessType,
+            description: analysis.description,
+            businessModel: analysis.businessModel,
+            decisionMakers: analysis.decisionMakers,
+            endUsers: analysis.endUsers,
+            searchBehavior: analysis.searchBehavior,
+            contentFocus: analysis.contentFocus,
+            websiteGoals: analysis.websiteGoals,
+            blogStrategy: analysis.blogStrategy
+          };
 
-        // Generate narrative from all the data
-        const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
-          narrativeInput,
-          intelligenceData,
-          storedCTAs
-        );
+          // Generate narrative from all the data
+          const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
+            narrativeInput,
+            intelligenceData,
+            storedCTAs
+          );
 
-        console.log('✨ [NARRATIVE] Narrative generated:', {
-          hasNarrative: !!narrativeAnalysis.narrative,
-          narrativeLength: narrativeAnalysis.narrative?.length || 0,
-          confidence: narrativeAnalysis.confidence,
-          keyInsightsCount: narrativeAnalysis.keyInsights?.length || 0,
-          narrativePreview: narrativeAnalysis.narrative?.substring(0, 100)
-        });
+          console.log('✨ [NARRATIVE] Narrative generated asynchronously:', {
+            hasNarrative: !!narrativeAnalysis.narrative,
+            narrativeLength: narrativeAnalysis.narrative?.length || 0,
+            confidence: narrativeAnalysis.confidence
+          });
 
-        // Store narrative in database
-        await db.query(
-          `UPDATE organization_intelligence
-           SET narrative_analysis = $1,
-               narrative_confidence = $2,
-               key_insights = $3,
-               updated_at = NOW()
-           WHERE organization_id = $4 AND is_current = TRUE`,
-          [
-            narrativeAnalysis.narrative,
-            narrativeAnalysis.confidence,
-            JSON.stringify(narrativeAnalysis.keyInsights),
-            foundOrganizationId
-          ]
-        );
+          // Store narrative in database
+          await db.query(
+            `UPDATE organization_intelligence
+             SET narrative_analysis = $1,
+                 narrative_confidence = $2,
+                 key_insights = $3,
+                 updated_at = NOW()
+             WHERE organization_id = $4 AND is_current = TRUE`,
+            [
+              narrativeAnalysis.narrative,
+              narrativeAnalysis.confidence,
+              JSON.stringify(narrativeAnalysis.keyInsights),
+              foundOrganizationId
+            ]
+          );
 
-        console.log('✅ [NARRATIVE] Narrative stored in database successfully');
+          console.log('✅ [NARRATIVE] Narrative stored in database successfully');
+        } catch (error) {
+          console.error('❌ [NARRATIVE] Async error generating narrative:', error.message);
+        }
+      })();
 
-        // Add narrative to response
-        narrativeData = {
-          narrative: narrativeAnalysis.narrative,
-          narrativeConfidence: narrativeAnalysis.confidence,
-          keyInsights: narrativeAnalysis.keyInsights
-        };
-
-        console.log('📦 [NARRATIVE] Narrative data prepared for response:', {
-          hasNarrative: !!narrativeData.narrative,
-          hasConfidence: !!narrativeData.narrativeConfidence,
-          hasInsights: !!narrativeData.keyInsights
-        });
-      } catch (error) {
-        console.error('❌ [NARRATIVE] Error generating narrative analysis:', error.message);
-        console.error('❌ [NARRATIVE] Error stack:', error.stack);
-        // Don't fail the whole request if narrative generation fails
-      }
+      console.log('⚡ [NARRATIVE] Response sent immediately - narrative generating in background');
     } else {
       console.log('⚠️ [NARRATIVE] Skipping narrative generation - no organization ID');
+      narrativeData = {};
     }
 
     const response = {
@@ -1255,6 +1229,57 @@ app.post('/api/analyze-website', async (req, res) => {
     res.status(500).json({
       error: 'Analysis failed',
       message: error.message
+    });
+  }
+});
+
+// Fetch narrative analysis for organization (polling endpoint)
+app.get('/api/narrative/:organizationId', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    console.log('📖 [NARRATIVE-FETCH] Fetching narrative for organization:', organizationId);
+
+    const result = await db.query(
+      `SELECT narrative_analysis, narrative_confidence, key_insights
+       FROM organization_intelligence
+       WHERE organization_id = $1 AND is_current = TRUE
+       LIMIT 1`,
+      [organizationId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Organization not found'
+      });
+    }
+
+    const intelligence = result.rows[0];
+
+    // Check if narrative has been generated
+    if (intelligence.narrative_analysis) {
+      console.log('✅ [NARRATIVE-FETCH] Narrative found');
+      res.json({
+        success: true,
+        ready: true,
+        narrative: intelligence.narrative_analysis,
+        narrativeConfidence: intelligence.narrative_confidence,
+        keyInsights: intelligence.key_insights
+      });
+    } else {
+      console.log('⏳ [NARRATIVE-FETCH] Narrative still generating');
+      res.json({
+        success: true,
+        ready: false,
+        message: 'Narrative is still being generated'
+      });
+    }
+  } catch (error) {
+    console.error('❌ [NARRATIVE-FETCH] Error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

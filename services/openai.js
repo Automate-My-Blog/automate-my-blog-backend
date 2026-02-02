@@ -322,7 +322,9 @@ VALIDATION RULES:
    * Transforms field-by-field data into consultative narrative format
    */
   async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
-    console.log('📝 Generating narrative website analysis...');
+    console.log('📝 [NARRATIVE-GEN] Starting narrative generation');
+    console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
+    console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
 
     const prompt = `You're a business consultant analyzing a client's website and market position. Write a consultative, narrative-driven analysis that helps them understand their business and opportunities.
 
@@ -394,13 +396,25 @@ Format your response as JSON:
   ]
 }`;
 
+    console.log('📝 [NARRATIVE-GEN] Prompt length:', prompt.length);
+    console.log('📝 [NARRATIVE-GEN] Prompt contains "EXACT structure":', prompt.includes('EXACT structure'));
+    console.log('📝 [NARRATIVE-GEN] Prompt contains "**About Your Business:**":', prompt.includes('**About Your Business:**'));
+    console.log('📝 [NARRATIVE-GEN] First 300 chars of prompt:', prompt.substring(0, 300));
+
     try {
+      const systemMessage = 'You are a business consultant analyzing market data and presenting findings. You communicate in a data-driven, analytical style that builds trust through demonstrated understanding. You sound like you\'re presenting research findings, not selling.';
+
+      console.log('📝 [NARRATIVE-GEN] System message:', systemMessage);
+      console.log('📝 [NARRATIVE-GEN] Model: gpt-4o');
+      console.log('📝 [NARRATIVE-GEN] Response format: JSON');
+      console.log('📝 [NARRATIVE-GEN] Calling OpenAI API...');
+
       const completion = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
           {
             role: 'system',
-            content: 'You are a business consultant analyzing market data and presenting findings. You communicate in a data-driven, analytical style that builds trust through demonstrated understanding. You sound like you\'re presenting research findings, not selling.'
+            content: systemMessage
           },
           { role: 'user', content: prompt }
         ],
@@ -408,7 +422,18 @@ Format your response as JSON:
         temperature: 0.7
       });
 
+      console.log('📝 [NARRATIVE-GEN] OpenAI response received');
+
       const result = JSON.parse(completion.choices[0].message.content);
+
+      console.log('📝 [NARRATIVE-GEN] Parsed JSON result');
+      console.log('📝 [NARRATIVE-GEN] Result has narrative:', !!result.narrative);
+      console.log('📝 [NARRATIVE-GEN] Narrative length:', result.narrative?.length);
+      console.log('📝 [NARRATIVE-GEN] First 200 chars of narrative:', result.narrative?.substring(0, 200));
+      console.log('📝 [NARRATIVE-GEN] Narrative contains "**About Your Business:**":', result.narrative?.includes('**About Your Business:**'));
+      console.log('📝 [NARRATIVE-GEN] Narrative contains "**Customer Search Patterns:**":', result.narrative?.includes('**Customer Search Patterns:**'));
+      console.log('📝 [NARRATIVE-GEN] Confidence:', result.confidence);
+      console.log('📝 [NARRATIVE-GEN] Key insights count:', result.keyInsights?.length);
 
       console.log('✅ Successfully generated narrative analysis');
 
