@@ -18,14 +18,12 @@
 ## Dependencies
 
 - **Redis:** Required for job create, retry, and worker. Set `REDIS_URL` (e.g. `redis://localhost:6379`).
-- **PostgreSQL:** `jobs` table and CTA unique constraint. Run:
+- **PostgreSQL:** `jobs` table and CTA unique constraint. Apply:
 
-  ```bash
-  node run-migration-26.js
-  psql "$DATABASE_URL" -f database/27_cta_analysis_unique_constraint.sql
-  ```
+  - `database/26_jobs_table.sql` – creates the `jobs` table.
+  - `database/27_cta_analysis_unique_constraint.sql` – CTA constraint (if needed).
 
-  Or apply `database/26_jobs_table.sql` and `database/27_cta_analysis_unique_constraint.sql` manually.
+  With Neon: use the [Neon SQL Editor](https://console.neon.tech) and paste/run each file, or run `psql "$DATABASE_URL" -f database/26_jobs_table.sql` (and 27) locally with your Neon connection string. See **docs/redis-setup.md** for Neon-specific steps.
 
 - **Env:** Add to `.env`:
 

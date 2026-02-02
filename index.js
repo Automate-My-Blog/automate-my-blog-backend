@@ -45,6 +45,13 @@ import { startEmailScheduler } from './jobs/scheduler.js';
 // Load environment variables
 dotenv.config();
 
+if (!process.env.REDIS_URL) {
+  console.warn(
+    'REDIS_URL is not set. POST /api/v1/jobs/website-analysis and other job endpoints will return 503. ' +
+    'Set REDIS_URL (e.g. redis://localhost:6379) and run the job worker: node jobs/job-worker.js'
+  );
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 

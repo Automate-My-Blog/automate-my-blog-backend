@@ -64,7 +64,7 @@ router.post('/website-analysis', requireUserOrSession, async (req, res) => {
       return res.status(503).json({
         success: false,
         error: 'Service unavailable',
-        message: 'Job queue is not configured (REDIS_URL required)'
+        message: e.message || 'Job queue is not configured (REDIS_URL required)'
       });
     }
     console.error('POST /jobs/website-analysis error:', e);
@@ -120,7 +120,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       return res.status(503).json({
         success: false,
         error: 'Service unavailable',
-        message: 'Job queue is not configured (REDIS_URL required)'
+        message: e.message || 'Job queue is not configured (REDIS_URL required)'
       });
     }
     console.error('POST /jobs/content-generation error:', e);
@@ -188,7 +188,7 @@ router.post('/:jobId/retry', requireUserOrSession, async (req, res) => {
       return res.status(503).json({
         success: false,
         error: 'Service unavailable',
-        message: 'Job queue is not configured (REDIS_URL required)'
+        message: e.message || 'Job queue is not configured (REDIS_URL required)'
       });
     }
     console.error('POST /jobs/:jobId/retry error:', e);
