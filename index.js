@@ -71,19 +71,38 @@ const limiter = rateLimit({
 
 // Middleware
 app.use(limiter);
-// CORS configuration - restored to working version
+// CORS configuration - allow frontend origins (production, Vercel previews, local dev)
+const allowedOriginList = [
+  'https://automatemyblog.com',
+  'https://www.automatemyblog.com',
+  'https://automatemyblog.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3002',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'http://127.0.0.1:3002',
+  'http://127.0.0.1:5173',
+  'http://localhost:5173'
+];
+const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+const allAllowedOrigins = [...allowedOriginList, ...extraOrigins];
+
+function corsOrigin(origin, callback) {
+  // Same-origin or non-browser (no Origin header) - allow
+  if (!origin) return callback(null, true);
+  if (allAllowedOrigins.includes(origin)) return callback(null, true);
+  // Vercel preview deployments (*.vercel.app)
+  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return callback(null, true);
+  callback(null, false);
+}
+
 app.use(cors({
-  origin: [
-    'https://automatemyblog.com',
-    'https://www.automatemyblog.com',
-    'https://automatemyblog.vercel.app',
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002'
-  ],
+  origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id'],
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 204
 }));
 
 // Body parsing - raw for webhook, JSON for everything else
