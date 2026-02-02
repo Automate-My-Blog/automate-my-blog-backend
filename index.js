@@ -630,6 +630,9 @@ app.post('/api/analyze-website', async (req, res) => {
     }
 
     // Save analysis to organizations and organization intelligence tables with session support
+    // Declare foundOrganizationId here so it's accessible for narrative generation later
+    let foundOrganizationId = null;
+
     try {
       const sessionId = req.headers['x-session-id'];
       const token = req.headers.authorization?.replace('Bearer ', '');
@@ -863,8 +866,12 @@ app.post('/api/analyze-website', async (req, res) => {
           `INSERT INTO organization_intelligence (${intelInsertFields.join(', ')}) VALUES (${intelInsertPlaceholders})`,
           intelInsertValues
         );
-        
+
         console.log('✅ Created new organization intelligence record');
+
+        // ✅ FIX: Set foundOrganizationId to the newly created/updated organization
+        foundOrganizationId = organizationId;
+        console.log('✅ [ORG DEBUG] Set foundOrganizationId for narrative generation:', { foundOrganizationId });
 
       } else {
         console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
@@ -875,28 +882,31 @@ app.post('/api/analyze-website', async (req, res) => {
     }
 
     // Store CTAs regardless of whether organization save succeeded
-    // Find organization ID from database (created by lead capture or organization save)
-    // Declare variables outside try-catch so they're accessible for response building
-    let foundOrganizationId = null;
+    // foundOrganizationId is now already set from the organization creation above
+    // Only do database lookup as fallback if organization creation failed
     let ctaStoredCount = 0;
 
     try {
-      const token = req.headers.authorization?.replace('Bearer ', '');
-      let userId = null;
+      // ✅ FIX: Only lookup organization if we don't already have it from creation step
+      if (!foundOrganizationId) {
+        console.log('⚠️ [CTA DEBUG] foundOrganizationId not set from creation, attempting fallback lookup');
 
-      if (token) {
-        try {
-          const jwt = await import('jsonwebtoken');
-          const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
-          userId = payload.userId;
-        } catch (jwtError) {
-          console.warn('JWT verification failed for CTA storage:', jwtError.message);
+        const token = req.headers.authorization?.replace('Bearer ', '');
+        let userId = null;
+
+        if (token) {
+          try {
+            const jwt = await import('jsonwebtoken');
+            const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+            userId = payload.userId;
+          } catch (jwtError) {
+            console.warn('JWT verification failed for CTA storage:', jwtError.message);
+          }
         }
-      }
 
-      // Use same user-first lookup as main organization creation
-      // This ensures CTAs are stored in the correct organization
-      if (userId) {
+        // Use same user-first lookup as main organization creation
+        // This ensures CTAs are stored in the correct organization
+        if (userId) {
         console.log('🔍 [CTA DEBUG] Looking up organization by user ID for CTA storage:', { userId });
 
         const userOrgResult = await db.query(
@@ -950,12 +960,14 @@ app.post('/api/analyze-website', async (req, res) => {
         } else {
           console.warn('⚠️ [CTA DEBUG] No organization found for URL:', { url });
         }
+        }
+      } else {
+        console.log('✅ [CTA DEBUG] Using foundOrganizationId from organization creation step:', { foundOrganizationId });
       }
 
-      console.log('🎯 [CTA DEBUG] Found organization for CTA storage:', {
+      console.log('🎯 [CTA DEBUG] Final organizationId for CTA storage:', {
         organizationId: foundOrganizationId,
-        url,
-        hasUserId: !!userId
+        url
       });
 
       // Clear old CTAs before storing new ones (for re-analysis scenarios)
