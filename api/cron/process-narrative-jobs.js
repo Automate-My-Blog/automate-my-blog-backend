@@ -81,7 +81,7 @@ export default async function handler(req, res) {
 
     // Get CTAs
     const ctaResult = await db.query(
-      `SELECT cta_text, cta_type, cta_href
+      `SELECT cta_text, cta_type, href
        FROM cta_analysis
        WHERE organization_id = $1
        ORDER BY created_at DESC
