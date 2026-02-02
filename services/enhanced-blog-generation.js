@@ -1257,8 +1257,21 @@ You MUST automatically wrap qualifying content in highlight boxes using this HTM
 8. **comparison** - For versus, plan differences
    - Example: <blockquote data-highlight-box="" data-highlight-type="comparison" data-width="90%" data-font-size="medium" data-layout="block" data-align="center" data-custom-bg="#e6fffb" data-custom-border="#13c2c2"><strong>Free vs Pro:</strong> Free includes 1,000 contacts</blockquote>
 
+**Context-Aware Type Selection:**
+When you encounter these content patterns, you MUST use the corresponding highlight type:
+- Data/numbers/percentages → Use **statistic** type
+- Expert quotes/testimonials → Use **pullquote** type
+- Critical warnings/alerts → Use **warning** type
+- Best practices/advice → Use **tip** type
+- Technical terms/acronyms → Use **definition** type
+- Step-by-step instructions → Use **process** type
+- Versus/comparison tables → Use **comparison** type
+- Key conclusions/main points → Use **takeaway** type (ONLY for conclusions)
+
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
+- **CRITICAL: Use 2-3 DIFFERENT highlight types per post - NEVER use only one type**
+- Match highlight type to content context (statistics → 'statistic', warnings → 'warning', tips → 'tip')
 - NEVER place highlight boxes in the conclusion section or after the last CTA
 - All highlight boxes must appear BEFORE the final call-to-action
 
@@ -1638,6 +1651,30 @@ CRITICAL REQUIREMENTS:
           };
         })
       });
+
+      // VALIDATION: Check highlight box type variety
+      const boxTypes = highlightBoxMatches.map(box => box.match(/data-highlight-type="(\w+)"/)?.[1]).filter(Boolean);
+      const uniqueTypes = [...new Set(boxTypes)];
+      const varietyScore = boxTypes.length > 0 ? (uniqueTypes.length / boxTypes.length) * 100 : 0;
+
+      console.log('🎨 [HIGHLIGHT BOX VARIETY] Checking type diversity:', {
+        totalBoxes: boxTypes.length,
+        uniqueTypes: uniqueTypes.length,
+        types: boxTypes,
+        varietyScore: varietyScore.toFixed(0) + '%',
+        hasVariety: uniqueTypes.length >= 2 || boxTypes.length === 0,
+        warning: uniqueTypes.length === 1 && boxTypes.length > 1 ? '⚠️ Only one type used - expected 2-3 different types' : null
+      });
+
+      // Add variety validation to metadata for tracking
+      blogData.highlightBoxVariety = {
+        totalBoxes: boxTypes.length,
+        uniqueTypes: uniqueTypes.length,
+        types: boxTypes,
+        varietyScore: Math.round(varietyScore),
+        hasAcceptableVariety: uniqueTypes.length >= 2 || boxTypes.length <= 1,
+        warning: uniqueTypes.length === 1 && boxTypes.length > 1 ? 'Only one highlight box type used' : null
+      };
 
       // Check if CTAs appear in generated content
       const ctaLinkMatches = blogData.content?.match(/\[.*?\]\(.*?\)/g) || [];
