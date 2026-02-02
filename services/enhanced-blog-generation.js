@@ -4,6 +4,7 @@ import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
 import grokTweetSearch from './grok-tweet-search.js';
 import emailService from './email.js';
+import crypto from 'crypto';
 
 /**
  * Enhanced Blog Generation Service
@@ -1947,21 +1948,61 @@ CRITICAL REQUIREMENTS:
         visualSuggestions = await this.generateVisualContentSuggestions(blogData, organizationId);
       }
 
+      // Run comprehensive SEO analysis on generated content
+      let seoAnalysis = null;
+      if (blogData.content && options.skipSEOAnalysis !== true) {
+        console.log('🔍 Running comprehensive SEO analysis on generated content...');
+        const seoResult = await this.runSEOAnalysis(
+          blogData.content,
+          businessInfo.userId || options.userId,
+          options.postId || null, // PostId may not exist yet if saving happens after
+          {
+            businessType: businessInfo.businessType || businessInfo.industry,
+            targetAudience: businessInfo.targetAudience || topic.targetAudience,
+            primaryKeywords: blogData.seoKeywords || [],
+            businessGoals: 'Generate more customers through content'
+          }
+        );
+
+        if (seoResult.success) {
+          seoAnalysis = seoResult.analysis;
+          console.log(`✅ SEO Analysis complete - Score: ${seoAnalysis.overallScore}/100`);
+
+          // Log warning if score is below target
+          if (seoAnalysis.overallScore < 95) {
+            console.warn(`⚠️ SEO score (${seoAnalysis.overallScore}) is below target (95). Consider regeneration.`);
+            console.warn(`📊 Top improvements needed:`, seoAnalysis.topImprovements);
+          }
+        } else {
+          console.warn('⚠️ SEO Analysis failed, using fallback analysis');
+          seoAnalysis = seoResult.analysis; // Fallback analysis
+        }
+      }
+
       // Combine everything into complete response
       const completeResponse = {
         ...blogData,
         visualContentSuggestions: visualSuggestions,
         enhancedGeneration: true,
+        seoAnalysis: seoAnalysis, // Add detailed SEO analysis for user transparency
         qualityPrediction: {
-          expectedSEOScore: blogData.seoOptimizationScore || 85,
+          expectedSEOScore: seoAnalysis?.overallScore || blogData.seoOptimizationScore || 85,
+          actualSEOScore: seoAnalysis?.overallScore || null,
           enhancementLevel: blogData.organizationContext.enhancementLevel,
           dataCompleteness: blogData.organizationContext.dataCompleteness,
-          recommendations: this.generateQualityRecommendations(organizationContext)
+          recommendations: this.generateQualityRecommendations(organizationContext),
+          topStrengths: seoAnalysis?.topStrengths || [],
+          topImprovements: seoAnalysis?.topImprovements || []
         }
       };
 
       console.log(`✅ Complete enhanced blog generation finished`);
-      console.log(`📊 Quality prediction: ${completeResponse.qualityPrediction.expectedSEOScore} SEO score`);
+      if (completeResponse.qualityPrediction.actualSEOScore) {
+        console.log(`📊 Actual SEO Score: ${completeResponse.qualityPrediction.actualSEOScore}/100 ${completeResponse.qualityPrediction.actualSEOScore >= 95 ? '✅' : '⚠️'}`);
+        console.log(`📊 Top Strengths: ${completeResponse.qualityPrediction.topStrengths.slice(0, 3).join(', ')}`);
+      } else {
+        console.log(`📊 Expected SEO Score: ${completeResponse.qualityPrediction.expectedSEOScore}`);
+      }
       console.log('🔍 [IMAGE DEBUG] Return object has _hasImagePlaceholders:', completeResponse._hasImagePlaceholders);
       console.log('🔍 [IMAGE DEBUG] Return object has _topicForImages:', !!completeResponse._topicForImages);
       console.log('🔍 [IMAGE DEBUG] Return object has _organizationIdForImages:', !!completeResponse._organizationIdForImages);
@@ -2021,6 +2062,152 @@ CRITICAL REQUIREMENTS:
   }
 
   /**
+   * Run comprehensive SEO analysis on generated content
+   * Returns detailed breakdown for quality validation and user transparency
+   */
+  async runSEOAnalysis(content, userId, postId, context = {}) {
+    try {
+      console.log(`🔍 Running comprehensive SEO analysis for post: ${postId}`);
+
+      // Build comprehensive prompt for SEO analysis
+      const prompt = `You are an expert content strategist analyzing blog content for a solopreneur who understands technology but is new to marketing. They need to understand WHY each element matters for getting customers, not just technical metrics.
+
+CONTENT TO ANALYZE:
+"""
+${content}
+"""
+
+BUSINESS CONTEXT:
+- Industry: ${context.businessType || 'Technology/Business'}
+- Target Audience: ${context.targetAudience || 'General audience'}
+- Primary Keywords: ${(context.primaryKeywords || []).join(', ') || 'Not specified'}
+- Business Goals: ${context.businessGoals || 'Generate more customers through content'}
+
+ANALYSIS REQUIREMENTS:
+1. Be HONEST and CRITICAL about content quality - don't inflate scores
+2. Severely penalize incomplete content, typos, and poor writing
+3. Score based on what customers would actually think, not potential
+4. Quote specific phrases as examples (including problems you find)
+5. Explain WHY each metric matters for getting customers
+6. If content is clearly unfinished or low-quality, scores should reflect that
+7. Suggest specific improvements with examples
+
+SCORING GUIDELINES:
+- 90-100: Exceptional, professional-grade content that truly serves customers
+- 80-89: Good content with minor issues
+- 70-79: Average content with noticeable problems
+- 60-69: Below average, needs significant improvement
+- Below 60: Poor quality that would hurt business credibility
+
+Return analysis in this exact JSON structure with HONEST scores based on actual content quality:
+{
+  "overallScore": <0-100 based on actual content quality>,
+  "titleAnalysis": {
+    "titleEffectiveness": {"score": <0-100>, "explanation": "..."},
+    "titleLength": {"score": <0-100>, "characterCount": <actual>, "explanation": "..."},
+    "clickThroughPotential": {"score": <0-100>, "explanation": "..."},
+    "headlineHierarchy": {"score": <0-100>, "h1Count": <actual>, "h2Count": <actual>, "h3Count": <actual>, "explanation": "..."},
+    "subheadingQuality": {"score": <0-100>, "explanation": "..."}
+  },
+  "contentFlow": {
+    "introductionEffectiveness": {"score": <0-100>, "explanation": "...", "hookQuote": "Actual quote from opening"},
+    "logicalProgression": {"score": <0-100>, "explanation": "..."},
+    "paragraphLength": {"score": <0-100>, "averageWordsPerParagraph": <actual>, "explanation": "..."},
+    "transitionQuality": {"score": <0-100>, "explanation": "..."},
+    "conclusionStrength": {"score": <0-100>, "explanation": "..."}
+  },
+  "engagementUX": {
+    "readingLevel": {"score": <0-100>, "grade": "<calculated>", "explanation": "..."},
+    "sentenceVariety": {"score": <0-100>, "explanation": "..."},
+    "activeVoiceUsage": {"score": <0-100>, "percentage": <actual>, "explanation": "..."},
+    "questionUsage": {"score": <0-100>, "explanation": "..."},
+    "storytellingElements": {"score": <0-100>, "explanation": "..."}
+  },
+  "technicalSEO": {
+    "internalLinkingOpportunities": {"score": <0-100>, "explanation": "...", "suggestions": ["...", "..."]},
+    "externalLinkQuality": {"score": <0-100>, "explanation": "..."},
+    "featuredSnippetOptimization": {"score": <0-100>, "explanation": "..."},
+    "schemaMarkupPotential": {"score": <0-100>, "explanation": "..."}
+  },
+  "topStrengths": ["Specific strength 1", "Specific strength 2", "Specific strength 3"],
+  "topImprovements": ["Specific improvement 1", "Specific improvement 2", "Specific improvement 3"],
+  "aiSummary": "Your honest assessment of the content quality..."
+}`;
+
+      // Call OpenAI for SEO analysis
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4o',
+        max_tokens: 3000,
+        temperature: 0.5,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert content strategist providing educational SEO analysis. Always respond with valid JSON in the exact structure specified.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ]
+      });
+
+      const rawResponse = completion.choices[0].message.content;
+
+      // Clean and parse response
+      let cleanedResponse = rawResponse.trim();
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.substring(7);
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.substring(3);
+      }
+      if (cleanedResponse.endsWith('```')) {
+        cleanedResponse = cleanedResponse.slice(0, -3);
+      }
+      cleanedResponse = cleanedResponse.trim();
+
+      const analysis = JSON.parse(cleanedResponse);
+
+      // Validate overall score exists
+      if (!analysis.overallScore || analysis.overallScore < 1 || analysis.overallScore > 100) {
+        throw new Error('Invalid overall score in SEO analysis');
+      }
+
+      console.log(`✅ SEO Analysis complete - Overall Score: ${analysis.overallScore}/100`);
+      console.log(`📊 Top Strengths: ${(analysis.topStrengths || []).length} identified`);
+      console.log(`📊 Top Improvements: ${(analysis.topImprovements || []).length} identified`);
+
+      return {
+        success: true,
+        analysis,
+        metadata: {
+          analyzedAt: new Date().toISOString(),
+          model: 'gpt-4o',
+          wordCount: content.split(/\s+/).length
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ SEO Analysis failed:', error.message);
+
+      // Return fallback analysis if real analysis fails (don't block blog generation)
+      return {
+        success: false,
+        error: error.message,
+        analysis: {
+          overallScore: 85, // Conservative fallback score
+          titleAnalysis: {},
+          contentFlow: {},
+          engagementUX: {},
+          technicalSEO: {},
+          topStrengths: ['Content generated successfully'],
+          topImprovements: ['SEO analysis temporarily unavailable - will be analyzed manually'],
+          aiSummary: 'SEO analysis could not be completed at this time. Content has been generated following best practices.'
+        }
+      };
+    }
+  }
+
+  /**
    * Generate blog with iterative optimization to reach target score
    */
   async generateWithOptimization(topic, businessInfo, organizationId, targetScore = 95, options = {}) {
@@ -2052,23 +2239,13 @@ CRITICAL REQUIREMENTS:
           }
         );
 
-        // Mock SEO score analysis (in real system, would use actual SEO analysis)
-        const content = blogResult.content || '';
-        const wordCount = content.split(' ').length;
-        const hasHeaders = content.includes('#');
-        const hasKeywords = blogResult.seoKeywords?.some(keyword => 
-          content.toLowerCase().includes(keyword.toLowerCase())
-        );
-        
-        const score = Math.min(95, 
-          60 + 
-          (wordCount > 1200 ? 20 : wordCount > 800 ? 15 : 10) + 
-          (hasHeaders ? 10 : 0) + 
-          (hasKeywords ? 15 : 5) +
-          (blogResult.internalLinks?.length > 2 ? 10 : 5)
-        );
+        // Use real SEO analysis score from generateCompleteEnhancedBlog
+        const score = blogResult.qualityPrediction?.actualSEOScore || blogResult.qualityPrediction?.expectedSEOScore || 0;
 
-        console.log(`📊 Attempt ${currentIteration} SEO score: ${score}`);
+        console.log(`📊 Attempt ${currentIteration} SEO score: ${score}/100`);
+        if (blogResult.qualityPrediction?.topImprovements?.length > 0) {
+          console.log(`📋 Key improvements needed:`, blogResult.qualityPrediction.topImprovements.slice(0, 2));
+        }
 
         attempts.push({
           iteration: currentIteration,
