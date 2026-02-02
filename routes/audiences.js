@@ -47,20 +47,23 @@ const safeParse = (jsonString, fieldName, recordId) => {
   }
 };
 
+const isDev = process.env.NODE_ENV !== 'production';
+
 const extractUserContext = (req) => {
   const sessionId = req.headers['x-session-id'] || req.body?.session_id;
-  
-  // Enhanced debugging for authentication issues
-  console.log('🔍 extractUserContext debug:', {
-    hasAuthHeader: !!req.headers.authorization,
-    authHeaderStart: req.headers.authorization?.substring(0, 20),
-    hasReqUser: !!req.user,
-    reqUserKeys: req.user ? Object.keys(req.user) : [],
-    reqUserId: req.user?.userId,
-    sessionId: sessionId,
-    endpoint: req.path
-  });
-  
+
+  if (isDev) {
+    console.log('🔍 extractUserContext debug:', {
+      hasAuthHeader: !!req.headers.authorization,
+      authHeaderStart: req.headers.authorization?.substring(0, 20),
+      hasReqUser: !!req.user,
+      reqUserKeys: req.user ? Object.keys(req.user) : [],
+      reqUserId: req.user?.userId,
+      sessionId: sessionId,
+      endpoint: req.path
+    });
+  }
+
   // Check for mock user ID (for testing session adoption flow)
   const mockUserId = req.headers['x-mock-user-id'];
   if (mockUserId && process.env.NODE_ENV !== 'production') {
@@ -70,17 +73,17 @@ const extractUserContext = (req) => {
       sessionId: sessionId || null
     };
   }
-  
+
   if (req.user?.userId) {
-    console.log('✅ extractUserContext: Authenticated user found:', req.user.userId);
+    if (isDev) console.log('✅ extractUserContext: Authenticated user found:', req.user.userId);
     return {
       isAuthenticated: true,
       userId: req.user.userId,
       sessionId: sessionId || null // Keep session ID even when authenticated for adoption
     };
   }
-  
-  console.log('❌ extractUserContext: No authenticated user, falling back to session');
+
+  if (isDev) console.log('❌ extractUserContext: No authenticated user, falling back to session');
   return {
     isAuthenticated: false,
     userId: null,
@@ -88,15 +91,19 @@ const extractUserContext = (req) => {
   };
 };
 
+const AUTH_REQUIRED_MSG = 'Either authentication or session ID is required';
+
 const validateUserContext = (context) => {
   if (!context.isAuthenticated && !context.sessionId) {
-    throw new Error('Either authentication or session ID is required');
+    throw new Error(AUTH_REQUIRED_MSG);
   }
-  console.log('✅ validateUserContext passed:', {
-    isAuthenticated: context.isAuthenticated,
-    hasSessionId: !!context.sessionId,
-    userId: context.userId
-  });
+  if (isDev) {
+    console.log('✅ validateUserContext passed:', {
+      isAuthenticated: context.isAuthenticated,
+      hasSessionId: !!context.sessionId,
+      userId: context.userId
+    });
+  }
 };
 
 // Validation function to prevent data corruption with monitoring
@@ -531,6 +538,13 @@ router.post('/', async (req, res) => {
     });
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Create audience error:', error);
     res.status(500).json({
       success: false,
@@ -733,6 +747,13 @@ router.get('/', async (req, res) => {
     res.json(response);
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Get audiences error:', error);
     res.status(500).json({
       success: false,
@@ -806,6 +827,13 @@ router.get('/:id', async (req, res) => {
     });
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Get audience error:', error);
     res.status(500).json({
       success: false,
@@ -1021,6 +1049,13 @@ router.put('/:id', async (req, res) => {
     });
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Update audience error:', error);
     res.status(500).json({
       success: false,
@@ -1181,6 +1216,13 @@ router.delete('/cleanup-corrupted', async (req, res) => {
     }
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Comprehensive cleanup error:', error);
     res.status(500).json({
       success: false,
@@ -1226,6 +1268,13 @@ router.delete('/:id', async (req, res) => {
     });
 
   } catch (error) {
+    if (error.message === AUTH_REQUIRED_MSG) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication or session ID (x-session-id header) is required'
+      });
+    }
     console.error('Delete audience error:', error);
     res.status(500).json({
       success: false,
