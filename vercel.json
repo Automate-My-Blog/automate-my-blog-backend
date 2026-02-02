@@ -11,6 +11,12 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/process-narrative-jobs",
+      "schedule": "* * * * *"
+    }
+  ],
   "env": {
     "NODE_ENV": "production",
     "VERCEL": "1"
