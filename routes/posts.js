@@ -278,6 +278,125 @@ router.get('/', async (req, res) => {
 });
 
 // =============================================================================
+// RE-ANALYZE SEO - Run SEO analysis on existing post
+// =============================================================================
+router.post('/:postId/reanalyze-seo', async (req, res) => {
+  try {
+    const { postId } = req.params;
+    const context = extractUserContext(req);
+    validateUserContext(context);
+
+    console.log(`🔍 Re-analyzing SEO for post: ${postId}`);
+
+    // Fetch the post
+    let query, params;
+    if (context.isAuthenticated) {
+      query = 'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2';
+      params = [postId, context.userId];
+    } else {
+      query = 'SELECT * FROM blog_posts WHERE id = $1 AND session_id = $2';
+      params = [postId, context.sessionId];
+    }
+
+    const postResult = await db.query(query, params);
+
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found or access denied'
+      });
+    }
+
+    const post = postResult.rows[0];
+
+    if (!post.content || post.content.trim().length < 200) {
+      return res.status(400).json({
+        success: false,
+        error: 'Post content too short for meaningful SEO analysis (minimum 200 characters)'
+      });
+    }
+
+    // Import enhanced blog generation service to use SEO analysis method
+    const enhancedBlogService = (await import('../services/enhanced-blog-generation.js')).default;
+
+    // Run SEO analysis
+    const topicData = safeParse(post.topic_data, 'topic_data', post.id);
+    const seoResult = await enhancedBlogService.runSEOAnalysis(
+      post.content,
+      context.userId || context.sessionId,
+      postId,
+      {
+        businessType: topicData?.industry || 'Business',
+        targetAudience: topicData?.targetAudience || 'General audience',
+        primaryKeywords: topicData?.seoKeywords || [],
+        businessGoals: 'Generate more customers through content'
+      }
+    );
+
+    if (!seoResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: 'SEO analysis failed',
+        details: seoResult.error
+      });
+    }
+
+    // Update post with new SEO analysis
+    const existingMetadata = safeParse(post.generation_metadata, 'generation_metadata', post.id) || {};
+    const updatedMetadata = {
+      ...existingMetadata,
+      seoAnalysis: seoResult.analysis,
+      qualityPrediction: {
+        ...existingMetadata.qualityPrediction,
+        actualSEOScore: seoResult.analysis.overallScore,
+        topStrengths: seoResult.analysis.topStrengths || [],
+        topImprovements: seoResult.analysis.topImprovements || []
+      },
+      lastSEOAnalysis: new Date().toISOString()
+    };
+
+    const updateQuery = `
+      UPDATE blog_posts
+      SET
+        generation_metadata = $1,
+        seo_score_prediction = $2,
+        updated_at = NOW()
+      WHERE id = $3
+      RETURNING *
+    `;
+
+    const updateResult = await db.query(updateQuery, [
+      JSON.stringify(updatedMetadata),
+      seoResult.analysis.overallScore,
+      postId
+    ]);
+
+    const updatedPost = updateResult.rows[0];
+
+    console.log(`✅ SEO re-analysis complete for post ${postId}: Score ${seoResult.analysis.overallScore}/100`);
+
+    res.json({
+      success: true,
+      post: {
+        ...updatedPost,
+        topic_data: safeParse(updatedPost.topic_data, 'topic_data', updatedPost.id),
+        generation_metadata: safeParse(updatedPost.generation_metadata, 'generation_metadata', updatedPost.id)
+      },
+      analysis: seoResult.analysis,
+      message: `SEO analysis complete! Score: ${seoResult.analysis.overallScore}/100`
+    });
+
+  } catch (error) {
+    console.error('❌ SEO re-analysis failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to re-analyze post',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
 // SESSION ADOPTION - Transfer posts from session to authenticated user
 // =============================================================================
 router.post('/adopt-session', async (req, res) => {
