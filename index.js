@@ -684,8 +684,7 @@ app.post('/api/analyze-website', async (req, res) => {
           analysis_confidence_score: analysis?.analysisConfidenceScore || 0.75,
           data_sources: analysis?.dataSources ? JSON.stringify(analysis.dataSources) : JSON.stringify(['website_analysis']),
           ai_model_used: analysis?.aiModelUsed || 'gpt-4',
-          raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null,
-          is_current: true
+          raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null
         };
         
         // PRIORITY-BASED ORGANIZATION LOOKUP (with session adoption)
