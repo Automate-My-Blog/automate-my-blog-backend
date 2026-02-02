@@ -22,6 +22,10 @@ const authenticateToken = (req, res, next) => {
  * Generate outcome-focused bundle overview using OpenAI
  */
 async function generateBundleOverview(strategies) {
+  console.log('🤖 [AI] Starting bundle overview generation:', {
+    strategyCount: strategies.length
+  });
+
   try {
     // Extract key information from each strategy
     const strategySummaries = strategies.map((strategy, index) => {
@@ -51,6 +55,11 @@ async function generateBundleOverview(strategies) {
       };
     });
 
+    console.log('📊 [AI] Strategy summaries prepared:', {
+      count: strategySummaries.length,
+      samples: strategySummaries.slice(0, 2)
+    });
+
     const prompt = `You are a strategic SEO consultant. Create a compelling, outcome-focused overview for a comprehensive SEO plan that targets multiple audience segments.
 
 Here are the audience strategies included:
@@ -68,6 +77,7 @@ Write a compelling 2-3 sentence overview that:
 
 Format your response as JSON with these fields:
 {
+  "title": "Compelling title for the bundle (4-6 words)",
   "overview": "The compelling 2-3 sentence overview",
   "totalMonthlySearches": <total search volume across all audiences>,
   "projectedMonthlyProfit": {
@@ -80,6 +90,8 @@ Format your response as JSON with these fields:
 
 Make it outcome-focused, not feature-focused. Focus on business results, not just "N strategies" or "X posts".`;
 
+    console.log('🎯 [AI] Calling OpenAI with gpt-4...');
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
       messages: [
@@ -90,16 +102,33 @@ Make it outcome-focused, not feature-focused. Focus on business results, not jus
       temperature: 0.7
     });
 
+    console.log('✅ [AI] OpenAI response received:', {
+      hasContent: !!completion.choices[0]?.message?.content
+    });
+
     const result = JSON.parse(completion.choices[0].message.content);
+
+    console.log('✨ [AI] Parsed result:', {
+      hasTitle: !!result.title,
+      hasOverview: !!result.overview,
+      overviewLength: result.overview?.length
+    });
 
     // Add the strategy summaries for display
     result.strategies = strategySummaries;
 
     return result;
   } catch (error) {
-    console.error('Error generating bundle overview:', error);
+    console.error('❌ [AI] Error generating bundle overview:', {
+      message: error.message,
+      type: error.type,
+      code: error.code
+    });
+
     // Return fallback
+    console.log('⚠️ [AI] Returning fallback content');
     return {
+      title: `${strategies.length}-Audience SEO Strategy`,
       overview: `Reach ${strategies.length} high-value audience segments with one comprehensive SEO strategy. Maximize your market coverage and revenue potential across multiple customer profiles.`,
       audienceCount: strategies.length,
       strategies: strategies.map(s => {
@@ -168,6 +197,13 @@ router.get('/calculate',  async (req, res) => {
  * Create Stripe checkout session for bundle subscription
  */
 router.post('/subscribe',  async (req, res) => {
+  console.log('🎫 [BUNDLE] Subscribe request:', {
+    userId: req.user?.userId,
+    email: req.user?.email,
+    billingInterval: req.body.billingInterval,
+    hasAuth: !!req.user
+  });
+
   try {
     const { billingInterval } = req.body; // 'monthly' or 'annual'
     const userId = req.user.userId;
@@ -274,6 +310,11 @@ router.post('/subscribe',  async (req, res) => {
         individual_monthly_total: bundlePricing.individualMonthlyTotal.toString(),
         total_discount_percent: bundlePricing.savings.totalDiscountPercent.toString()
       }
+    });
+
+    console.log('✅ [BUNDLE] Checkout session created:', {
+      sessionId: session.id,
+      url: session.url
     });
 
     res.json({
