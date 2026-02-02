@@ -863,22 +863,26 @@ class DatabaseAuthService {
    */
   optionalAuthMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
+    const isDev = process.env.NODE_ENV !== 'production';
 
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
       try {
         const decoded = this.verifyToken(token);
         req.user = decoded;
-        console.log('✅ Token verified successfully for optional auth:', {
-          userId: decoded.userId,
-          endpoint: req.path
-        });
+        if (isDev) {
+          console.log('✅ Token verified successfully for optional auth:', {
+            userId: decoded.userId,
+            endpoint: req.path
+          });
+        }
       } catch (error) {
-        // Log error for debugging JWT issues
-        console.log('⚠️ Token verification failed in optionalAuth:', {
-          error: error.message,
-          endpoint: req.path
-        });
+        if (isDev) {
+          console.log('⚠️ Token verification failed in optionalAuth:', {
+            error: error.message,
+            endpoint: req.path
+          });
+        }
       }
     }
 
