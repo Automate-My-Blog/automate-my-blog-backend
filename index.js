@@ -846,19 +846,21 @@ app.post('/api/analyze-website', async (req, res) => {
         
         // Create new intelligence record
         const intelligenceId = uuidv4();
-        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'is_current', 'created_at', 'updated_at'];
-        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), true, now, now];
-        
-        // Add session_id for session-based intelligence (organization_id will be null for sessions)
+
+        // Build insert fields and values - handle session vs user cases differently to avoid splice issues
+        let intelInsertFields;
+        let intelInsertValues;
+
         if (!userId && sessionId) {
-          intelInsertFields.push('session_id');
-          intelInsertValues.push(sessionId);
-          // Remove organization_id for session-based records
-          const orgIdIndex = intelInsertFields.indexOf('organization_id');
-          intelInsertFields.splice(orgIdIndex, 1);
-          intelInsertValues.splice(orgIdIndex, 1);
+          // Session-based: use session_id instead of organization_id
+          intelInsertFields = ['id', 'session_id', ...Object.keys(intelligenceData), 'is_current', 'created_at', 'updated_at'];
+          intelInsertValues = [intelligenceId, sessionId, ...Object.values(intelligenceData), true, now, now];
+        } else {
+          // User-based: use organization_id
+          intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'is_current', 'created_at', 'updated_at'];
+          intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), true, now, now];
         }
-        
+
         const intelInsertPlaceholders = intelInsertFields.map((_, i) => `$${i + 1}`).join(', ');
         
         await db.query(
