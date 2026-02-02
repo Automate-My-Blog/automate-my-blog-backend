@@ -847,8 +847,8 @@ app.post('/api/analyze-website', async (req, res) => {
         
         // Create new intelligence record
         const intelligenceId = uuidv4();
-        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'created_at', 'updated_at'];
-        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), now, now];
+        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'is_current', 'created_at', 'updated_at'];
+        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), true, now, now];
         
         // Add session_id for session-based intelligence (organization_id will be null for sessions)
         if (!userId && sessionId) {

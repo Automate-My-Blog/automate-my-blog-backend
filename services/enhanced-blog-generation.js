@@ -2308,16 +2308,20 @@ Return analysis in this exact JSON structure with HONEST scores based on actual 
         blogData.title,
         blogData.content,
         blogData.metaDescription,
-        JSON.stringify({ 
+        JSON.stringify({
           title: blogData.title,
           subtitle: blogData.subtitle,
           tags: blogData.tags,
           seoKeywords: blogData.seoKeywords
         }),
-        JSON.stringify(blogData.generationMetadata),
+        JSON.stringify({
+          ...blogData.generationMetadata,
+          seoAnalysis: blogData.seoAnalysis, // Include full SEO analysis for user transparency
+          qualityPrediction: blogData.qualityPrediction
+        }),
         options.status || 'draft',
         blogData.content ? blogData.content.split(' ').length : 0,
-        blogData.qualityPrediction?.expectedSEOScore || null,
+        blogData.qualityPrediction?.actualSEOScore || blogData.qualityPrediction?.expectedSEOScore || null,
         JSON.stringify(blogData.internalLinks || []),
         JSON.stringify(blogData.ctaSuggestions || []),
         blogData.organizationContext?.enhancementLevel || 'basic'
