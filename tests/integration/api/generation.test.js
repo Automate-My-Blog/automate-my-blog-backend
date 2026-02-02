@@ -29,7 +29,7 @@ vi.mock('../../../services/billing.js', () => ({
   },
 }));
 
-const hasDb = !!process.env.DATABASE_URL && process.env.__DB_CONNECTED === 'true';
+const hasDb = !!process.env.DATABASE_URL;
 
 describe.skipIf(!hasDb)('integration api generation', () => {
   /** @type {import('express').Express} */
