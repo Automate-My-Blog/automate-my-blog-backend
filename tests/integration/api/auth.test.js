@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 
-const hasDb = !!process.env.DATABASE_URL;
+const hasDb = !!process.env.DATABASE_URL && process.env.__DB_CONNECTED === 'true';
 
 describe.skipIf(!hasDb)('integration api auth', () => {
   /** @type {import('express').Express} */

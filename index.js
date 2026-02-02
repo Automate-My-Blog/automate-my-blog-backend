@@ -482,8 +482,11 @@ app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (
 
   } catch (error) {
     console.error('Get user error:', error);
-    res.status(404).json({
-      error: 'User not found',
+    // Return 500 for infrastructure/DB errors, 404 for user-not-found
+    const isServerError = error.code === '28000' || error.code === 'ECONNREFUSED' ||
+      error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === '57P01';
+    res.status(isServerError ? 500 : 404).json({
+      error: isServerError ? 'Service unavailable' : 'User not found',
       message: error.message
     });
   }

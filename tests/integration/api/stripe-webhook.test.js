@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import Stripe from 'stripe';
 
-const hasDb = !!process.env.DATABASE_URL;
+const hasDb = !!process.env.DATABASE_URL && process.env.__DB_CONNECTED === 'true';
 const hasStripeSecret = !!process.env.STRIPE_WEBHOOK_SECRET;
 
 describe.skipIf(!hasDb || !hasStripeSecret)('integration api stripe webhook', () => {
