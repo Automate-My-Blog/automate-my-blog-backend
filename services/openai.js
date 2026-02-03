@@ -1695,9 +1695,16 @@ Business Context:
 ${webSearchData}
 ${keywordData}${existingAudiencesText}
 
-CRITICAL INSTRUCTIONS:
+CRITICAL INSTRUCTIONS FOR DIVERSITY:
 ${qualityNote}
-- Each scenario MUST have UNIQUE demographics (different age ranges, life stages, etc.)${isIncrementalAnalysis ? ' from existing audiences' : ''}
+- Each audience MUST be COMPLETELY DIFFERENT - different age groups, life stages, roles, industries
+- NO semantic duplicates - avoid variations of the same audience (e.g., don't create "small business owners wanting to grow" AND "small business owners seeking expansion")
+- Aim for maximum demographic diversity: different career levels (entry, mid, senior, executive), different age ranges (20s, 30s, 40s, 50+), different contexts (B2B, B2C, personal use)
+- Each audience should have distinctly different pain points, motivations, and search behaviors${isIncrementalAnalysis ? ' from existing audiences' : ''}
+
+EXAMPLES OF GOOD DIVERSITY (for a business consulting firm):
+✅ GOOD: [Startup founders in tech (20-35), Mid-market CEOs in manufacturing (45-60), Freelance consultants building practice (30-50), Corporate executives transitioning to entrepreneurship (40-55)]
+❌ BAD: [Small business owners wanting to grow, Small business owners seeking expansion, Small business owners looking to scale, Business owners trying to improve]
 
 Generate scenarios as JSON array:
 
@@ -1731,7 +1738,7 @@ Generate scenarios as JSON array:
 Return only audiences with strong business potential. If no strong additional audiences exist, return an empty array []. Each scenario must target DIFFERENT demographics from existing audiences. Order by priority (highest value first).`
           }
         ],
-        temperature: 0.3,
+        temperature: 0.8,
         max_tokens: 3500
       });
 
