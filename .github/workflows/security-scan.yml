@@ -5,6 +5,8 @@ on:
     branches: [main, test/unit-tests]
   push:
     branches: [main, test/unit-tests]
+  merge_group:
+    branches: [main, test/unit-tests]
 
 jobs:
   security-scan:

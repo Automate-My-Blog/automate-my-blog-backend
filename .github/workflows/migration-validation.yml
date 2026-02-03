@@ -12,6 +12,8 @@ on:
     branches: [main]
     paths:
       - 'database/**/*.sql'
+  merge_group:
+    branches: [main]
 
 jobs:
   validate-migrations:
