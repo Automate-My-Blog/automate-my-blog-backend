@@ -106,7 +106,7 @@ function rowToStatus(row) {
   };
 }
 
-/** Thrown when context.userId is set but that user does not exist in users table (e.g. JWT from deleted user). */
+/** Thrown when context.userId is set but that user does not exist in users table, and no sessionId to fall back to. */
 export class UserNotFoundError extends Error {
   constructor(userId) {
     super(`User not found: ${userId}`);
@@ -117,20 +117,30 @@ export class UserNotFoundError extends Error {
 
 /**
  * Create a job, enqueue it, return jobId.
+ * Supports anonymous jobs (sessionId only) and user jobs. If userId is set but that user
+ * does not exist in DB (e.g. JWT for deleted user), we fall back to session-only when
+ * sessionId is present so anonymous flow still works; otherwise throw UserNotFoundError.
+ *
  * @param {string} type - 'website_analysis' | 'content_generation'
  * @param {object} input - Job payload (stored for retry)
  * @param {object} context - { userId?, sessionId?, tenantId? }
  * @returns {Promise<{ jobId: string }>}
- * @throws {UserNotFoundError} when context.userId is set but user does not exist in DB
+ * @throws {UserNotFoundError} when context.userId is set, user does not exist, and no sessionId
  */
 export async function createJob(type, input, context = {}) {
   if (!JOB_TYPES.includes(type)) throw new Error(`Invalid job type: ${type}`);
-  const { userId, sessionId, tenantId } = context;
+  let { userId, sessionId, tenantId } = context;
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
 
   if (userId) {
     const u = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
-    if (!u.rows.length) throw new UserNotFoundError(userId);
+    if (!u.rows.length) {
+      if (sessionId) {
+        userId = null;
+      } else {
+        throw new UserNotFoundError(userId);
+      }
+    }
   }
 
   ensureRedis();
