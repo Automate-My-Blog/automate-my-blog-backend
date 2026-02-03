@@ -220,6 +220,80 @@ router.post('/generate', async (req, res) => {
 });
 
 /**
+ * POST /api/v1/enhanced-blog-generation/generate-stream (Phase 2)
+ * Start streaming blog content. Client must open GET /api/v1/stream?token= first to get connectionId.
+ * Body: { connectionId, topic, businessInfo, organizationId, additionalInstructions?, options? }
+ * Returns 202 { connectionId, streamUrl }. Events: content-chunk, complete, error.
+ */
+router.post('/generate-stream', async (req, res) => {
+  try {
+    const { connectionId, topic, businessInfo, organizationId, additionalInstructions, options = {} } = req.body;
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Authentication required' });
+    }
+    if (!connectionId || typeof connectionId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing connectionId',
+        message: 'Open GET /api/v1/stream?token= first, then pass connectionId from the connected event'
+      });
+    }
+    if (!topic || !businessInfo || !organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'topic, businessInfo, and organizationId are required'
+      });
+    }
+    if (!topic.title || !businessInfo.businessType || !businessInfo.targetAudience) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid data structure',
+        message: 'topic must have title, businessInfo must have businessType and targetAudience'
+      });
+    }
+
+    const hasCredits = await billingService.hasCredits(userId);
+    if (!hasCredits) {
+      const credits = await billingService.getUserCredits(userId);
+      return res.status(402).json({
+        success: false,
+        error: 'Insufficient credits',
+        message: 'You have used all your blog post credits for this billing period.',
+        data: { currentPlan: credits.basePlan, creditsUsed: credits.usedCredits, creditsAvailable: credits.availableCredits, upgradeUrl: '/pricing' }
+      });
+    }
+
+    const baseUrl = req.protocol + '://' + (req.get('host') || '');
+    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
+    const streamUrl = token ? `${baseUrl}/api/v1/stream?token=${encodeURIComponent(token)}` : `${baseUrl}/api/v1/stream`;
+
+    setImmediate(() => {
+      enhancedBlogGenerationService.generateBlogPostStream(
+        topic,
+        businessInfo,
+        organizationId,
+        connectionId,
+        { additionalInstructions, ...options }
+      ).catch((err) => console.error('generate-stream background error:', err));
+    });
+
+    res.status(202).json({
+      connectionId,
+      streamUrl
+    });
+  } catch (error) {
+    console.error('generate-stream endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start stream',
+      message: error.message
+    });
+  }
+});
+
+/**
  * POST /api/v1/enhanced-blog-generation/analyze-and-improve
  * Generate blog and automatically analyze with SEO analysis
  */
