@@ -470,6 +470,129 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
   }
 
   /**
+   * Stream trending topics: GPT stream then DALL-E per topic. Events: topic-complete (per topic, no image),
+   * topic-image-complete (per topic with image), complete { topics }.
+   * @param {string} businessType
+   * @param {string} targetAudience
+   * @param {string} contentFocus
+   * @param {string} connectionId
+   */
+  async generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId) {
+    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+    const systemContent = `You are a content strategist who creates blog topics optimized for search and user intent. You understand that readers search using specific keywords and phrases when looking for solutions to their problems.
+
+CRITICAL PRINCIPLES:
+1. SEO-OPTIMIZED: Focus on searchable keywords and clear value propositions that match what people actually search for
+2. CLEAR & DIRECT: Titles should tell readers exactly what they'll learn using straightforward language
+3. SEARCHABILITY: Use language people actually search for, not abstract concepts or academic phrasing
+4. PRACTICAL VALUE: Promise specific, actionable outcomes that solve real problems`;
+
+    const userContent = `Generate 2 strategic blog post topics for this business that promise genuinely insightful content:
+
+Business Analysis:
+- Business Type: ${businessType}
+- Target Audience: ${targetAudience}
+- Content Focus: ${contentFocus}
+
+TOPIC QUALITY REQUIREMENTS:
+
+1. SEARCH-OPTIMIZED: Use keywords and phrases that people actually type into search engines when looking for solutions.
+
+2. CLEAR VALUE: Make it immediately obvious what specific benefit or solution the reader will get from the article.
+
+3. SPECIFIC FOCUS: Address concrete problems or questions with actionable answers, not broad conceptual overviews.
+
+4. NATURAL LANGUAGE: Use conversational, everyday language that real people use when describing their problems.
+
+For each topic, provide:
+{
+  "id": number,
+  "trend": "string - content theme/topic area using searchable keywords",
+  "title": "string - clear, SEO-friendly title using searchable keywords (e.g., 'How to Manage Postpartum Depression' not 'The Paradox of Maternal Mental Health')",
+  "subheader": "string - subtitle that clarifies the specific problem solved and target audience",
+  "seoBenefit": "string - specific value like 'Can help [audience] find answers when they search for [actual search terms they use]'",
+  "category": "string - content category using common search terms"
+}
+
+AVOID:
+- Abstract or philosophical language (e.g., "The Paradox of...", "Navigating the Complexity of...")
+- Excessive use of colons or clever wordplay in titles
+- Vague promises that don't specify what the reader will learn
+- Academic or overly formal language that people don't search for
+
+CREATE:
+- Direct, searchable titles that match common search queries
+- Specific problem statements that readers can immediately relate to
+- Clear benefit statements using action words (How to, Ways to, Steps to, Guide to)
+- Language that sounds like something a real person would type into Google
+
+Return an array of 2 SEO-optimized topics that address real search intent with clear value.`;
+
+    const extractCompleteObjects = (buf) => {
+      let depth = 0;
+      let startIdx = -1;
+      const objects = [];
+      for (let i = 0; i < buf.length; i++) {
+        if (buf[i] === '{') {
+          if (depth === 0) startIdx = i;
+          depth++;
+        } else if (buf[i] === '}') {
+          depth--;
+          if (depth === 0 && startIdx >= 0) {
+            try {
+              const obj = JSON.parse(buf.slice(startIdx, i + 1));
+              objects.push(obj);
+            } catch (e) {}
+            startIdx = i + 1;
+          }
+        }
+      }
+      return { objects, remainingBuffer: startIdx >= 0 ? buf.slice(startIdx) : '' };
+    };
+
+    try {
+      const stream = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemContent },
+          { role: 'user', content: userContent }
+        ],
+        temperature: 0.7,
+        max_tokens: 1500,
+        stream: true
+      });
+
+      let buffer = '';
+      const allTopics = [];
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? '';
+        if (delta) {
+          buffer += delta;
+          const { objects, remainingBuffer } = extractCompleteObjects(buffer);
+          buffer = remainingBuffer;
+          for (const obj of objects) {
+            allTopics.push(obj);
+            streamManager.publish(connectionId, 'topic-complete', { topic: obj });
+          }
+        }
+      }
+
+      // Generate DALL-E images for each topic
+      for (let i = 0; i < allTopics.length; i++) {
+        streamManager.publish(connectionId, 'topic-image-start', { index: i, total: allTopics.length, topic: allTopics[i] });
+        allTopics[i].image = await this.generateTopicImage(allTopics[i]);
+        streamManager.publish(connectionId, 'topic-image-complete', { index: i, topic: allTopics[i] });
+      }
+
+      streamManager.publish(connectionId, 'complete', { topics: allTopics });
+    } catch (error) {
+      console.error('OpenAI trending topics stream error:', error);
+      streamManager.publish(connectionId, 'error', { error: error.message, errorCode: error.code ?? null });
+    }
+  }
+
+  /**
    * Generate blog post content
    */
   async generateBlogPost(topic, businessInfo, additionalInstructions = '') {
@@ -1564,11 +1687,11 @@ CRITICAL: Generate ONLY net new audiences that are completely different from the
             content: `Based on this business analysis, identify ${targetCount} genuine audience opportunities:
 
 Business Context:
-- Business Type: ${analysisData.businessType}
-- Business Name: ${analysisData.businessName}
-- Target Audience: ${analysisData.targetAudience}
-- Business Model: ${analysisData.businessModel}
-- Content Focus: ${analysisData.contentFocus}
+- Business Type: ${analysisData?.businessType ?? 'Business'}
+- Business Name: ${analysisData?.businessName ?? analysisData?.companyName ?? 'Company'}
+- Target Audience: ${analysisData?.targetAudience ?? 'General market'}
+- Business Model: ${analysisData?.businessModel ?? 'Service-based'}
+- Content Focus: ${analysisData?.contentFocus ?? 'Customer problems and solutions'}
 ${webSearchData}
 ${keywordData}${existingAudiencesText}
 
@@ -1613,7 +1736,17 @@ Return only audiences with strong business potential. If no strong additional au
       });
 
       const response = completion.choices[0].message.content;
-      const scenarios = this.parseOpenAIResponse(response);
+      const parsed = this.parseOpenAIResponse(response);
+
+      // Handle model returning object (e.g. { scenarios: [...] }) instead of array
+      let scenarios = Array.isArray(parsed) ? parsed : null;
+      if (!scenarios && parsed && typeof parsed === 'object') {
+        scenarios = parsed.scenarios ?? parsed.audiences ?? parsed.customerScenarios ?? parsed.results ?? null;
+      }
+      if (!Array.isArray(scenarios)) {
+        console.warn('generateAudienceScenarios: expected array, got', typeof parsed, Object.keys(parsed || {}));
+        return [];
+      }
 
       console.log(`✅ Generated ${scenarios.length} audience scenarios`);
       return scenarios;
@@ -1671,11 +1804,11 @@ CRITICAL: Generate ONLY net new audiences that are completely different from the
             content: `Based on this business analysis, identify ${targetCount} genuine audience opportunities:
 
 Business Context:
-- Business Type: ${analysisData.businessType}
-- Business Name: ${analysisData.businessName}
-- Target Audience: ${analysisData.targetAudience}
-- Business Model: ${analysisData.businessModel}
-- Content Focus: ${analysisData.contentFocus}
+- Business Type: ${analysisData?.businessType ?? 'Business'}
+- Business Name: ${analysisData?.businessName ?? analysisData?.companyName ?? 'Company'}
+- Target Audience: ${analysisData?.targetAudience ?? 'General market'}
+- Business Model: ${analysisData?.businessModel ?? 'Service-based'}
+- Content Focus: ${analysisData?.contentFocus ?? 'Customer problems and solutions'}
 ${webSearchData}
 ${keywordData}${existingAudiencesText}
 

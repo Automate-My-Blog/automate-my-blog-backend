@@ -29,6 +29,7 @@ import manualInputRoutes from './routes/manual-inputs.js';
 import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
 import blogRoutes from './routes/blog.js';
+import topicRoutes from './routes/topics.js';
 import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -148,6 +149,7 @@ app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), m
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
 app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes);
+app.use('/api/v1/topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
@@ -350,6 +352,7 @@ app.get('/api', (req, res) => {
       'POST /api/v1/jobs/:jobId/retry': 'Retry a failed job',
       'POST /api/v1/jobs/:jobId/cancel': 'Cancel a queued or running job',
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
+      'POST /api/v1/topics/generate-stream': 'Stream topic generation (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/generate-content': 'Generate complete blog post content',
       'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',
       'POST /api/export': 'Export blog content in different formats (markdown, html, json)',

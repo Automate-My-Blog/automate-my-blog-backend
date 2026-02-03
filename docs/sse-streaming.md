@@ -22,7 +22,7 @@ The app CORS config allows the same origins as the rest of the API (production, 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/stream?token=JWT` | `token` query | Open SSE connection. First event: `connected` with `{ connectionId }`. Then keepalive comments and app events via Redis Pub/Sub. |
-| GET | `/api/v1/stream/:connectionId?token=JWT` | `token` query | Join existing stream by connectionId (returned from POST /audiences/generate-stream, POST /blog/generate-stream, GET .../bundle/calculate?stream=true). First event: `connected` with `{ connectionId }`. |
+| GET | `/api/v1/stream/:connectionId?token=JWT` | `token` query | Join existing stream by connectionId (returned from POST /audiences/generate-stream, POST /blog/generate-stream, POST /topics/generate-stream, GET .../bundle/calculate?stream=true). First event: `connected` with `{ connectionId }`. |
 
 ## Connection lifecycle
 
