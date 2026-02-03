@@ -21,7 +21,9 @@ const PROGRESS_STEPS = [
 export const PROGRESS_PHASES = [
   [
     'Fetching page content',
-    'Researching business context',
+    'Researching business (brand & competitors)',
+    'Researching keywords & SEO',
+    'Analyzing business from content',
     'Analyzing customer psychology',
     'Saving analysis & CTAs',
     'Generating narrative summary'
@@ -252,14 +254,19 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   await report(0, PROGRESS_STEPS[0], 10, 85, { phase: PROGRESS_PHASES[0][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
-  const analysis = await openaiService.analyzeWebsite(fullContent, url);
-  await report(0, PROGRESS_STEPS[0], 35, 60, { phase: PROGRESS_PHASES[0][2] });
+  const analysisSubPhaseProgress = { 'Researching business (brand & competitors)': 12, 'Researching keywords & SEO': 20, 'Analyzing business from content': 30 };
+  const onAnalyzeProgress = (phase) => {
+    const p = analysisSubPhaseProgress[phase];
+    if (p != null) void report(0, PROGRESS_STEPS[0], p, 60, { phase });
+  };
+  const analysis = await openaiService.analyzeWebsite(fullContent, url, { onProgress: onAnalyzeProgress });
+  await report(0, PROGRESS_STEPS[0], 35, 60, { phase: PROGRESS_PHASES[0][4] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const { organizationId, storedCTAs } = await persistAnalysis(url, analysis, scrapedContent, { userId, sessionId });
-  await report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][3] });
+  await report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][5] });
 
-  await report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][4] });
+  await report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][6] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   // Generate narrative analysis
@@ -318,7 +325,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // Don't fail the whole pipeline if narrative generation fails
   }
 
-  await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][4] });
+  await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6] });
   if (typeof onPartialResult === 'function') {
     onPartialResult('analysis', {
       url,

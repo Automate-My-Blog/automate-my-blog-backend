@@ -89,9 +89,15 @@ export class OpenAIService {
   }
 
   /**
-   * Analyze website content and extract business information
+   * Analyze website content and extract business information.
+   * @param {string} websiteContent - Scraped page text
+   * @param {string} url - Page URL
+   * @param {{ onProgress?: (phase: string) => void }} [opts] - Optional progress callback for granular sub-steps (e.g. "Researching business (brand & competitors)", "Researching keywords & SEO", "Analyzing business from content")
    */
-  async analyzeWebsite(websiteContent, url) {
+  async analyzeWebsite(websiteContent, url, opts = {}) {
+    const { onProgress } = opts;
+    const report = (phase) => { if (typeof onProgress === 'function') try { onProgress(phase); } catch (e) { /* noop */ } };
+
     try {
       console.log('OpenAI website analysis starting...');
       console.log('Model:', process.env.OPENAI_MODEL || 'gpt-3.5-turbo');
@@ -128,47 +134,51 @@ export class OpenAIService {
         businessType = 'Business Services';
       }
 
-      // Perform web search-enhanced research (parallel execution for speed)
-      console.log('=== STARTING WEB SEARCH RESEARCH ===');
-      console.log('Business Name:', businessName);
-      console.log('Business Type:', businessType);
-      console.log('Website URL:', url);
-      console.log('About to call performBusinessResearch and performKeywordResearch...');
-      
-      const [webSearchResults, keywordResults] = await Promise.allSettled([
-        this.performBusinessResearch(businessName, businessType, url),
-        this.performKeywordResearch(businessType, 'target customers', null)
-      ]);
-
-      console.log('=== WEB SEARCH RESULTS ===');
-      console.log('Business Research Status:', webSearchResults.status);
-      if (webSearchResults.status === 'rejected') {
-        console.error('Business Research Error:', webSearchResults.reason);
-      }
-      console.log('Keyword Research Status:', keywordResults.status);
-      if (keywordResults.status === 'rejected') {
-        console.error('Keyword Research Error:', keywordResults.reason);
-      }
-
+      // Perform web search-enhanced research in parallel (faster); report granular phase as each completes
+      const skipWebResearch = /^(1|true|yes)$/i.test(process.env.SKIP_WEBSITE_WEB_RESEARCH || '');
       let webSearchData = '';
       let keywordData = '';
+      let webSearchResults = { status: 'rejected', value: null };
+      let keywordResults = { status: 'rejected', value: null };
 
-      if (webSearchResults.status === 'fulfilled' && webSearchResults.value) {
-        webSearchData = `\n\nWEB SEARCH BUSINESS INTELLIGENCE:\n${webSearchResults.value}`;
-        console.log('✅ Web search business research completed successfully');
-        console.log('Data length:', webSearchResults.value?.length || 0);
+      if (skipWebResearch) {
+        console.log('⏭️ Skipping web search research (SKIP_WEBSITE_WEB_RESEARCH=true), using scraped content only');
       } else {
-        console.log('❌ Web search business research failed or unavailable, continuing with basic analysis');
+        const researchTimeoutMs = Math.max(0, parseInt(process.env.WEBSITE_WEB_RESEARCH_TIMEOUT_MS || '0', 10)) || null;
+        const withTimeout = (promise, label) => {
+          if (!researchTimeoutMs) return promise;
+          return Promise.race([
+            promise,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`${label} timed out after ${researchTimeoutMs}ms`)), researchTimeoutMs)
+            )
+          ]);
+        };
+
+        report('Researching business (brand & competitors)');
+        report('Researching keywords & SEO');
+        console.log('=== STARTING WEB SEARCH RESEARCH (parallel) ===');
+
+        const businessPromise = withTimeout(this.performBusinessResearch(businessName, businessType, url), 'Business research')
+          .then((v) => { report('Researching business (brand & competitors)'); return { status: 'fulfilled', value: v }; })
+          .catch((e) => { console.error('Business Research Error:', e?.message || e); return { status: 'rejected', value: null }; });
+        const keywordPromise = withTimeout(this.performKeywordResearch(businessType, 'target customers', null), 'Keyword research')
+          .then((v) => { report('Researching keywords & SEO'); return { status: 'fulfilled', value: v }; })
+          .catch((e) => { console.error('Keyword Research Error:', e?.message || e); return { status: 'rejected', value: null }; });
+
+        [webSearchResults, keywordResults] = await Promise.all([businessPromise, keywordPromise]);
+
+        if (webSearchResults.status === 'fulfilled' && webSearchResults.value) {
+          webSearchData = `\n\nWEB SEARCH BUSINESS INTELLIGENCE:\n${webSearchResults.value}`;
+          console.log('✅ Web search business research completed');
+        }
+        if (keywordResults.status === 'fulfilled' && keywordResults.value) {
+          keywordData = `\n\nKEYWORD & SEO RESEARCH:\n${keywordResults.value}`;
+          console.log('✅ Keyword research completed');
+        }
       }
 
-      if (keywordResults.status === 'fulfilled' && keywordResults.value) {
-        keywordData = `\n\nKEYWORD & SEO RESEARCH:\n${keywordResults.value}`;
-        console.log('✅ Keyword research completed successfully');
-        console.log('Data length:', keywordResults.value?.length || 0);
-      } else {
-        console.log('❌ Keyword research failed or unavailable, continuing with basic analysis');
-      }
-      
+      report('Analyzing business from content');
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
       console.log('Using OpenAI model for final analysis:', model);
       
@@ -216,12 +226,12 @@ export class OpenAIService {
 
       const analysisResult = this.parseOpenAIResponse(response);
       
-      // Add web search enhancement status to the response
+      // Add web search enhancement status to the response (webSearchResults/keywordResults are { status, value } when research ran)
       const webSearchStatus = {
-        businessResearchSuccess: webSearchResults.status === 'fulfilled' && !!webSearchResults.value,
-        keywordResearchSuccess: keywordResults.status === 'fulfilled' && !!keywordResults.value,
-        enhancementComplete: (webSearchResults.status === 'fulfilled' && !!webSearchResults.value) || 
-                           (keywordResults.status === 'fulfilled' && !!keywordResults.value)
+        businessResearchSuccess: webSearchResults?.status === 'fulfilled' && !!webSearchResults?.value,
+        keywordResearchSuccess: keywordResults?.status === 'fulfilled' && !!keywordResults?.value,
+        enhancementComplete: (webSearchResults?.status === 'fulfilled' && !!webSearchResults?.value) ||
+                             (keywordResults?.status === 'fulfilled' && !!keywordResults?.value)
       };
       
       return {

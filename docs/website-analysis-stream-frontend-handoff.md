@@ -66,7 +66,7 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type** (e
 | Event type               | When                         | Use in UI |
 |--------------------------|------------------------------|-----------|
 | `connected`              | Right after opening stream   | Optional: confirm connection; `data.connectionId`, `data.jobId`. |
-| `progress-update`        | Progress / step changes      | Progress bar: `data.progress`, `data.currentStep`, `data.phase`, `data.estimatedTimeRemaining`. |
+| `progress-update`        | Progress / step changes      | Progress bar: `data.progress`, `data.currentStep`, `data.phase`, `data.estimatedTimeRemaining`. **phase** during "Analyzing website" can be: Fetching page content → Researching business (brand & competitors) → Researching keywords & SEO → Analyzing business from content → Analyzing customer psychology → Saving analysis & CTAs → Generating narrative summary. |
 | `scrape-phase`           | Granular scrape steps        | Optional: “thoughts” log during “Analyzing website” (e.g. “Navigating to page”). |
 | `scrape-result`          | Scrape finished              | **Show page preview**: `data.title`, `data.metaDescription`, `data.headings`, `data.scrapedAt`. |
 | `analysis-result`        | Analysis step finished       | **Show org summary, CTAs, metadata immediately** — no need to wait for audiences. |
