@@ -88,8 +88,14 @@ async function processWebsiteAnalysis(jobId, input, context) {
     }
   };
 
+  const onPartialResult = (segment, data) => {
+    const eventType = `${segment}-result`;
+    publishJobStreamEvent(connection, jobId, eventType, data);
+  };
+
   const result = await runWebsiteAnalysisPipeline(input, context, {
     onProgress,
+    onPartialResult,
     isCancelled: isCancelledFactory(jobId)
   });
   return result;

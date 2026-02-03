@@ -26,6 +26,10 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 } }
 { "type": "scrape-phase", "data": { "phase": "navigate", "message": "Navigating to page", "url": "https://..." } }
 { "type": "step-change", "data": { "progress": 0, "currentStep": null, "estimatedTimeRemaining": null } }
+{ "type": "analysis-result", "data": { "url", "scrapedAt", "analysis", "metadata", "ctas", "ctaCount", "hasSufficientCTAs", "organizationId" } }
+{ "type": "audiences-result", "data": { "scenarios": [ ... ] } }
+{ "type": "pitches-result", "data": { "scenarios": [ ... ] } }
+{ "type": "scenarios-result", "data": { "scenarios": [ ... ] } }
 { "type": "complete", "data": { "result": { ... } } }
 { "type": "failed", "data": { "error": "...", "errorCode": "..." } }
 ```
@@ -34,6 +38,10 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 - **progress-update** — Progress percentage, current step, estimated time remaining. Optional **phase** (granular sub-step for Thinking UX) and **detail** (e.g. "5 audiences").
 - **scrape-phase** — Granular website-scraping “thoughts”: one event per sub-step (validate, browser-launch, navigate, extract, ctas, fallbacks). Use for a step-by-step scraping log. **phase** = machine key, **message** = human-readable text, **url** only on first event.
 - **step-change** — Job started or step changed.
+- **analysis-result** — (website_analysis only) Analysis step finished; show org summary, CTAs, metadata immediately. `data`: url, scrapedAt, analysis, metadata, ctas, ctaCount, hasSufficientCTAs, organizationId.
+- **audiences-result** — (website_analysis only) Audiences step finished; scenarios have targetSegment, customerProblem, etc., no pitch/image yet.
+- **pitches-result** — (website_analysis only) Pitches step finished; scenarios include pitch, no imageUrl yet.
+- **scenarios-result** — (website_analysis only) Images step finished; scenarios include imageUrl. Full list before final persist.
 - **complete** — Job succeeded; `data.result` is the job result.
 - **failed** — Job failed or cancelled; `data.error`, `data.errorCode`.
 
