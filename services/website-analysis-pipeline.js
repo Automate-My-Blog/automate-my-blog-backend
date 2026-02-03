@@ -199,6 +199,25 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
   if (!webScraperService.isValidUrl(url)) throw new Error('Invalid URL format');
 
+  /** Start existing-audiences query early so it overlaps with scrape + analyze (faster). */
+  let existingAudiencesPromise = null;
+  if (userId || sessionId) {
+    const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
+    const queryParams = userId ? [userId] : [sessionId];
+    existingAudiencesPromise = db
+      .query(
+        `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
+        queryParams
+      )
+      .then((r) => r.rows)
+      .catch((err) => {
+        console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', err.message);
+        return [];
+      });
+  } else {
+    existingAudiencesPromise = Promise.resolve([]);
+  }
+
   /** Yield to event loop so each progress update is published in its own tick (avoids frontend receiving all at once). */
   const yieldTick = () => new Promise((r) => setImmediate(r));
 
@@ -339,34 +358,10 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     });
   }
 
-  // Query existing audiences to avoid duplicates
-  let existingAudiences = [];
-  try {
-    let whereConditions = [];
-    let queryParams = [];
-    let paramIndex = 1;
-
-    if (userId) {
-      whereConditions.push(`user_id = $${paramIndex}`);
-      queryParams.push(userId);
-      paramIndex++;
-    } else if (sessionId) {
-      whereConditions.push(`session_id = $${paramIndex}`);
-      queryParams.push(sessionId);
-      paramIndex++;
-    }
-
-    if (whereConditions.length > 0) {
-      const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
-      const result = await db.query(
-        `SELECT target_segment, customer_problem FROM audiences ${whereClause} ORDER BY created_at DESC`,
-        queryParams
-      );
-      existingAudiences = result.rows;
-      console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
-    }
-  } catch (error) {
-    console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', error.message);
+  // Use existing-audiences result from query started at pipeline start (overlaps with analyze)
+  const existingAudiences = await existingAudiencesPromise;
+  if (existingAudiences.length > 0) {
+    console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
   }
 
   await report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });
