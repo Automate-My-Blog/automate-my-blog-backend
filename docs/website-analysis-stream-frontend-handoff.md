@@ -1,8 +1,10 @@
 # Website analysis job stream — frontend hand-off
 
-Streaming website analysis so the UI can show **partial results as soon as each step finishes** instead of waiting for the full pipeline. Uses the existing job stream: create a website-analysis job, then open `GET /api/v1/jobs/:jobId/stream` and listen for **progress-update** plus **analysis-result**, **audiences-result**, **pitches-result**, **scenarios-result**, and **complete**.
+Streaming website analysis so the UI can show **partial results as soon as each step finishes** (and **per-item** as audiences, pitches, and images complete). Uses the existing job stream: create a website-analysis job, then open `GET /api/v1/jobs/:jobId/stream` and listen for **progress-update**, **scrape-result**, **analysis-result**, **audience-complete**, **audiences-result**, **pitch-complete**, **pitches-result**, **scenario-image-complete**, **scenarios-result**, and **complete**.
 
 **Related:** [job-stream-sse.md](./job-stream-sse.md) (event schema), [frontend-job-queue-handoff.md](./frontend-job-queue-handoff.md) (job create/poll/cancel).
+
+**Backward compatible:** Existing events (**analysis-result**, **audiences-result**, **pitches-result**, **scenarios-result**, **complete**) are unchanged. New events (**scrape-result**, **audience-complete**, **pitch-complete**, **scenario-image-complete**) are additive; ignore them if you only consume the step-level results.
 
 ---
 
@@ -61,24 +63,42 @@ First event you get is **connected** with `{ connectionId, jobId }`. Then you re
 
 All event `data` is JSON. Parse `event.data` and switch on the **event type** (e.g. `event.type` or the event name your SSE client exposes).
 
-| Event type          | When                         | Use in UI |
-|---------------------|------------------------------|-----------|
-| `connected`         | Right after opening stream   | Optional: confirm connection; `data.connectionId`, `data.jobId`. |
-| `progress-update`   | Progress / step changes      | Progress bar: `data.progress`, `data.currentStep`, `data.phase`, `data.estimatedTimeRemaining`. |
-| `scrape-phase`      | Granular scrape steps        | Optional: “thoughts” log during “Analyzing website” (e.g. “Navigating to page”). |
-| `analysis-result`   | Analysis step finished       | **Show org summary, CTAs, metadata immediately** — no need to wait for audiences. |
-| `audiences-result`  | Audiences step finished      | **Show audience cards** (targetSegment, customerProblem, etc.; no pitch/image yet). |
-| `pitches-result`    | Pitches step finished        | **Show pitches on each audience** (still no image). |
-| `scenarios-result`  | Images step finished         | **Show full scenarios with imageUrl**; then persist happens; you can replace with `complete` if you prefer. |
-| `complete`          | Full job done                | `data.result` = full result (same shape as sync API). Close stream. |
-| `failed`            | Job failed or cancelled      | `data.error`, `data.errorCode`. Close stream. |
-| `stream-timeout`    | ~10 min warning              | Stream will close soon; fall back to polling `GET /jobs/:jobId/status` if needed. |
+| Event type               | When                         | Use in UI |
+|--------------------------|------------------------------|-----------|
+| `connected`              | Right after opening stream   | Optional: confirm connection; `data.connectionId`, `data.jobId`. |
+| `progress-update`        | Progress / step changes      | Progress bar: `data.progress`, `data.currentStep`, `data.phase`, `data.estimatedTimeRemaining`. |
+| `scrape-phase`           | Granular scrape steps        | Optional: “thoughts” log during “Analyzing website” (e.g. “Navigating to page”). |
+| `scrape-result`          | Scrape finished              | **Show page preview**: `data.title`, `data.metaDescription`, `data.headings`, `data.scrapedAt`. |
+| `analysis-result`        | Analysis step finished       | **Show org summary, CTAs, metadata immediately** — no need to wait for audiences. |
+| `audience-complete`      | One audience streamed        | **Append one audience card** (per-item); `data.audience` = one scenario (no pitch/image). |
+| `audiences-result`       | Audiences step finished      | **Full list** of audience cards (or replace with `data.scenarios`). |
+| `pitch-complete`         | One pitch ready              | **Update one card** with pitch; `data.index`, `data.scenario` (includes `pitch`). |
+| `pitches-result`         | Pitches step finished        | **Full list** with pitches (still no image). |
+| `scenario-image-complete`| One image ready              | **Update one card** with image; `data.index`, `data.scenario` (includes `imageUrl`). |
+| `scenarios-result`       | Images step finished         | **Full list** with imageUrl; then persist. |
+| `complete`               | Full job done                | `data.result` = full result (same shape as sync API). Close stream. |
+| `failed`                 | Job failed or cancelled      | `data.error`, `data.errorCode`. Close stream. |
+| `stream-timeout`         | ~10 min warning              | Stream will close soon; fall back to polling `GET /jobs/:jobId/status` if needed. |
 
 ---
 
 ## 3. Partial result payload shapes
 
-### 3.1 `analysis-result`
+### 3.1 `scrape-result`
+
+Emitted as soon as the page is scraped (before analysis). Use it to show “We found: [title]” or a simple page preview.
+
+```ts
+{
+  url: string;
+  title: string;
+  metaDescription: string;
+  headings: string[];
+  scrapedAt: string;  // ISO date
+}
+```
+
+### 3.2 `analysis-result`
 
 Emitted when the “Analyzing website” step (scrape + analysis + narrative) is done. Use it to render org summary, CTAs, and metadata right away.
 
@@ -110,7 +130,15 @@ Emitted when the “Analyzing website” step (scrape + analysis + narrative) is
 }
 ```
 
-### 3.2 `audiences-result`
+### 3.3 `audience-complete` (per-item)
+
+Emitted as each audience scenario is parsed during “Generating audiences”. Append one card per event; `data.audience` has the same shape as one element of `audiences-result.scenarios` (no pitch/image).
+
+```ts
+{ audience: { targetSegment, customerProblem, businessValue, customerLanguage, seoKeywords, conversionPath, contentIdeas, ... } }
+```
+
+### 3.4 `audiences-result`
 
 Emitted when the “Generating audiences” step is done. Scenarios have **no** `pitch` or `imageUrl` yet.
 
@@ -129,7 +157,15 @@ Emitted when the “Generating audiences” step is done. Scenarios have **no** 
 }
 ```
 
-### 3.3 `pitches-result`
+### 3.5 `pitch-complete` (per-item)
+
+Emitted as each pitch is generated. Update the card at `data.index` with `data.scenario` (includes `pitch`).
+
+```ts
+{ index: number; scenario: { ...scenario, pitch: string; ... } }
+```
+
+### 3.6 `pitches-result`
 
 Emitted when the “Generating pitches” step is done. Same as `audiences-result` but each scenario now has **pitch**; still **no imageUrl**.
 
@@ -143,7 +179,15 @@ Emitted when the “Generating pitches” step is done. Same as `audiences-resul
 }
 ```
 
-### 3.4 `scenarios-result`
+### 3.7 `scenario-image-complete` (per-item)
+
+Emitted as each image is generated. Update the card at `data.index` with `data.scenario` (includes `imageUrl`).
+
+```ts
+{ index: number; scenario: { ...scenario, imageUrl?: string; ... } }
+```
+
+### 3.8 `scenarios-result`
 
 Emitted when the “Generating images” step is done. Scenarios include **imageUrl**. This is the full list before the final DB persist; **complete** will then deliver the same (plus url, analysis, ctas, etc.) in `data.result`.
 
@@ -161,7 +205,7 @@ Emitted when the “Generating images” step is done. Scenarios include **image
 }
 ```
 
-### 3.5 `complete`
+### 3.9 `complete`
 
 Same as today: `data.result` is the full website-analysis result (success, url, scrapedAt, analysis, metadata, scenarios, ctas, ctaCount, hasSufficientCTAs, organizationId). Use it as the single source of truth once the job is done, or to replace any partial state you had built from the partial-result events.
 
@@ -173,18 +217,22 @@ Same as today: `data.result` is the full website-analysis result (success, url, 
 2. `POST /api/v1/jobs/website-analysis` with `{ url }` → get `jobId`.
 3. Open `EventSource(\`${API_BASE}/api/v1/jobs/${jobId}/stream?token=...\`)` (or `?sessionId=...`).
 4. On **progress-update**: update progress bar / step label / phase text.
-5. On **analysis-result**: show org summary, CTAs, metadata (e.g. summary card, CTA list). User sees value before audiences are ready.
-6. On **audiences-result**: show audience cards (segment, problem, no pitch/image yet — e.g. placeholders for pitch and image).
-7. On **pitches-result**: update the same cards with pitch text (or replace scenarios with this list).
-8. On **scenarios-result**: update cards with imageUrl (and any revenue/profit if you display them).
-9. On **complete**: set final state from `data.result`, close EventSource, show “Done” (or replace partial state with `data.result`).
-10. On **failed**: close EventSource, show `data.error` (and optionally `data.errorCode`).
+5. On **scrape-result**: optional — show “We found: [title]” or page preview (title, metaDescription, headings).
+6. On **analysis-result**: show org summary, CTAs, metadata (e.g. summary card, CTA list). User sees value before audiences are ready.
+7. On **audience-complete**: append one audience card (per-item; no pitch/image yet). Or wait for **audiences-result** and show the full list.
+8. On **audiences-result**: show full list of audience cards (or replace with `data.scenarios` if you didn’t use audience-complete).
+9. On **pitch-complete**: update the card at `data.index` with `data.scenario.pitch`. Or wait for **pitches-result** and update all.
+10. On **pitches-result**: update all cards with pitch text (or replace scenarios with this list).
+11. On **scenario-image-complete**: update the card at `data.index` with `data.scenario.imageUrl`. Or wait for **scenarios-result**.
+12. On **scenarios-result**: update all cards with imageUrl (and any revenue/profit if you display them).
+13. On **complete**: set final state from `data.result`, close EventSource, show “Done” (or replace partial state with `data.result`).
+14. On **failed**: close EventSource, show `data.error` (and optionally `data.errorCode`).
 
-You can ignore partial-result events and only handle **complete** (same behavior as before, just over SSE); the partial events are for **incremental UI**.
+**Minimal (backward compatible):** Ignore per-item events and only handle **scrape-result** (optional), **analysis-result**, **audiences-result**, **pitches-result**, **scenarios-result**, and **complete** — same as before; the per-item events are for **incremental UI** (show each audience/pitch/image as it lands).
 
 ---
 
-## 5. Example: listening for partial results
+## 5. Example: listening for partial and per-item results
 
 ```js
 const jobId = response.jobId; // from POST /jobs/website-analysis
@@ -206,6 +254,11 @@ es.addEventListener('progress-update', (e) => {
   setPhase(data.phase);
 });
 
+es.addEventListener('scrape-result', (e) => {
+  const data = JSON.parse(e.data);
+  setPagePreview(data.title, data.metaDescription, data.headings);
+});
+
 es.addEventListener('analysis-result', (e) => {
   const data = JSON.parse(e.data);
   analysis = data;
@@ -214,16 +267,32 @@ es.addEventListener('analysis-result', (e) => {
   setMetadata(data.metadata);
 });
 
+// Per-item: append each audience as it streams
+es.addEventListener('audience-complete', (e) => {
+  const data = JSON.parse(e.data);
+  appendAudienceCard(data.audience);
+});
+
 es.addEventListener('audiences-result', (e) => {
   const data = JSON.parse(e.data);
   scenarios = data.scenarios;
-  setAudienceCards(scenarios); // no pitch/image yet
+  setAudienceCards(scenarios); // or replace if you didn’t use audience-complete
+});
+
+es.addEventListener('pitch-complete', (e) => {
+  const data = JSON.parse(e.data);
+  updateAudienceCard(data.index, data.scenario); // set pitch on card at index
 });
 
 es.addEventListener('pitches-result', (e) => {
   const data = JSON.parse(e.data);
   scenarios = data.scenarios;
   setAudienceCards(scenarios); // now with pitch
+});
+
+es.addEventListener('scenario-image-complete', (e) => {
+  const data = JSON.parse(e.data);
+  updateAudienceCard(data.index, data.scenario); // set imageUrl on card at index
 });
 
 es.addEventListener('scenarios-result', (e) => {
@@ -244,6 +313,8 @@ es.addEventListener('failed', (e) => {
   es.close();
 });
 ```
+
+**Backward compatible:** Omit listeners for `scrape-result`, `audience-complete`, `pitch-complete`, and `scenario-image-complete`; rely on **audiences-result**, **pitches-result**, **scenarios-result**, and **complete** as before.
 
 ---
 

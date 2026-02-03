@@ -26,9 +26,13 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 } }
 { "type": "scrape-phase", "data": { "phase": "navigate", "message": "Navigating to page", "url": "https://..." } }
 { "type": "step-change", "data": { "progress": 0, "currentStep": null, "estimatedTimeRemaining": null } }
+{ "type": "scrape-result", "data": { "url", "title", "metaDescription", "headings", "scrapedAt" } }
 { "type": "analysis-result", "data": { "url", "scrapedAt", "analysis", "metadata", "ctas", "ctaCount", "hasSufficientCTAs", "organizationId" } }
+{ "type": "audience-complete", "data": { "audience": { ... } } }
 { "type": "audiences-result", "data": { "scenarios": [ ... ] } }
+{ "type": "pitch-complete", "data": { "index", "scenario": { ... } } }
 { "type": "pitches-result", "data": { "scenarios": [ ... ] } }
+{ "type": "scenario-image-complete", "data": { "index", "scenario": { ... } } }
 { "type": "scenarios-result", "data": { "scenarios": [ ... ] } }
 { "type": "complete", "data": { "result": { ... } } }
 { "type": "failed", "data": { "error": "...", "errorCode": "..." } }
@@ -38,10 +42,14 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 - **progress-update** — Progress percentage, current step, estimated time remaining. Optional **phase** (granular sub-step for Thinking UX) and **detail** (e.g. "5 audiences").
 - **scrape-phase** — Granular website-scraping “thoughts”: one event per sub-step (validate, browser-launch, navigate, extract, ctas, fallbacks). Use for a step-by-step scraping log. **phase** = machine key, **message** = human-readable text, **url** only on first event.
 - **step-change** — Job started or step changed.
+- **scrape-result** — (website_analysis only) Scrape finished; show page title, metaDescription, headings immediately. `data`: url, title, metaDescription, headings, scrapedAt.
 - **analysis-result** — (website_analysis only) Analysis step finished; show org summary, CTAs, metadata immediately. `data`: url, scrapedAt, analysis, metadata, ctas, ctaCount, hasSufficientCTAs, organizationId.
-- **audiences-result** — (website_analysis only) Audiences step finished; scenarios have targetSegment, customerProblem, etc., no pitch/image yet.
-- **pitches-result** — (website_analysis only) Pitches step finished; scenarios include pitch, no imageUrl yet.
-- **scenarios-result** — (website_analysis only) Images step finished; scenarios include imageUrl. Full list before final persist.
+- **audience-complete** — (website_analysis only) One audience scenario streamed; `data.audience` is a single scenario (no pitch/image). Emitted as each is parsed during “Generating audiences”.
+- **audiences-result** — (website_analysis only) Audiences step finished; full `data.scenarios` (targetSegment, customerProblem, etc., no pitch/image yet).
+- **pitch-complete** — (website_analysis only) One scenario’s pitch ready; `data.index`, `data.scenario` (includes pitch). Emitted as each pitch completes.
+- **pitches-result** — (website_analysis only) Pitches step finished; full `data.scenarios` with pitch, no imageUrl yet.
+- **scenario-image-complete** — (website_analysis only) One scenario’s image ready; `data.index`, `data.scenario` (includes imageUrl). Emitted as each image completes.
+- **scenarios-result** — (website_analysis only) Images step finished; full `data.scenarios` with imageUrl. Full list before final persist.
 - **complete** — Job succeeded; `data.result` is the job result.
 - **failed** — Job failed or cancelled; `data.error`, `data.errorCode`.
 
