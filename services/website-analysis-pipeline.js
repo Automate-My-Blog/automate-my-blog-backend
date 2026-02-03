@@ -233,6 +233,15 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const scrapedContent = await webScraperService.scrapeWebsite(url, { onScrapeProgress });
+  if (typeof onPartialResult === 'function') {
+    onPartialResult('scrape-result', {
+      url,
+      title: scrapedContent.title,
+      metaDescription: scrapedContent.metaDescription,
+      headings: scrapedContent.headings || [],
+      scrapedAt: scrapedContent.scrapedAt
+    });
+  }
   const fullContent = [
     `Title: ${scrapedContent.title}`,
     `Meta Description: ${scrapedContent.metaDescription}`,
@@ -357,7 +366,15 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (await checkCancelled()) throw new Error('Cancelled');
   await report(1, PROGRESS_STEPS[1], 15, 40, { phase: PROGRESS_PHASES[1][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
-  let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
+  let scenarios;
+  if (typeof onPartialResult === 'function' && typeof openaiService.generateAudienceScenariosStreamWithCallback === 'function') {
+    scenarios = await openaiService.generateAudienceScenariosStreamWithCallback(
+      analysis, '', '', existingAudiences,
+      (audience) => onPartialResult('audience-complete', { audience })
+    );
+  } else {
+    scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
+  }
   await report(1, PROGRESS_STEPS[1], 80, 5, { phase: PROGRESS_PHASES[1][2] });
   await report(1, PROGRESS_STEPS[1], 100, 0, { phase: PROGRESS_PHASES[1][2] });
   if (typeof onPartialResult === 'function') {
@@ -374,7 +391,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   if (await checkCancelled()) throw new Error('Cancelled');
-  scenarios = await openaiService.generatePitches(scenarios, businessContext);
+  scenarios = await openaiService.generatePitches(scenarios, businessContext, typeof onPartialResult === 'function' ? {
+    onPitchComplete: (scenario, index) => onPartialResult('pitch-complete', { index, scenario })
+  } : {});
   await report(2, PROGRESS_STEPS[2], 80, 5, {
     phase: PROGRESS_PHASES[2][1],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
@@ -390,7 +409,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   if (await checkCancelled()) throw new Error('Cancelled');
-  scenarios = await openaiService.generateAudienceImages(scenarios, brandContext);
+  scenarios = await openaiService.generateAudienceImages(scenarios, brandContext, typeof onPartialResult === 'function' ? {
+    onImageComplete: (scenario, index) => onPartialResult('scenario-image-complete', { index, scenario })
+  } : {});
   await report(3, PROGRESS_STEPS[3], 70, 3, {
     phase: PROGRESS_PHASES[3][0],
     detail: scenarios.length ? `${scenarios.length} audiences` : null

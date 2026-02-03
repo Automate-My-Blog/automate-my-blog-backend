@@ -88,8 +88,11 @@ async function processWebsiteAnalysis(jobId, input, context) {
     }
   };
 
+  const FULL_RESULT_SEGMENTS = ['analysis', 'audiences', 'pitches', 'scenarios'];
   const onPartialResult = (segment, data) => {
-    const eventType = `${segment}-result`;
+    const eventType = FULL_RESULT_SEGMENTS.includes(segment)
+      ? `${segment}-result`
+      : segment;
     publishJobStreamEvent(connection, jobId, eventType, data);
   };
 

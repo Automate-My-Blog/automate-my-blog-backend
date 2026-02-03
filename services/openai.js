@@ -983,19 +983,23 @@ Focus: Simple character that clearly represents the audience demographic. This i
    * Generate DALL-E images for multiple audience scenarios in parallel
    * @param {Array} scenarios - Array of audience scenarios
    * @param {Object} brandContext - Brand voice and style context
+   * @param {{ onImageComplete?: (scenario: object, index: number) => void }} [options]
    */
-  async generateAudienceImages(scenarios, brandContext = {}) {
+  async generateAudienceImages(scenarios, brandContext = {}, options = {}) {
     try {
+      const { onImageComplete } = options;
       console.log(`🎨 Generating DALL-E images for ${scenarios.length} audiences with brand voice: ${brandContext.brandVoice || 'Professional'}...`);
 
       // Generate images in parallel to minimize total time
       const imagePromises = scenarios.map(async (scenario, index) => {
         console.log(`Generating image ${index + 1}/${scenarios.length} for: ${scenario.targetSegment.demographics}`);
         const imageUrl = await this.generateAudienceImage(scenario, brandContext);
-        return {
+        const result = {
           ...scenario,
           imageUrl
         };
+        if (typeof onImageComplete === 'function') onImageComplete(result, index);
+        return result;
       });
 
       const scenariosWithImages = await Promise.all(imagePromises);
@@ -1873,13 +1877,120 @@ Return only audiences with strong business potential. Order by priority.`
   }
 
   /**
+   * Stream audience scenarios and call onAudience for each parsed object; returns full array.
+   * Used by job pipeline for per-audience partial results (audience-complete events).
+   * @param {Object} analysisData
+   * @param {string} webSearchData
+   * @param {string} keywordData
+   * @param {Array} existingAudiences
+   * @param { (scenario: object) => void } [onAudience]
+   * @returns {Promise<Array>}
+   */
+  async generateAudienceScenariosStreamWithCallback(analysisData, webSearchData = '', keywordData = '', existingAudiences = [], onAudience = null) {
+    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+    let existingAudiencesText = '';
+    if (existingAudiences.length > 0) {
+      const audienceDescriptions = existingAudiences.map((aud, idx) => {
+        let demographics = 'Unknown demographics';
+        try {
+          const parsed = typeof aud.target_segment === 'string' ? JSON.parse(aud.target_segment) : aud.target_segment;
+          demographics = parsed?.demographics || 'Unknown demographics';
+        } catch (e) {}
+        return `${idx + 1}. ${aud.customer_problem} - ${demographics}`;
+      }).join('\n');
+      existingAudiencesText = `
+
+EXISTING AUDIENCES (DO NOT DUPLICATE):
+You have already created ${existingAudiences.length} audience(s) for this user/website:
+${audienceDescriptions}
+
+CRITICAL: Generate ONLY net new audiences that are completely different from the above.`;
+    }
+    const isIncrementalAnalysis = existingAudiences.length > 0;
+    const systemPrompt = isIncrementalAnalysis
+      ? `You are a customer psychology expert. Generate additional audience scenarios only when they represent genuine opportunities. Avoid duplicating existing audiences.`
+      : `You are a customer psychology expert. Generate 4-5 distinct audience scenarios for content marketing.`;
+    const targetCount = isIncrementalAnalysis ? '1-2 additional' : '4-5';
+    const qualityNote = isIncrementalAnalysis
+      ? '- Generate 1-2 additional audience scenarios ONLY if genuine opportunities exist\n- Do NOT force audiences to reach a number'
+      : '- Generate 4-5 distinct audience scenarios\n- Each must have strong business value';
+
+    const stream = await openai.chat.completions.create({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        {
+          role: 'user',
+          content: `Based on this business analysis, identify ${targetCount} genuine audience opportunities:
+
+Business Context:
+- Business Type: ${analysisData?.businessType ?? 'Business'}
+- Business Name: ${analysisData?.businessName ?? analysisData?.companyName ?? 'Company'}
+- Target Audience: ${analysisData?.targetAudience ?? 'General market'}
+- Business Model: ${analysisData?.businessModel ?? 'Service-based'}
+- Content Focus: ${analysisData?.contentFocus ?? 'Customer problems and solutions'}
+${webSearchData}
+${keywordData}${existingAudiencesText}
+
+CRITICAL: ${qualityNote}
+Generate scenarios as JSON array: [ { "customerProblem": "...", "targetSegment": { "demographics": "...", "psychographics": "...", "searchBehavior": "..." }, "businessValue": { "searchVolume": "...", "competition": "...", "conversionPotential": "...", "priority": 1 }, "customerLanguage": [], "seoKeywords": [], "conversionPath": "...", "contentIdeas": [] }, ... ]
+Return only audiences with strong business potential. Order by priority.`
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 3500,
+      stream: true
+    });
+
+    let buffer = '';
+    const allAudiences = [];
+    const extractCompleteObjects = (buf) => {
+      let depth = 0;
+      let startIdx = -1;
+      const objects = [];
+      for (let i = 0; i < buf.length; i++) {
+        if (buf[i] === '{') {
+          if (depth === 0) startIdx = i;
+          depth++;
+        } else if (buf[i] === '}') {
+          depth--;
+          if (depth === 0 && startIdx >= 0) {
+            try {
+              const obj = JSON.parse(buf.slice(startIdx, i + 1));
+              objects.push(obj);
+            } catch (e) {}
+            startIdx = i + 1;
+          }
+        }
+      }
+      return { objects, remainingBuffer: startIdx >= 0 ? buf.slice(startIdx) : '' };
+    };
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? '';
+      if (delta) {
+        buffer += delta;
+        const { objects, remainingBuffer } = extractCompleteObjects(buffer);
+        buffer = remainingBuffer;
+        for (const obj of objects) {
+          allAudiences.push(obj);
+          if (typeof onAudience === 'function') onAudience(obj);
+        }
+      }
+    }
+    return allAudiences;
+  }
+
+  /**
    * Generate step-by-step funnel pitches for audience scenarios
    * @param {Array} scenarios - Audience scenarios without pitches
    * @param {Object} businessContext - Business context for revenue calculations
+   * @param {{ onPitchComplete?: (scenario: object, index: number) => void }} [options]
    * @returns {Promise<Array>} Scenarios with generated pitches
    */
-  async generatePitches(scenarios, businessContext) {
+  async generatePitches(scenarios, businessContext, options = {}) {
     try {
+      const { onPitchComplete } = options;
       console.log('💰 Generating conversion funnel pitches...');
 
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
@@ -1951,11 +2062,13 @@ Use their specific emotional state and urgency to justify rates. Plain text only
         // Extract profit metrics from Step 5 for database storage
         const metrics = this.extractProfitMetrics(pitch);
 
-        return {
+        const result = {
           ...scenario,
           pitch,
           ...metrics
         };
+        if (typeof onPitchComplete === 'function') onPitchComplete(result, index);
+        return result;
       });
 
       const scenariosWithPitches = await Promise.all(pitchPromises);
