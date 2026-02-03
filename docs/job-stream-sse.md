@@ -102,7 +102,7 @@ For `website_analysis` jobs, **progress-update** events include a **phase** fiel
 
 | Step | Phases |
 |------|--------|
-| Analyzing website | Fetching page content (with scrape-phase thoughts above) → Researching business context → Analyzing customer psychology → Saving analysis & CTAs → Generating narrative summary |
+| Analyzing website | Fetching page content (with scrape-phase thoughts above) → Researching business (brand & competitors) → Researching keywords & SEO → Analyzing business from content → Analyzing customer psychology → Saving analysis & CTAs → Generating narrative summary |
 | Generating audiences | Checking existing audiences → Identifying audience opportunities → Creating customer scenarios |
 | Generating pitches | Calculating revenue projections → Generating conversion pitches |
 | Generating images | Creating audience visuals → Saving strategies |
