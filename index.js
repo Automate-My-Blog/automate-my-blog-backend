@@ -28,6 +28,7 @@ import contentUploadRoutes from './routes/content-upload.js';
 import manualInputRoutes from './routes/manual-inputs.js';
 import visualContentRoutes from './routes/visual-content.js';
 import enhancedBlogGenerationRoutes from './routes/enhanced-blog-generation.js';
+import blogRoutes from './routes/blog.js';
 import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -146,6 +147,7 @@ app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), 
 app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
 app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
 app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
+app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
