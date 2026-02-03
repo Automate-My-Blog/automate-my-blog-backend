@@ -36,6 +36,36 @@ class StreamManager extends EventEmitter {
     this._redisSubscribed = false;
     this._redisJobPatternSubscribed = false;
     this._keepaliveMs = DEFAULT_KEEPALIVE_MS;
+    /** @type {{ connectionIds: string[], event: string, data: object }[]} Queue so job events are sent one per tick (avoids frontend bursts). */
+    this._jobEventQueue = [];
+    this._jobEventDrainScheduled = false;
+  }
+
+  /**
+   * Enqueue a job event for delivery; drain sends one event per tick so the client receives updates in real time.
+   * @param {string[]} connectionIds
+   * @param {string} event
+   * @param {object} data
+   */
+  _enqueueJobEventDelivery(connectionIds, event, data) {
+    this._jobEventQueue.push({ connectionIds, event, data });
+    if (!this._jobEventDrainScheduled) {
+      this._jobEventDrainScheduled = true;
+      setImmediate(() => this._drainJobEventQueue());
+    }
+  }
+
+  _drainJobEventQueue() {
+    this._jobEventDrainScheduled = false;
+    const item = this._jobEventQueue.shift();
+    if (!item) return;
+    for (const connectionId of item.connectionIds) {
+      this.sendToConnection(connectionId, item.event, item.data);
+    }
+    if (this._jobEventQueue.length > 0) {
+      this._jobEventDrainScheduled = true;
+      setImmediate(() => this._drainJobEventQueue());
+    }
   }
 
   /**
@@ -254,9 +284,7 @@ class StreamManager extends EventEmitter {
           if (!set || set.size === 0) return;
           try {
             const { event, data } = JSON.parse(message);
-            for (const connectionId of set) {
-              this.sendToConnection(connectionId, event, data);
-            }
+            this._enqueueJobEventDelivery(Array.from(set), event, data);
           } catch (e) {
             console.error('[stream-manager] Invalid Redis job event message:', e?.message || e);
           }
