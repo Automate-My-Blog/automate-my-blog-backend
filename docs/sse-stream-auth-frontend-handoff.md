@@ -15,6 +15,8 @@ Endpoints that support **session** for the POST (and return a usable `streamUrl`
 
 - `POST /api/v1/topics/generate-stream` — accepts JWT or `x-session-id`; response `streamUrl` contains `?token=...` or `?sessionId=...` so it’s ready for EventSource.
 
+- `POST /api/v1/tweets/search-for-topic-stream` — same; accepts JWT or `x-session-id`; response `streamUrl` ready for EventSource.
+
 Others (e.g. blog) may require a logged-in user for the POST; the **SSE GET** still accepts either auth type below.
 
 ---
@@ -80,5 +82,7 @@ No frontend change is required if you already use `streamUrl` from the response;
 ## 5. Reference
 
 - Topics stream contract: [docs/topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
+- Tweet search stream contract: [docs/tweets-search-stream-frontend-handoff.md](./tweets-search-stream-frontend-handoff.md)
 - Backend stream route: `routes/stream.js` — `GET /api/v1/stream/:connectionId`
 - Backend topics stream: `routes/topics.js` — `POST /api/v1/topics/generate-stream`
+- Backend tweets stream: `routes/tweets.js` — `POST /api/v1/tweets/search-for-topic-stream`
