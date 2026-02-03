@@ -152,6 +152,7 @@ app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(auth
 app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes);
 app.use('/api/v1/topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
 app.use('/api/v1/tweets', authService.optionalAuthMiddleware.bind(authService), tweetRoutes);
+app.use('/api/v1/trending-topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
@@ -356,6 +357,7 @@ app.get('/api', (req, res) => {
       'POST /api/trending-topics': 'Generate trending blog topics for a business',
       'POST /api/v1/topics/generate-stream': 'Stream topic generation (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/v1/tweets/search-for-topic-stream': 'Stream tweet search for a topic (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
+      'POST /api/v1/trending-topics/stream': 'Stream trending topics (same as topics/generate-stream; returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/generate-content': 'Generate complete blog post content',
       'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',
       'POST /api/export': 'Export blog content in different formats (markdown, html, json)',
