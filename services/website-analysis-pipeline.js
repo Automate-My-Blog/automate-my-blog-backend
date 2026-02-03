@@ -89,8 +89,7 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
     existing = r.rows[0];
   }
 
-  if (existing) {
-    organizationId = existing.id;
+  const updateExistingOrg = async (id) => {
     await db.query(
       `UPDATE organizations SET
         website_url = $1, business_type = $2, industry_category = $3, business_model = $4,
@@ -99,26 +98,56 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
        WHERE id = $11`,
       [orgData.website_url, orgData.business_type, orgData.industry_category, orgData.business_model,
         orgData.company_size, orgData.description, orgData.target_audience, orgData.brand_voice,
-        orgData.website_goals, orgData.last_analyzed_at, organizationId]
+        orgData.website_goals, orgData.last_analyzed_at, id]
     );
     await db.query(
       'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',
-      [organizationId]
+      [id]
     );
+  };
+
+  if (existing) {
+    organizationId = existing.id;
+    await updateExistingOrg(organizationId);
   } else {
     organizationId = uuidv4();
-    const slug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
+    const slugBase = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
     const ownerId = userId || null;
     const sessId = userId ? null : (sessionId || null);
-    await db.query(
-      `INSERT INTO organizations (id, slug, name, website_url, business_type, industry_category, business_model,
-        company_size, description, target_audience, brand_voice, website_goals, last_analyzed_at, created_at, updated_at,
-        owner_user_id, session_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
-      [organizationId, slug, orgData.name, orgData.website_url, orgData.business_type, orgData.industry_category,
-        orgData.business_model, orgData.company_size, orgData.description, orgData.target_audience, orgData.brand_voice,
-        orgData.website_goals, orgData.last_analyzed_at, now, now, ownerId, sessId]
-    );
+    let created = false;
+
+    for (let attempt = 0; attempt < 3 && !created; attempt++) {
+      const slug = attempt === 0 ? slugBase : `${slugBase}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      try {
+        await db.query(
+          `INSERT INTO organizations (id, slug, name, website_url, business_type, industry_category, business_model,
+            company_size, description, target_audience, brand_voice, website_goals, last_analyzed_at, created_at, updated_at,
+            owner_user_id, session_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+          [organizationId, slug, orgData.name, orgData.website_url, orgData.business_type, orgData.industry_category,
+            orgData.business_model, orgData.company_size, orgData.description, orgData.target_audience, orgData.brand_voice,
+            orgData.website_goals, orgData.last_analyzed_at, now, now, ownerId, sessId]
+        );
+        created = true;
+      } catch (insertError) {
+        if (insertError.code === '23505' && insertError.constraint === 'organizations_slug_key') {
+          // If another request already created an org for this URL, reuse it instead of failing.
+          const byUrl = await db.query(
+            'SELECT id FROM organizations WHERE website_url = $1 ORDER BY created_at DESC LIMIT 1',
+            [url]
+          );
+          if (byUrl.rows.length > 0) {
+            organizationId = byUrl.rows[0].id;
+            await updateExistingOrg(organizationId);
+            created = true;
+          } else if (attempt === 2) {
+            throw insertError;
+          }
+        } else {
+          throw insertError;
+        }
+      }
+    }
   }
 
   const intelId = uuidv4();
@@ -194,6 +223,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   const { url } = input;
   const { userId, sessionId } = context;
   const { onProgress, onPartialResult, isCancelled } = opts;
+  const CACHE_TTL_DAYS = 30;
 
   if (!url) throw new Error('url is required');
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
@@ -231,6 +261,129 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     const v = isCancelled();
     return typeof v?.then === 'function' ? await v : !!v;
   };
+
+  const findOrgForCache = async () => {
+    const websiteDomain = new URL(url).hostname;
+    const urlVariants = [url, `http://${websiteDomain}`, `https://${websiteDomain}`];
+    if (userId) {
+      const result = await db.query(
+        `SELECT id, website_url, last_analyzed_at
+         FROM organizations
+         WHERE owner_user_id = $1
+           AND website_url = ANY($2)
+           AND last_analyzed_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [userId, urlVariants]
+      );
+      return result.rows[0] || null;
+    }
+    if (sessionId) {
+      const result = await db.query(
+        `SELECT id, website_url, last_analyzed_at
+         FROM organizations
+         WHERE owner_user_id IS NULL
+           AND session_id = $1
+           AND website_url = ANY($2)
+           AND last_analyzed_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
+         ORDER BY created_at DESC
+         LIMIT 1`,
+        [sessionId, urlVariants]
+      );
+      return result.rows[0] || null;
+    }
+    return null;
+  };
+
+  const maybeReturnCachedResult = async () => {
+    const org = await findOrgForCache();
+    if (!org?.id) return null;
+    const intelResult = await db.query(
+      `SELECT raw_openai_response, created_at
+       FROM organization_intelligence
+       WHERE organization_id = $1 AND is_current = TRUE
+         AND created_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [org.id]
+    );
+    const intelRow = intelResult.rows[0];
+    if (!intelRow) return null;
+
+    const ctaResult = await db.query(
+      `SELECT id, cta_text as text, cta_type as type, href, placement, conversion_potential, data_source
+       FROM cta_analysis WHERE organization_id = $1 ORDER BY conversion_potential DESC LIMIT 5`,
+      [org.id]
+    );
+    const storedCTAs = ctaResult.rows || [];
+
+    const audiencesResult = await db.query(
+      `SELECT target_segment, customer_problem, customer_language, conversion_path, business_value,
+              pitch, image_url, projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
+       FROM audiences
+       WHERE organization_intelligence_id = (
+         SELECT id FROM organization_intelligence WHERE organization_id = $1 AND is_current = TRUE
+         ORDER BY created_at DESC LIMIT 1
+       )
+       ORDER BY created_at DESC`,
+      [org.id]
+    );
+    const scenarios = (audiencesResult.rows || []).map((row) => ({
+      targetSegment: row.target_segment,
+      customerProblem: row.customer_problem,
+      customerLanguage: row.customer_language,
+      conversionPath: row.conversion_path,
+      businessValue: row.business_value,
+      pitch: row.pitch,
+      imageUrl: row.image_url,
+      projectedRevenueLow: row.projected_revenue_low,
+      projectedRevenueHigh: row.projected_revenue_high,
+      projectedProfitLow: row.projected_profit_low,
+      projectedProfitHigh: row.projected_profit_high
+    }));
+
+    const analysis = {
+      ...(intelRow.raw_openai_response || {}),
+      organizationId: org.id
+    };
+    const result = {
+      success: true,
+      fromCache: true,
+      cacheTtlDays: CACHE_TTL_DAYS,
+      url,
+      scrapedAt: org.last_analyzed_at || intelRow.created_at,
+      analysis,
+      metadata: { title: null, headings: [] },
+      scenarios,
+      ctas: storedCTAs,
+      ctaCount: storedCTAs.length,
+      hasSufficientCTAs: storedCTAs.length >= 3,
+      organizationId: org.id
+    };
+
+    if (typeof onPartialResult === 'function') {
+      onPartialResult('analysis', {
+        url: result.url,
+        scrapedAt: result.scrapedAt,
+        analysis: result.analysis,
+        metadata: result.metadata,
+        ctas: result.ctas,
+        ctaCount: result.ctaCount,
+        hasSufficientCTAs: result.hasSufficientCTAs,
+        organizationId: result.organizationId
+      });
+      if (result.scenarios.length > 0) {
+        onPartialResult('audiences', { scenarios: [...result.scenarios] });
+        onPartialResult('pitches', { scenarios: [...result.scenarios] });
+        onPartialResult('scenarios', { scenarios: [...result.scenarios] });
+      }
+    }
+    await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6], detail: 'cached' });
+    return result;
+  };
+
+  const cachedResult = await maybeReturnCachedResult();
+  if (cachedResult) return cachedResult;
 
   /** Progress 2–10% during scrape; granular phases published to stream as thoughts. */
   const SCRAPE_PROGRESS = {
