@@ -34,6 +34,10 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 { "type": "pitches-result", "data": { "scenarios": [ ... ] } }
 { "type": "scenario-image-complete", "data": { "index", "scenario": { ... } } }
 { "type": "scenarios-result", "data": { "scenarios": [ ... ] } }
+{ "type": "context-result", "data": { "organizationId", "completenessScore", "availability" } }
+{ "type": "blog-result", "data": { "title", "content", "metaDescription", "tags", "seoKeywords", ... } }
+{ "type": "visuals-result", "data": { "visualContentSuggestions": [ ... ] } }
+{ "type": "seo-result", "data": { "seoAnalysis": { ... } } }
 { "type": "complete", "data": { "result": { ... } } }
 { "type": "failed", "data": { "error": "...", "errorCode": "..." } }
 ```
@@ -50,6 +54,10 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 - **pitches-result** — (website_analysis only) Pitches step finished; full `data.scenarios` with pitch, no imageUrl yet.
 - **scenario-image-complete** — (website_analysis only) One scenario’s image ready; `data.index`, `data.scenario` (includes imageUrl). Emitted as each image completes.
 - **scenarios-result** — (website_analysis only) Images step finished; full `data.scenarios` with imageUrl. Full list before final persist.
+- **context-result** — (content_generation only) Organization context loaded; `data`: organizationId, completenessScore, availability.
+- **blog-result** — (content_generation only) Blog post content ready; `data` = full blog object (title, content, metaDescription, tags, seoKeywords, etc.). Show post body before visuals/SEO.
+- **visuals-result** — (content_generation only) Visual suggestions ready; `data.visualContentSuggestions`.
+- **seo-result** — (content_generation only) SEO analysis ready; `data.seoAnalysis`.
 - **complete** — Job succeeded; `data.result` is the job result.
 - **failed** — Job failed or cancelled; `data.error`, `data.errorCode`.
 
