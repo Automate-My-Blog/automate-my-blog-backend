@@ -30,7 +30,7 @@ function validateStreamToken(authService, token) {
 /**
  * GET /api/v1/stream/:connectionId?token=JWT
  * Joins an existing stream by connectionId (returned from POST /audiences/generate-stream,
- * POST /blog/generate-stream, etc.). Auth via ?token= (JWT).
+ * POST /blog/generate-stream, POST /topics/generate-stream, etc.). Auth via ?token= (JWT).
  * Response: SSE stream of events for that connection.
  */
 function handleStreamByConnectionId(authService, req, res) {
