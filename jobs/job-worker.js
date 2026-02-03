@@ -48,21 +48,38 @@ async function processWebsiteAnalysis(jobId, input, context) {
   const totalSteps = PROGRESS_STEPS.length;
   const stepWeight = 100 / totalSteps;
 
-  const onProgress = (stepIndex, _label, progress, estimated) => {
+  const onProgress = (stepIndex, _label, progress, estimated, extra = {}) => {
     const base = stepIndex * stepWeight;
     const pct = Math.round(base + (progress / 100) * stepWeight);
     const currentStep = PROGRESS_STEPS[stepIndex];
     const estimatedRemaining = estimated ?? null;
-    updateJobProgress(jobId, {
-      progress: Math.min(100, pct),
-      current_step: currentStep,
-      estimated_seconds_remaining: estimatedRemaining
-    }).catch((e) => console.warn('Progress update failed:', e.message));
-    publishJobStreamEvent(connection, jobId, 'progress-update', {
+    const phase = extra?.phase ?? null;
+    const detail = extra?.detail ?? null;
+    const eventData = {
       progress: Math.min(100, pct),
       currentStep,
-      estimatedTimeRemaining: estimatedRemaining
-    });
+      estimatedTimeRemaining: estimatedRemaining,
+      ...(phase && { phase }),
+      ...(detail && { detail }),
+      ...(extra?.stepIndex != null && { stepIndex: extra.stepIndex }),
+      ...(extra?.phaseIndex != null && { phaseIndex: extra.phaseIndex }),
+      ...(extra?.totalPhases != null && { totalPhases: extra.totalPhases })
+    };
+    updateJobProgress(jobId, {
+      progress: Math.min(100, pct),
+      current_step: phase ? `${currentStep}: ${phase}` : currentStep,
+      estimated_seconds_remaining: estimatedRemaining
+    }).catch((e) => console.warn('Progress update failed:', e.message));
+    publishJobStreamEvent(connection, jobId, 'progress-update', eventData);
+
+    // Publish granular scrape thoughts so the UI can show a step-by-step scraping log
+    if (extra?.scrapePhase != null) {
+      publishJobStreamEvent(connection, jobId, 'scrape-phase', {
+        phase: extra.scrapePhase,
+        message: extra.scrapeMessage ?? extra.phase ?? extra.scrapePhase,
+        ...(extra?.url && { url: extra.url })
+      });
+    }
   };
 
   const result = await runWebsiteAnalysisPipeline(input, context, {
