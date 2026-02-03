@@ -87,19 +87,43 @@ export class WebScraperService {
   }
 
   /**
-   * Scrape website content with fallback methods
+   * Notify optional progress callback. Used for granular stream updates during scrape.
+   * @param {Function|undefined} onScrapeProgress - (phase, message, detail?) => void
+   * @param {string} phase - e.g. 'validate', 'browser-launch', 'extract'
+   * @param {string} message - Human-readable status
+   * @param {object} [detail] - Optional extra (e.g. { url }
    */
-  async scrapeWebsite(url) {
+  _scrapeProgress(onScrapeProgress, phase, message, detail = {}) {
+    if (typeof onScrapeProgress === 'function') {
+      try {
+        onScrapeProgress(phase, message, detail);
+      } catch (e) {
+        console.warn('[webscraper] onScrapeProgress error:', e?.message);
+      }
+    }
+  }
+
+  /**
+   * Scrape website content with fallback methods.
+   * @param {string} url - Page URL
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts] - Optional progress callback for stream
+   */
+  async scrapeWebsite(url, opts = {}) {
+    const { onScrapeProgress } = opts;
     try {
+      this._scrapeProgress(onScrapeProgress, 'start', 'Starting website scrape', { url });
+
       // Validate URL
+      this._scrapeProgress(onScrapeProgress, 'validate', 'Validating URL');
       const urlObj = new URL(url);
       if (!['http:', 'https:'].includes(urlObj.protocol)) {
         throw new Error('Invalid URL protocol. Only HTTP and HTTPS are supported.');
       }
 
       // Try Puppeteer first for dynamic content
+      this._scrapeProgress(onScrapeProgress, 'method-puppeteer', 'Trying Puppeteer (dynamic content)');
       try {
-        return await this.scrapeWithPuppeteer(url);
+        return await this.scrapeWithPuppeteer(url, opts);
       } catch (puppeteerError) {
         console.error('❌ Puppeteer scraping failed for', url);
         console.error('❌ Error details:', {
@@ -107,11 +131,11 @@ export class WebScraperService {
           stack: puppeteerError.stack?.split('\n').slice(0, 3).join('\n'),
           url: url
         });
-        
+        this._scrapeProgress(onScrapeProgress, 'fallback-playwright', 'Puppeteer failed, trying Playwright');
+
         // Try Playwright as first fallback
         try {
-          console.log('🔄 Falling back to Playwright extraction...');
-          return await this.scrapeWithPlaywright(url);
+          return await this.scrapeWithPlaywright(url, opts);
         } catch (playwrightError) {
           console.error('❌ Playwright scraping also failed for', url);
           console.error('❌ Playwright error details:', {
@@ -119,11 +143,11 @@ export class WebScraperService {
             stack: playwrightError.stack?.split('\n').slice(0, 3).join('\n'),
             url: url
           });
-          
+          this._scrapeProgress(onScrapeProgress, 'fallback-browserless', 'Playwright failed, trying Browserless.io');
+
           // Try Browserless.io as second fallback
           try {
-            console.log('🔄 Falling back to Browserless.io service...');
-            return await this.scrapeWithBrowserService(url);
+            return await this.scrapeWithBrowserService(url, opts);
           } catch (browserServiceError) {
             console.error('❌ Browserless service also failed for', url);
             console.error('❌ Browserless error details:', {
@@ -131,10 +155,10 @@ export class WebScraperService {
               stack: browserServiceError.stack?.split('\n').slice(0, 3).join('\n'),
               url: url
             });
-            
+            this._scrapeProgress(onScrapeProgress, 'fallback-cheerio', 'Trying Cheerio (static HTML)');
+
             // Final fallback to enhanced Cheerio extraction
-            console.log('🔄 Falling back to enhanced Cheerio extraction...');
-            return await this.scrapeWithCheerio(url);
+            return await this.scrapeWithCheerio(url, opts);
           }
         }
       }
@@ -146,37 +170,37 @@ export class WebScraperService {
 
   /**
    * Scrape with Puppeteer for dynamic content
+   * @param {string} url
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
    */
-  async scrapeWithPuppeteer(url) {
+  async scrapeWithPuppeteer(url, opts = {}) {
+    const { onScrapeProgress } = opts;
     let browser;
     let page; // Need page variable for CTA extraction
     try {
       console.log('🚀 Starting Puppeteer scraping for:', url);
+      this._scrapeProgress(onScrapeProgress, 'config', 'Getting Puppeteer config');
       const puppeteerConfig = await this.getPuppeteerConfig();
       console.log('🔧 Puppeteer config obtained:', JSON.stringify(puppeteerConfig, null, 2));
       
+      this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching browser');
       console.log('🌐 Launching browser...');
       browser = await puppeteer.launch(puppeteerConfig);
       console.log('✅ Browser launched successfully');
 
       page = await browser.newPage();
-      
-      // Set user agent
       await page.setUserAgent(this.userAgent);
-      
-      // Set viewport
       await page.setViewport({ width: 1920, height: 1080 });
 
-      // Navigate to page with timeout
+      this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
       await page.goto(url, {
         waitUntil: 'networkidle0',
         timeout: this.timeout
       });
 
-      // Wait longer for React SPAs and dynamic content to fully load
+      this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
       await new Promise(resolve => setTimeout(resolve, 5000));
       
-      // For heavily JS-dependent sites, wait for meaningful content to appear
       await page.waitForFunction(() => {
         const paragraphs = document.querySelectorAll('p');
         if (paragraphs.length > 2) {
@@ -194,6 +218,7 @@ export class WebScraperService {
         console.log('Dynamic content wait timed out, proceeding with extraction...');
       });
 
+      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
       // Extract content with enhanced SPA handling
       const content = await page.evaluate((url) => {
         console.log('Starting content extraction for URL:', url);
@@ -312,6 +337,7 @@ export class WebScraperService {
       }, url);
 
       // Extract CTAs using inline extraction logic
+      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
       console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Puppeteer scraper');
       let extractedCTAs = [];
       try {
@@ -532,40 +558,38 @@ export class WebScraperService {
 
   /**
    * Scrape with Playwright for dynamic content (Puppeteer alternative)
+   * @param {string} url
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
    */
-  async scrapeWithPlaywright(url) {
+  async scrapeWithPlaywright(url, opts = {}) {
+    const { onScrapeProgress } = opts;
     let browser;
-    let page; // Need page variable for CTA extraction
+    let page;
     try {
       console.log('🚀 Starting Playwright scraping for:', url);
+      this._scrapeProgress(onScrapeProgress, 'config', 'Getting Playwright config');
       const playwrightConfig = await this.getPlaywrightConfig();
       console.log('🔧 Playwright config obtained:', JSON.stringify(playwrightConfig, null, 2));
       
+      this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching Playwright browser');
       console.log('🌐 Launching Playwright browser...');
       browser = await chromium.launch(playwrightConfig);
       console.log('✅ Playwright browser launched successfully');
 
       page = await browser.newPage();
-      
-      // Set user agent
-      await page.setExtraHTTPHeaders({
-        'User-Agent': this.userAgent
-      });
-      
-      // Set viewport
+      await page.setExtraHTTPHeaders({ 'User-Agent': this.userAgent });
       await page.setViewportSize({ width: 1920, height: 1080 });
 
-      // Navigate to page with timeout
+      this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
       console.log('🌐 Navigating to page with Playwright...');
       await page.goto(url, {
         waitUntil: 'networkidle',
         timeout: this.timeout
       });
 
-      // Wait longer for React SPAs and dynamic content to fully load
+      this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
       await page.waitForTimeout(5000);
       
-      // For heavily JS-dependent sites, wait for meaningful content to appear
       try {
         await page.waitForFunction(() => {
           const paragraphs = document.querySelectorAll('p');
@@ -585,7 +609,7 @@ export class WebScraperService {
         console.log('Playwright dynamic content wait timed out, proceeding with extraction...');
       }
 
-      // Extract content with enhanced SPA handling (same logic as Puppeteer)
+      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
       const content = await page.evaluate((url) => {
         console.log('Starting Playwright content extraction for URL:', url);
         console.log('Initial page state:');
@@ -701,6 +725,7 @@ export class WebScraperService {
       }, url);
 
       // Extract CTAs using inline extraction logic
+      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
       console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Playwright scraper');
       let extractedCTAs = [];
       try {
@@ -845,12 +870,15 @@ export class WebScraperService {
 
   /**
    * Scrape with Browserless.io cloud service (serverless browser automation)
+   * @param {string} url
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
    */
-  async scrapeWithBrowserService(url) {
+  async scrapeWithBrowserService(url, opts = {}) {
+    const { onScrapeProgress } = opts;
     try {
       console.log('🚀 Starting Browserless.io scraping for:', url);
+      this._scrapeProgress(onScrapeProgress, 'api-request', 'Requesting page from Browserless.io');
       
-      // Check if we have a Browserless API token
       const browserlessToken = process.env.BROWSERLESS_API_TOKEN || process.env.BROWSERLESS_TOKEN;
       if (!browserlessToken) {
         console.warn('⚠️ BROWSERLESS_API_TOKEN not found, skipping Browserless.io...');
@@ -860,7 +888,6 @@ export class WebScraperService {
       console.log('✅ Browserless API token found, using Browserless.io service');
       const browserlessEndpoint = `https://production-sfo.browserless.io/content?token=${browserlessToken}`;
 
-      // Configure the scraping request - use /content endpoint for full HTML
       const scrapeRequest = {
         url: url,
         gotoOptions: {
@@ -874,16 +901,16 @@ export class WebScraperService {
         headers: {
           'Content-Type': 'application/json'
         },
-        timeout: this.timeout + 5000 // Add buffer for API response
+        timeout: this.timeout + 5000
       });
       
       if (!response.data) {
         throw new Error('No data returned from Browserless.io');
       }
 
+      this._scrapeProgress(onScrapeProgress, 'parse-html', 'Parsing HTML');
       console.log('✅ Browserless.io response received, parsing HTML...');
 
-      // Parse the HTML with Cheerio
       const $ = cheerio.load(response.data);
 
       // Extract title
@@ -893,7 +920,7 @@ export class WebScraperService {
       const metaDescription = $('meta[name="description"]').attr('content') ||
                              $('meta[property="og:description"]').attr('content') || '';
 
-      // Extract main content - try multiple selectors
+      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
       let mainContent = '';
       const contentSelectors = [
         'main',
@@ -950,10 +977,14 @@ export class WebScraperService {
 
   /**
    * Scrape with Axios + Cheerio for static content
+   * @param {string} url
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
    */
-  async scrapeWithCheerio(url) {
+  async scrapeWithCheerio(url, opts = {}) {
+    const { onScrapeProgress } = opts;
     try {
       console.log('🔧 Using enhanced Cheerio fallback for:', url);
+      this._scrapeProgress(onScrapeProgress, 'fetch', 'Fetching page with HTTP');
       
       const response = await axios.get(url, {
         headers: {
@@ -967,14 +998,14 @@ export class WebScraperService {
         maxRedirects: 5
       });
 
+      this._scrapeProgress(onScrapeProgress, 'parse-html', 'Parsing HTML');
       const $ = cheerio.load(response.data);
       const urlObj = new URL(url);
       const domain = urlObj.hostname;
 
-      // Remove unwanted elements but preserve content structure
       $('script, style, .cookie-banner, .popup, .modal, .advertisement, .social-share, .comments').remove();
 
-      // Extract content
+      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
       const title = $('title').text().trim();
       const metaDescription = $('meta[name="description"]').attr('content') || '';
 
@@ -1063,7 +1094,7 @@ export class WebScraperService {
         }
       });
 
-      // Extract potential CTAs
+      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
       const ctas = [];
       const ctaSelectors = [
         'button', 

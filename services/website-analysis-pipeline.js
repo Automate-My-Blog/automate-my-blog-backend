@@ -11,10 +11,34 @@ import { normalizeCTA } from '../utils/cta-normalizer.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const PROGRESS_STEPS = [
-  'Analyzing website...',
-  'Generating audiences...',
-  'Generating pitches...',
-  'Generating images...'
+  'Analyzing website',
+  'Generating audiences',
+  'Generating pitches',
+  'Generating images'
+];
+
+/** Granular phases for Thinking-model UX. stepIndex -> array of phase labels. */
+export const PROGRESS_PHASES = [
+  [
+    'Fetching page content',
+    'Researching business context',
+    'Analyzing customer psychology',
+    'Saving analysis & CTAs',
+    'Generating narrative summary'
+  ],
+  [
+    'Checking existing audiences',
+    'Identifying audience opportunities',
+    'Creating customer scenarios'
+  ],
+  [
+    'Calculating revenue projections',
+    'Generating conversion pitches'
+  ],
+  [
+    'Creating audience visuals',
+    'Saving strategies'
+  ]
 ];
 
 /**
@@ -160,7 +184,7 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
  * Run full website analysis pipeline.
  * @param {object} input - { url: string }
  * @param {object} context - { userId?, sessionId? }
- * @param {object} opts - { onProgress?(stepIndex, stepLabel, progress, estimatedRemaining), isCancelled?: () => boolean | Promise<boolean> }
+ * @param {object} opts - { onProgress?(stepIndex, stepLabel, progress, estimatedRemaining, extra?), isCancelled?: () => boolean | Promise<boolean> }
  * @returns {Promise<object>} Combined result matching current analyze-website + audiences + pitches + images API shape.
  */
 export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {}) {
@@ -172,8 +196,8 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
   if (!webScraperService.isValidUrl(url)) throw new Error('Invalid URL format');
 
-  const report = (stepIndex, label, progress, estimated) => {
-    if (typeof onProgress === 'function') onProgress(stepIndex, label, progress, estimated);
+  const report = (stepIndex, label, progress, estimated, extra = {}) => {
+    if (typeof onProgress === 'function') onProgress(stepIndex, label, progress, estimated, extra);
   };
 
   const checkCancelled = async () => {
@@ -182,10 +206,28 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     return typeof v?.then === 'function' ? await v : !!v;
   };
 
-  report(0, PROGRESS_STEPS[0], 5, 90);
+  /** Progress 2–10% during scrape; granular phases published to stream as thoughts. */
+  const SCRAPE_PROGRESS = {
+    start: 2, validate: 3, 'method-puppeteer': 4, config: 4, 'browser-launch': 5,
+    navigate: 6, 'wait-content': 7, extract: 8, ctas: 9,
+    'fallback-playwright': 9, 'fallback-browserless': 9, 'fallback-cheerio': 9,
+    'api-request': 5, 'parse-html': 7, fetch: 5
+  };
+
+  const onScrapeProgress = (phase, message, detail = {}) => {
+    const progress = SCRAPE_PROGRESS[phase] ?? 9;
+    report(0, PROGRESS_STEPS[0], progress, 85, {
+      phase: message,
+      scrapePhase: phase,
+      scrapeMessage: message,
+      ...detail
+    });
+  };
+
+  report(0, PROGRESS_STEPS[0], 2, 90, { phase: PROGRESS_PHASES[0][0] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
-  const scrapedContent = await webScraperService.scrapeWebsite(url);
+  const scrapedContent = await webScraperService.scrapeWebsite(url, { onScrapeProgress });
   const fullContent = [
     `Title: ${scrapedContent.title}`,
     `Meta Description: ${scrapedContent.metaDescription}`,
@@ -193,14 +235,18 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     `Content: ${scrapedContent.content}`
   ].join('\n').trim();
 
-  report(0, PROGRESS_STEPS[0], 15, 75);
+  report(0, PROGRESS_STEPS[0], 10, 85, { phase: PROGRESS_PHASES[0][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const analysis = await openaiService.analyzeWebsite(fullContent, url);
-  report(0, PROGRESS_STEPS[0], 25, 60);
+  report(0, PROGRESS_STEPS[0], 35, 60, { phase: PROGRESS_PHASES[0][2] });
+  if (await checkCancelled()) throw new Error('Cancelled');
 
   const { organizationId, storedCTAs } = await persistAnalysis(url, analysis, scrapedContent, { userId, sessionId });
-  report(0, PROGRESS_STEPS[0], 100, 0);
+  report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][3] });
+
+  report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][4] });
+  if (await checkCancelled()) throw new Error('Cancelled');
 
   // Generate narrative analysis
   try {
@@ -258,6 +304,8 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // Don't fail the whole pipeline if narrative generation fails
   }
 
+  report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][4] });
+
   // Query existing audiences to avoid duplicates
   let existingAudiences = [];
   try {
@@ -288,26 +336,103 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', error.message);
   }
 
-  report(1, PROGRESS_STEPS[1], 0, 45);
+  report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });
+  if (await checkCancelled()) throw new Error('Cancelled');
+  report(1, PROGRESS_STEPS[1], 15, 40, { phase: PROGRESS_PHASES[1][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
   let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
-  report(1, PROGRESS_STEPS[1], 100, 0);
+  report(1, PROGRESS_STEPS[1], 80, 5, { phase: PROGRESS_PHASES[1][2] });
+  report(1, PROGRESS_STEPS[1], 100, 0, { phase: PROGRESS_PHASES[1][2] });
 
   const businessContext = {
     businessType: analysis?.businessType,
     businessName: analysis?.businessName || analysis?.companyName,
     targetAudience: analysis?.targetAudience
   };
-  report(2, PROGRESS_STEPS[2], 0, 30);
+  report(2, PROGRESS_STEPS[2], 0, 30, {
+    phase: PROGRESS_PHASES[2][0],
+    detail: scenarios.length ? `${scenarios.length} audiences` : null
+  });
   if (await checkCancelled()) throw new Error('Cancelled');
   scenarios = await openaiService.generatePitches(scenarios, businessContext);
-  report(2, PROGRESS_STEPS[2], 100, 0);
+  report(2, PROGRESS_STEPS[2], 80, 5, {
+    phase: PROGRESS_PHASES[2][1],
+    detail: scenarios.length ? `${scenarios.length} audiences` : null
+  });
+  report(2, PROGRESS_STEPS[2], 100, 0, { phase: PROGRESS_PHASES[2][1] });
 
   const brandContext = { brandVoice: analysis?.brandVoice || 'Professional' };
-  report(3, PROGRESS_STEPS[3], 0, 15);
+  report(3, PROGRESS_STEPS[3], 0, 15, {
+    phase: PROGRESS_PHASES[3][0],
+    detail: scenarios.length ? `${scenarios.length} audiences` : null
+  });
   if (await checkCancelled()) throw new Error('Cancelled');
   scenarios = await openaiService.generateAudienceImages(scenarios, brandContext);
-  report(3, PROGRESS_STEPS[3], 100, 0);
+  report(3, PROGRESS_STEPS[3], 70, 3, {
+    phase: PROGRESS_PHASES[3][0],
+    detail: scenarios.length ? `${scenarios.length} audiences` : null
+  });
+  report(3, PROGRESS_STEPS[3], 90, 1, { phase: PROGRESS_PHASES[3][1] });
+  report(3, PROGRESS_STEPS[3], 100, 0, { phase: PROGRESS_PHASES[3][1] });
+
+  // Persist scenarios to audiences table and organization_intelligence so they appear on refresh
+  if (scenarios.length > 0) {
+    try {
+      const intelResult = await db.query(
+        'SELECT id FROM organization_intelligence WHERE organization_id = $1 AND is_current = TRUE LIMIT 1',
+        [organizationId]
+      );
+      const orgIntelId = intelResult.rows[0]?.id ?? null;
+
+      await db.query(
+        'UPDATE organization_intelligence SET customer_scenarios = $1, updated_at = NOW() WHERE organization_id = $2 AND is_current = TRUE',
+        [JSON.stringify(scenarios.map(s => ({
+          customerProblem: s.customerProblem,
+          targetSegment: s.targetSegment,
+          businessValue: s.businessValue,
+          customerLanguage: s.customerLanguage,
+          conversionPath: s.conversionPath,
+          seoKeywords: s.seoKeywords,
+          contentIdeas: s.contentIdeas,
+          pitch: s.pitch
+        }))), organizationId]
+      );
+
+      for (let i = 0; i < scenarios.length; i++) {
+        const s = scenarios[i];
+        const targetSegment = s.targetSegment || { demographics: '', psychographics: '', searchBehavior: '' };
+        const businessValue = s.businessValue || {};
+        await db.query(
+          `INSERT INTO audiences (
+            user_id, session_id, organization_intelligence_id,
+            target_segment, customer_problem, customer_language, conversion_path,
+            business_value, priority, pitch, image_url,
+            projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          [
+            userId || null,
+            userId ? null : (sessionId || null),
+            orgIntelId,
+            JSON.stringify(targetSegment),
+            s.customerProblem || null,
+            s.customerLanguage ? JSON.stringify(s.customerLanguage) : null,
+            s.conversionPath || null,
+            JSON.stringify(businessValue),
+            (s.businessValue?.priority ?? i + 1),
+            s.pitch || null,
+            s.imageUrl || null,
+            s.projected_revenue_low ?? null,
+            s.projected_revenue_high ?? null,
+            s.projected_profit_low ?? null,
+            s.projected_profit_high ?? null
+          ]
+        );
+      }
+      console.log(`📊 Persisted ${scenarios.length} audience strategies to database`);
+    } catch (persistErr) {
+      console.warn('⚠️ Failed to persist audiences (scenarios still in job result):', persistErr.message);
+    }
+  }
 
   return {
     success: true,
