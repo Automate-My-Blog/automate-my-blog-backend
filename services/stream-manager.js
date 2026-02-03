@@ -39,6 +39,51 @@ class StreamManager extends EventEmitter {
   }
 
   /**
+   * Create a new SSE connection with a pre-determined connectionId (e.g. from POST /audiences/generate-stream).
+   * Used when client receives connectionId from a POST response and then opens GET /stream/:connectionId.
+   * @param {string} connectionId - Pre-generated connection ID
+   * @param {import('express').Response} res - Express response (SSE headers not yet sent; caller must send them)
+   * @param {{ userId?: string, sessionId?: string }} context - Optional auth context
+   * @param {{ keepalive?: boolean, maxAgeMs?: number }} options - keepalive (default true), maxAgeMs
+   */
+  createConnectionWithId(connectionId, res, context = {}, options = { keepalive: true }) {
+    if (this.connections.has(connectionId)) {
+      this.removeConnection(connectionId);
+    }
+    const createdAt = Date.now();
+    const record = {
+      res,
+      userId: context.userId ?? undefined,
+      sessionId: context.sessionId ?? undefined,
+      createdAt
+    };
+
+    const cleanup = () => this.removeConnection(connectionId);
+
+    res.on('close', cleanup);
+    res.on('error', () => cleanup());
+
+    if (options.keepalive !== false) {
+      record.keepaliveTimer = setInterval(() => {
+        if (res.writableEnded) {
+          if (record.keepaliveTimer) clearInterval(record.keepaliveTimer);
+          return;
+        }
+        sendKeepalive(res);
+      }, this._keepaliveMs);
+    }
+
+    if (options.maxAgeMs != null && options.maxAgeMs > 0) {
+      record.streamTimeout = setTimeout(cleanup, options.maxAgeMs);
+    }
+
+    this.connections.set(connectionId, record);
+    this.ensureRedisSubscriber();
+    this.emit('connection', { connectionId, ...context });
+    return connectionId;
+  }
+
+  /**
    * Create a new SSE connection and register it.
    * @param {import('express').Response} res - Express response (SSE headers not yet sent; caller must send them)
    * @param {{ userId?: string, sessionId?: string }} context - Optional auth context

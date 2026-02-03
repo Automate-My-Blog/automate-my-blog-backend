@@ -226,11 +226,14 @@ Make it outcome-focused. Return only valid JSON.`;
 /**
  * GET /api/v1/strategies/bundle/calculate
  * Calculate bundle pricing for all user's strategies.
- * Optional ?stream=true&connectionId=xxx — returns 202 { connectionId, streamUrl } and streams overview chunks (Phase 4).
+ * ?stream=true — returns 200 { connectionId, bundlePricing, bundleOverview? } and streams overview chunks via GET /api/v1/stream/:connectionId.
  */
 router.get('/calculate',  async (req, res) => {
   try {
-    const userId = req.user.userId;
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Authentication required' });
+    }
 
     // Get all user's strategies
     const result = await db.query(
@@ -247,23 +250,29 @@ router.get('/calculate',  async (req, res) => {
       });
     }
 
-    // Calculate bundle pricing
+    // Calculate bundle pricing (may use fallback for strategies without profit data)
     const bundlePricing = pricingCalculator.calculateAllStrategiesBundle(strategies);
 
     if (!bundlePricing) {
       return res.status(400).json({
         error: 'Could not calculate bundle pricing',
-        message: 'Not enough strategies with valid profit data'
+        message: 'Not enough strategies with valid profit data. Ensure audiences have pitch/profit fields from website analysis.'
       });
     }
 
     const streamRequested = req.query.stream === 'true';
-    const connectionId = req.query.connectionId;
+    let connectionId = req.query.connectionId;
 
-    if (streamRequested && connectionId) {
+    if (streamRequested) {
+      if (!connectionId || typeof connectionId !== 'string') {
+        const { v4: uuidv4 } = await import('uuid');
+        connectionId = uuidv4();
+      }
       const baseUrl = req.protocol + '://' + (req.get('host') || '');
       const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
-      const streamUrl = token ? `${baseUrl}/api/v1/stream?token=${encodeURIComponent(token)}` : `${baseUrl}/api/v1/stream`;
+      const streamUrl = token
+        ? `${baseUrl}/api/v1/stream/${connectionId}?token=${encodeURIComponent(token)}`
+        : `${baseUrl}/api/v1/stream/${connectionId}`;
 
       setImmediate(() => {
         generateBundleOverviewStream(strategies, connectionId).catch((err) =>
@@ -271,7 +280,7 @@ router.get('/calculate',  async (req, res) => {
         );
       });
 
-      return res.status(202).json({
+      return res.status(200).json({
         connectionId,
         streamUrl,
         bundlePricing,

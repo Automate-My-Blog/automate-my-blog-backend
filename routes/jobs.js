@@ -13,8 +13,8 @@ import DatabaseAuthService from '../services/auth-database.js';
 const router = express.Router();
 const authService = new DatabaseAuthService();
 
-/** Job stream connection timeout (10 min). */
-const JOB_STREAM_MAX_AGE_MS = 10 * 60 * 1000;
+/** Job stream connection timeout. Vercel serverless limit is 300s; use 250s to close gracefully before timeout. */
+const JOB_STREAM_MAX_AGE_MS = 250 * 1000;
 
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
@@ -178,7 +178,24 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     }, { keepalive: true, maxAgeMs: JOB_STREAM_MAX_AGE_MS });
 
     streamManager.subscribeToJob(jobId, connectionId);
-    writeSSE(res, 'connected', { connectionId, jobId });
+    writeSSE(res, 'connected', {
+      connectionId,
+      jobId,
+      maxAgeSeconds: Math.floor(JOB_STREAM_MAX_AGE_MS / 1000),
+      hint: 'If stream closes before job completes, poll GET /jobs/:jobId/status'
+    });
+
+    // Send stream-timeout event 10s before closing so frontend can fall back to polling
+    const timeoutWarningMs = JOB_STREAM_MAX_AGE_MS - 10 * 1000;
+    const warningTimer = setTimeout(() => {
+      if (!res.writableEnded) {
+        writeSSE(res, 'stream-timeout', {
+          jobId,
+          message: 'Stream closing soon due to serverless limit; poll GET /jobs/:jobId/status for updates'
+        });
+      }
+    }, timeoutWarningMs);
+    res.on('close', () => clearTimeout(warningTimer));
   } catch (e) {
     console.error('GET /jobs/:jobId/stream error:', e);
     if (!res.headersSent) {

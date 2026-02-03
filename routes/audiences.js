@@ -96,48 +96,43 @@ const AUTH_REQUIRED_MSG = 'Either authentication or session ID is required';
 
 /**
  * POST /api/v1/audiences/generate-stream (Phase 3)
- * Stream audience scenarios. Client must open GET /api/v1/stream?token= first to get connectionId.
- * Body: { connectionId, analysis }. Returns 202 { connectionId, streamUrl }. Events: audience-complete, complete, error.
+ * Stream audience scenarios. Body: { analysis, existingAudiences? }.
+ * Returns 200 { connectionId }. Client then opens GET /api/v1/stream/:connectionId?token= (EventSource).
+ * Events: audience-complete, complete, error.
  */
 router.post('/generate-stream', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
     validateUserContext(userContext);
 
-    const { connectionId, analysis } = req.body;
-    if (!connectionId || typeof connectionId !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing connectionId',
-        message: 'Open GET /api/v1/stream?token= first, then pass connectionId from the connected event'
-      });
-    }
+    const { analysis, existingAudiences: bodyExistingAudiences } = req.body;
     if (!analysis || typeof analysis !== 'object') {
       return res.status(400).json({
         success: false,
         error: 'Missing analysis',
-        message: 'analysis (website analysis object) is required'
+        message: 'analysis (website analysis object from analyze-website) is required'
       });
     }
 
-    let existingAudiences = [];
-    try {
-      const whereClause = userContext.userId
-        ? 'WHERE user_id = $1'
-        : 'WHERE session_id = $1';
-      const queryParam = userContext.userId || userContext.sessionId;
-      const result = await db.query(
-        `SELECT target_segment, customer_problem FROM audiences ${whereClause} ORDER BY created_at DESC`,
-        [queryParam]
-      );
-      existingAudiences = result.rows;
-    } catch (e) {
-      console.warn('Failed to load existing audiences for stream:', e?.message);
+    let existingAudiences = Array.isArray(bodyExistingAudiences) ? bodyExistingAudiences : [];
+    if (existingAudiences.length === 0) {
+      try {
+        const whereClause = userContext.userId
+          ? 'WHERE user_id = $1'
+          : 'WHERE session_id = $1';
+        const queryParam = userContext.userId || userContext.sessionId;
+        const result = await db.query(
+          `SELECT target_segment, customer_problem FROM audiences ${whereClause} ORDER BY created_at DESC`,
+          [queryParam]
+        );
+        existingAudiences = result.rows;
+      } catch (e) {
+        console.warn('Failed to load existing audiences for stream:', e?.message);
+      }
     }
 
-    const baseUrl = req.protocol + '://' + (req.get('host') || '');
-    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
-    const streamUrl = token ? `${baseUrl}/api/v1/stream?token=${encodeURIComponent(token)}` : `${baseUrl}/api/v1/stream`;
+    const { v4: uuidv4 } = await import('uuid');
+    const connectionId = uuidv4();
 
     setImmediate(() => {
       openaiService.generateAudienceScenariosStream(analysis, '', '', existingAudiences, connectionId).catch((err) =>
@@ -145,7 +140,7 @@ router.post('/generate-stream', async (req, res) => {
       );
     });
 
-    res.status(202).json({ connectionId, streamUrl });
+    res.status(200).json({ connectionId });
   } catch (error) {
     if (error.message === AUTH_REQUIRED_MSG) {
       return res.status(401).json({

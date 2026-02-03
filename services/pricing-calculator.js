@@ -23,38 +23,30 @@ class PricingCalculator {
       let lowEndProfit, highEndProfit;
 
       // PRIORITY 1: Use database fields if available
-      if (strategy.projected_profit_low && strategy.projected_profit_high) {
+      if (strategy.projected_profit_low != null && strategy.projected_profit_high != null) {
         lowEndProfit = parseInt(strategy.projected_profit_low, 10);
         highEndProfit = parseInt(strategy.projected_profit_high, 10);
-        console.log('✅ Using database profit fields:', { lowEndProfit, highEndProfit });
-      } else {
-        // FALLBACK: Extract from pitch text
-        const { pitch } = strategy;
-
-        if (!pitch) {
-          console.warn('No pitch or profit fields provided for pricing calculation');
-          return null;
+        if (!isNaN(lowEndProfit) && !isNaN(highEndProfit)) {
+          console.log('✅ Using database profit fields:', { lowEndProfit, highEndProfit });
         }
-
-        // Extract projected monthly profit from pitch (Step 5)
-        // Expected format: "Step 5: Profit of $X-$Y monthly ($A-$B revenue, Z% margin..."
-        const profitMatch = pitch.match(
-          /Step 5:[^\$]*(?:Profit|profit)\s+of\s*\$([0-9,]+)-\$([0-9,]+)\s*(?:\/month|\/mo|monthly)/i
-        );
-
-        if (!profitMatch) {
-          console.warn('Could not extract profit from pitch Step 5:', pitch.substring(0, 200));
-          return null;
-        }
-
-        lowEndProfit = parseInt(profitMatch[1].replace(/,/g, ''), 10);
-        highEndProfit = parseInt(profitMatch[2].replace(/,/g, ''), 10);
-        console.log('⚠️ Extracted profit from pitch text (consider running backfill):', { lowEndProfit, highEndProfit });
       }
 
-      if (isNaN(lowEndProfit) || isNaN(highEndProfit)) {
-        console.warn('Invalid profit values:', { lowEndProfit, highEndProfit });
-        return null;
+      // PRIORITY 2: Extract from pitch text
+      if ((lowEndProfit == null || highEndProfit == null || isNaN(lowEndProfit) || isNaN(highEndProfit)) && strategy.pitch) {
+        const profitMatch = strategy.pitch.match(
+          /Step 5:[^\$]*(?:Profit|profit)\s+of\s*\$([0-9,]+)-\$([0-9,]+)\s*(?:\/month|\/mo|monthly)/i
+        ) || strategy.pitch.match(/\$([0-9,]+)-\$([0-9,]+)\s*(?:monthly|\/month|\/mo)/i);
+        if (profitMatch) {
+          lowEndProfit = parseInt(profitMatch[1].replace(/,/g, ''), 10);
+          highEndProfit = parseInt(profitMatch[2].replace(/,/g, ''), 10);
+        }
+      }
+
+      // FALLBACK: Use floor when no profit data (reduces 400s for valid frontend flows)
+      if (lowEndProfit == null || highEndProfit == null || isNaN(lowEndProfit) || isNaN(highEndProfit)) {
+        const FLOOR_PROFIT = 500;
+        lowEndProfit = FLOOR_PROFIT;
+        highEndProfit = FLOOR_PROFIT * 2;
       }
 
       // Calculate dynamic percentage that slides from 10% to 8%
