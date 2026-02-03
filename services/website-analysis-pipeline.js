@@ -184,13 +184,14 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
  * Run full website analysis pipeline.
  * @param {object} input - { url: string }
  * @param {object} context - { userId?, sessionId? }
- * @param {object} opts - { onProgress?(stepIndex, stepLabel, progress, estimatedRemaining, extra?), isCancelled?: () => boolean | Promise<boolean> }
+ * @param {object} opts - { onProgress?(...), onPartialResult?(segment, data)?, isCancelled?: () => boolean | Promise<boolean> }
+ *   onPartialResult(segment, data): segment is 'analysis' | 'audiences' | 'pitches' | 'scenarios'; data is the partial result for that segment.
  * @returns {Promise<object>} Combined result matching current analyze-website + audiences + pitches + images API shape.
  */
 export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {}) {
   const { url } = input;
   const { userId, sessionId } = context;
-  const { onProgress, isCancelled } = opts;
+  const { onProgress, onPartialResult, isCancelled } = opts;
 
   if (!url) throw new Error('url is required');
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
@@ -309,6 +310,18 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   }
 
   await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][4] });
+  if (typeof onPartialResult === 'function') {
+    onPartialResult('analysis', {
+      url,
+      scrapedAt: scrapedContent.scrapedAt,
+      analysis: { ...analysis, organizationId },
+      metadata: { title: scrapedContent.title, headings: scrapedContent.headings || [] },
+      ctas: storedCTAs,
+      ctaCount: storedCTAs.length,
+      hasSufficientCTAs: storedCTAs.length >= 3,
+      organizationId
+    });
+  }
 
   // Query existing audiences to avoid duplicates
   let existingAudiences = [];
@@ -347,6 +360,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
   await report(1, PROGRESS_STEPS[1], 80, 5, { phase: PROGRESS_PHASES[1][2] });
   await report(1, PROGRESS_STEPS[1], 100, 0, { phase: PROGRESS_PHASES[1][2] });
+  if (typeof onPartialResult === 'function') {
+    onPartialResult('audiences', { scenarios: [...scenarios] });
+  }
 
   const businessContext = {
     businessType: analysis?.businessType,
@@ -364,6 +380,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   await report(2, PROGRESS_STEPS[2], 100, 0, { phase: PROGRESS_PHASES[2][1] });
+  if (typeof onPartialResult === 'function') {
+    onPartialResult('pitches', { scenarios: [...scenarios] });
+  }
 
   const brandContext = { brandVoice: analysis?.brandVoice || 'Professional' };
   await report(3, PROGRESS_STEPS[3], 0, 15, {
@@ -378,6 +397,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   });
   await report(3, PROGRESS_STEPS[3], 90, 1, { phase: PROGRESS_PHASES[3][1] });
   await report(3, PROGRESS_STEPS[3], 100, 0, { phase: PROGRESS_PHASES[3][1] });
+  if (typeof onPartialResult === 'function') {
+    onPartialResult('scenarios', { scenarios: [...scenarios] });
+  }
 
   // Persist scenarios to audiences table and organization_intelligence so they appear on refresh
   if (scenarios.length > 0) {
