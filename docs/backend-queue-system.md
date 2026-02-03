@@ -96,7 +96,7 @@ Single job runs: **analyze → audiences → pitches → audience images**.
 1. Run migration 26, add `REDIS_URL`, start Redis.
 2. Deploy API. Job endpoints are available; create always enqueues and returns `jobId`.
 3. Run the worker (same or separate host). Ensure it can reach Redis and the DB.
-4. Frontend switches to async: call `POST /jobs/website-analysis` or `POST /jobs/content-generation`, then poll `GET /jobs/:jobId/status` until `succeeded` or `failed`.
+4. Frontend switches to async: call `POST /api/v1/jobs/website-analysis` or `POST /api/v1/jobs/content-generation`, then poll `GET /api/v1/jobs/:jobId/status` until `succeeded` or `failed`.
 5. Optionally deprecate or redirect existing sync endpoints once frontend is fully migrated.
 
 ---
