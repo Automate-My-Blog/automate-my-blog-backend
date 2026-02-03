@@ -74,15 +74,27 @@ describe('job-queue', () => {
     });
 
     it('accepts userId and tenantId', async () => {
-      vi.mocked(db.query).mockResolvedValue({ rows: [], rowCount: 1 });
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [{ id: 'u1' }] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
       await jobQueue.createJob('content_generation', { topic: {}, businessInfo: {}, organizationId: 'org1' }, {
         userId: 'u1',
         tenantId: 'org1',
       });
-      const [, params] = vi.mocked(db.query).mock.calls[0];
+      expect(db.query).toHaveBeenNthCalledWith(1, 'SELECT id FROM users WHERE id = $1', ['u1']);
+      const [, params] = vi.mocked(db.query).mock.calls[1];
       expect(params[0]).toBeDefined();
       expect(params[2]).toBe('u1');
       expect(params[1]).toBe('org1');
+    });
+
+    it('throws UserNotFoundError when userId is not in users table', async () => {
+      vi.mocked(db.query).mockResolvedValue({ rows: [] });
+      await expect(
+        jobQueue.createJob('website_analysis', { url: 'https://x.com' }, { userId: 'nonexistent-user-id' })
+      ).rejects.toMatchObject({ name: 'UserNotFoundError', userId: 'nonexistent-user-id' });
+      expect(db.query).toHaveBeenCalledWith('SELECT id FROM users WHERE id = $1', ['nonexistent-user-id']);
+      expect(db.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO jobs'), expect.any(Array));
     });
   });
 
