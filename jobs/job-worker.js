@@ -13,6 +13,7 @@ import {
   QUEUE_NAME,
   JOB_TYPES
 } from '../services/job-queue.js';
+import { getJobEventsChannel } from '../utils/job-stream-channels.js';
 
 let url = (process.env.REDIS_URL || '').trim();
 if (!url) {
@@ -34,6 +35,14 @@ function isCancelledFactory(jobId) {
   return () => isJobCancelled(jobId).then((v) => v === true);
 }
 
+function publishJobStreamEvent(connection, jobId, event, data) {
+  const channel = getJobEventsChannel(jobId);
+  const payload = JSON.stringify({ event, data });
+  connection.publish(channel, payload).catch((err) => {
+    console.warn('[job-worker] stream publish error:', err?.message || err);
+  });
+}
+
 async function processWebsiteAnalysis(jobId, input, context) {
   const { runWebsiteAnalysisPipeline, PROGRESS_STEPS } = await import('../services/website-analysis-pipeline.js');
   const totalSteps = PROGRESS_STEPS.length;
@@ -42,11 +51,18 @@ async function processWebsiteAnalysis(jobId, input, context) {
   const onProgress = (stepIndex, _label, progress, estimated) => {
     const base = stepIndex * stepWeight;
     const pct = Math.round(base + (progress / 100) * stepWeight);
+    const currentStep = PROGRESS_STEPS[stepIndex];
+    const estimatedRemaining = estimated ?? null;
     updateJobProgress(jobId, {
       progress: Math.min(100, pct),
-      current_step: PROGRESS_STEPS[stepIndex],
-      estimated_seconds_remaining: estimated ?? null
+      current_step: currentStep,
+      estimated_seconds_remaining: estimatedRemaining
     }).catch((e) => console.warn('Progress update failed:', e.message));
+    publishJobStreamEvent(connection, jobId, 'progress-update', {
+      progress: Math.min(100, pct),
+      currentStep,
+      estimatedTimeRemaining: estimatedRemaining
+    });
   };
 
   const result = await runWebsiteAnalysisPipeline(input, context, {
@@ -87,6 +103,11 @@ async function processContentGeneration(jobId, input, context) {
     current_step: 'Writing...',
     estimated_seconds_remaining: 60
   }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 10,
+    currentStep: 'Writing...',
+    estimatedTimeRemaining: 60
+  });
 
   const result = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
     topic,
@@ -165,6 +186,11 @@ const processor = async (bullJob) => {
     current_step: null,
     started_at: new Date()
   });
+  publishJobStreamEvent(connection, jobId, 'step-change', {
+    progress: 0,
+    currentStep: null,
+    estimatedTimeRemaining: null
+  });
 
   if (await isJobCancelled(jobId)) {
     await updateJobProgress(jobId, {
@@ -172,6 +198,7 @@ const processor = async (bullJob) => {
       error: 'Cancelled',
       finished_at: new Date()
     });
+    publishJobStreamEvent(connection, jobId, 'failed', { error: 'Cancelled', errorCode: null });
     return;
   }
 
@@ -191,6 +218,7 @@ const processor = async (bullJob) => {
         error: 'Cancelled',
         finished_at: new Date()
       });
+      publishJobStreamEvent(connection, jobId, 'failed', { error: 'Cancelled', errorCode: null });
       return;
     }
 
@@ -203,14 +231,18 @@ const processor = async (bullJob) => {
       error: null,
       finished_at: new Date()
     });
+    publishJobStreamEvent(connection, jobId, 'complete', { result });
   } catch (err) {
     const cancelled = await isJobCancelled(jobId);
+    const errorMessage = cancelled ? 'Cancelled' : (err.message || 'Job failed');
+    const errorCode = err.code || null;
     await updateJobProgress(jobId, {
       status: 'failed',
-      error: cancelled ? 'Cancelled' : (err.message || 'Job failed'),
-      error_code: err.code || null,
+      error: errorMessage,
+      error_code: errorCode,
       finished_at: new Date()
     });
+    publishJobStreamEvent(connection, jobId, 'failed', { error: errorMessage, errorCode });
     if (!cancelled) throw err;
   }
 };
