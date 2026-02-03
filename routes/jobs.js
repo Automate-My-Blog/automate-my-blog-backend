@@ -171,6 +171,8 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
+    // Send each SSE write immediately instead of buffering (helps progress updates stream in real time)
+    if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
 
     const connectionId = streamManager.createConnection(res, {
       userId: ctx.userId ?? undefined,

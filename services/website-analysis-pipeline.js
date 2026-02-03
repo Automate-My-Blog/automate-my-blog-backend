@@ -196,7 +196,11 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
   if (!webScraperService.isValidUrl(url)) throw new Error('Invalid URL format');
 
-  const report = (stepIndex, label, progress, estimated, extra = {}) => {
+  /** Yield to event loop so each progress update is published in its own tick (avoids frontend receiving all at once). */
+  const yieldTick = () => new Promise((r) => setImmediate(r));
+
+  const report = async (stepIndex, label, progress, estimated, extra = {}) => {
+    await yieldTick();
     if (typeof onProgress === 'function') onProgress(stepIndex, label, progress, estimated, extra);
   };
 
@@ -216,7 +220,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
   const onScrapeProgress = (phase, message, detail = {}) => {
     const progress = SCRAPE_PROGRESS[phase] ?? 9;
-    report(0, PROGRESS_STEPS[0], progress, 85, {
+    void report(0, PROGRESS_STEPS[0], progress, 85, {
       phase: message,
       scrapePhase: phase,
       scrapeMessage: message,
@@ -224,7 +228,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     });
   };
 
-  report(0, PROGRESS_STEPS[0], 2, 90, { phase: PROGRESS_PHASES[0][0] });
+  await report(0, PROGRESS_STEPS[0], 2, 90, { phase: PROGRESS_PHASES[0][0] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const scrapedContent = await webScraperService.scrapeWebsite(url, { onScrapeProgress });
@@ -235,17 +239,17 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     `Content: ${scrapedContent.content}`
   ].join('\n').trim();
 
-  report(0, PROGRESS_STEPS[0], 10, 85, { phase: PROGRESS_PHASES[0][1] });
+  await report(0, PROGRESS_STEPS[0], 10, 85, { phase: PROGRESS_PHASES[0][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const analysis = await openaiService.analyzeWebsite(fullContent, url);
-  report(0, PROGRESS_STEPS[0], 35, 60, { phase: PROGRESS_PHASES[0][2] });
+  await report(0, PROGRESS_STEPS[0], 35, 60, { phase: PROGRESS_PHASES[0][2] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   const { organizationId, storedCTAs } = await persistAnalysis(url, analysis, scrapedContent, { userId, sessionId });
-  report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][3] });
+  await report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][3] });
 
-  report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][4] });
+  await report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][4] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   // Generate narrative analysis
@@ -304,7 +308,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // Don't fail the whole pipeline if narrative generation fails
   }
 
-  report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][4] });
+  await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][4] });
 
   // Query existing audiences to avoid duplicates
   let existingAudiences = [];
@@ -336,44 +340,44 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', error.message);
   }
 
-  report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });
+  await report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });
   if (await checkCancelled()) throw new Error('Cancelled');
-  report(1, PROGRESS_STEPS[1], 15, 40, { phase: PROGRESS_PHASES[1][1] });
+  await report(1, PROGRESS_STEPS[1], 15, 40, { phase: PROGRESS_PHASES[1][1] });
   if (await checkCancelled()) throw new Error('Cancelled');
   let scenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingAudiences);
-  report(1, PROGRESS_STEPS[1], 80, 5, { phase: PROGRESS_PHASES[1][2] });
-  report(1, PROGRESS_STEPS[1], 100, 0, { phase: PROGRESS_PHASES[1][2] });
+  await report(1, PROGRESS_STEPS[1], 80, 5, { phase: PROGRESS_PHASES[1][2] });
+  await report(1, PROGRESS_STEPS[1], 100, 0, { phase: PROGRESS_PHASES[1][2] });
 
   const businessContext = {
     businessType: analysis?.businessType,
     businessName: analysis?.businessName || analysis?.companyName,
     targetAudience: analysis?.targetAudience
   };
-  report(2, PROGRESS_STEPS[2], 0, 30, {
+  await report(2, PROGRESS_STEPS[2], 0, 30, {
     phase: PROGRESS_PHASES[2][0],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   if (await checkCancelled()) throw new Error('Cancelled');
   scenarios = await openaiService.generatePitches(scenarios, businessContext);
-  report(2, PROGRESS_STEPS[2], 80, 5, {
+  await report(2, PROGRESS_STEPS[2], 80, 5, {
     phase: PROGRESS_PHASES[2][1],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
-  report(2, PROGRESS_STEPS[2], 100, 0, { phase: PROGRESS_PHASES[2][1] });
+  await report(2, PROGRESS_STEPS[2], 100, 0, { phase: PROGRESS_PHASES[2][1] });
 
   const brandContext = { brandVoice: analysis?.brandVoice || 'Professional' };
-  report(3, PROGRESS_STEPS[3], 0, 15, {
+  await report(3, PROGRESS_STEPS[3], 0, 15, {
     phase: PROGRESS_PHASES[3][0],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   if (await checkCancelled()) throw new Error('Cancelled');
   scenarios = await openaiService.generateAudienceImages(scenarios, brandContext);
-  report(3, PROGRESS_STEPS[3], 70, 3, {
+  await report(3, PROGRESS_STEPS[3], 70, 3, {
     phase: PROGRESS_PHASES[3][0],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
-  report(3, PROGRESS_STEPS[3], 90, 1, { phase: PROGRESS_PHASES[3][1] });
-  report(3, PROGRESS_STEPS[3], 100, 0, { phase: PROGRESS_PHASES[3][1] });
+  await report(3, PROGRESS_STEPS[3], 90, 1, { phase: PROGRESS_PHASES[3][1] });
+  await report(3, PROGRESS_STEPS[3], 100, 0, { phase: PROGRESS_PHASES[3][1] });
 
   // Persist scenarios to audiences table and organization_intelligence so they appear on refresh
   if (scenarios.length > 0) {

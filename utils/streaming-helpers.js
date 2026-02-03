@@ -24,6 +24,8 @@ export function formatSSE(event, data) {
 export function writeSSE(res, event, data) {
   if (res.writableEnded) return;
   res.write(formatSSE(event, data));
+  // Flush so each event reaches the client immediately (avoids buffering multiple events into one chunk)
+  if (typeof res.flush === 'function') res.flush();
 }
 
 /**
@@ -33,6 +35,7 @@ export function writeSSE(res, event, data) {
 export function sendKeepalive(res) {
   if (res.writableEnded) return;
   res.write(': keepalive\n\n');
+  if (typeof res.flush === 'function') res.flush();
 }
 
 /**
