@@ -75,6 +75,20 @@ router.post('/website-analysis', requireUserOrSession, async (req, res) => {
     );
     return res.status(201).json({ jobId });
   } catch (e) {
+    if (e.name === 'UserNotFoundError') {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'User not found; token may be for a deleted or invalid user'
+      });
+    }
+    if (e.code === '23503' && e.constraint === 'jobs_user_id_fkey') {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'User not found; token may be for a deleted or invalid user'
+      });
+    }
     if (e.message?.includes('REDIS_URL')) {
       return res.status(503).json({
         success: false,
@@ -131,6 +145,20 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
     });
     return res.status(201).json({ jobId });
   } catch (e) {
+    if (e.name === 'UserNotFoundError') {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'User not found; token may be for a deleted or invalid user'
+      });
+    }
+    if (e.code === '23503' && e.constraint === 'jobs_user_id_fkey') {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'User not found; token may be for a deleted or invalid user'
+      });
+    }
     if (e.message?.includes('REDIS_URL')) {
       return res.status(503).json({
         success: false,

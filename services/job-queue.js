@@ -106,17 +106,32 @@ function rowToStatus(row) {
   };
 }
 
+/** Thrown when context.userId is set but that user does not exist in users table (e.g. JWT from deleted user). */
+export class UserNotFoundError extends Error {
+  constructor(userId) {
+    super(`User not found: ${userId}`);
+    this.name = 'UserNotFoundError';
+    this.userId = userId;
+  }
+}
+
 /**
  * Create a job, enqueue it, return jobId.
  * @param {string} type - 'website_analysis' | 'content_generation'
  * @param {object} input - Job payload (stored for retry)
  * @param {object} context - { userId?, sessionId?, tenantId? }
  * @returns {Promise<{ jobId: string }>}
+ * @throws {UserNotFoundError} when context.userId is set but user does not exist in DB
  */
 export async function createJob(type, input, context = {}) {
   if (!JOB_TYPES.includes(type)) throw new Error(`Invalid job type: ${type}`);
   const { userId, sessionId, tenantId } = context;
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
+
+  if (userId) {
+    const u = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
+    if (!u.rows.length) throw new UserNotFoundError(userId);
+  }
 
   ensureRedis();
   const jobId = uuidv4();
