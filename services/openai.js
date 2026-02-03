@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import analyticsService from './analytics.js';
 import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/index.js';
+import streamManager from './stream-manager.js';
 
 dotenv.config();
 
@@ -1620,6 +1621,114 @@ Return only audiences with strong business potential. If no strong additional au
     } catch (error) {
       console.error('❌ Failed to generate audience scenarios:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Stream audience scenarios via SSE (Phase 3). Emit audience-complete per object, then complete.
+   * @param {Object} analysisData
+   * @param {string} webSearchData
+   * @param {string} keywordData
+   * @param {Array} existingAudiences
+   * @param {string} connectionId
+   */
+  async generateAudienceScenariosStream(analysisData, webSearchData = '', keywordData = '', existingAudiences = [], connectionId) {
+    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+    let existingAudiencesText = '';
+    if (existingAudiences.length > 0) {
+      const audienceDescriptions = existingAudiences.map((aud, idx) => {
+        let demographics = 'Unknown demographics';
+        try {
+          const parsed = typeof aud.target_segment === 'string' ? JSON.parse(aud.target_segment) : aud.target_segment;
+          demographics = parsed?.demographics || 'Unknown demographics';
+        } catch (e) {}
+        return `${idx + 1}. ${aud.customer_problem} - ${demographics}`;
+      }).join('\n');
+      existingAudiencesText = `
+
+EXISTING AUDIENCES (DO NOT DUPLICATE):
+You have already created ${existingAudiences.length} audience(s) for this user/website:
+${audienceDescriptions}
+
+CRITICAL: Generate ONLY net new audiences that are completely different from the above.`;
+    }
+    const isIncrementalAnalysis = existingAudiences.length > 0;
+    const systemPrompt = isIncrementalAnalysis
+      ? `You are a customer psychology expert. Generate additional audience scenarios only when they represent genuine opportunities. Avoid duplicating existing audiences.`
+      : `You are a customer psychology expert. Generate 4-5 distinct audience scenarios for content marketing.`;
+    const targetCount = isIncrementalAnalysis ? '1-2 additional' : '4-5';
+    const qualityNote = isIncrementalAnalysis
+      ? '- Generate 1-2 additional audience scenarios ONLY if genuine opportunities exist\n- Do NOT force audiences to reach a number'
+      : '- Generate 4-5 distinct audience scenarios\n- Each must have strong business value';
+
+    try {
+      const stream = await openai.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: `Based on this business analysis, identify ${targetCount} genuine audience opportunities:
+
+Business Context:
+- Business Type: ${analysisData.businessType}
+- Business Name: ${analysisData.businessName}
+- Target Audience: ${analysisData.targetAudience}
+- Business Model: ${analysisData.businessModel}
+- Content Focus: ${analysisData.contentFocus}
+${webSearchData}
+${keywordData}${existingAudiencesText}
+
+CRITICAL: ${qualityNote}
+Generate scenarios as JSON array: [ { "customerProblem": "...", "targetSegment": { "demographics": "...", "psychographics": "...", "searchBehavior": "..." }, "businessValue": { "searchVolume": "...", "competition": "...", "conversionPotential": "...", "priority": 1 }, "customerLanguage": [], "seoKeywords": [], "conversionPath": "...", "contentIdeas": [] }, ... ]
+Return only audiences with strong business potential. Order by priority.`
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 3500,
+        stream: true
+      });
+
+      let buffer = '';
+      const allAudiences = [];
+      const extractCompleteObjects = (buf) => {
+        let depth = 0;
+        let startIdx = -1;
+        const objects = [];
+        for (let i = 0; i < buf.length; i++) {
+          if (buf[i] === '{') {
+            if (depth === 0) startIdx = i;
+            depth++;
+          } else if (buf[i] === '}') {
+            depth--;
+            if (depth === 0 && startIdx >= 0) {
+              try {
+                const obj = JSON.parse(buf.slice(startIdx, i + 1));
+                objects.push(obj);
+              } catch (e) {}
+              startIdx = i + 1;
+            }
+          }
+        }
+        return { objects, remainingBuffer: startIdx >= 0 ? buf.slice(startIdx) : '' };
+      };
+
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? '';
+        if (delta) {
+          buffer += delta;
+          const { objects, remainingBuffer } = extractCompleteObjects(buffer);
+          buffer = remainingBuffer;
+          for (const obj of objects) {
+            allAudiences.push(obj);
+            streamManager.publish(connectionId, 'audience-complete', { audience: obj });
+          }
+        }
+      }
+      streamManager.publish(connectionId, 'complete', { audiences: allAudiences });
+    } catch (error) {
+      console.error('Audience stream error:', error);
+      streamManager.publish(connectionId, 'error', { error: error.message, errorCode: error.code ?? null });
     }
   }
 
