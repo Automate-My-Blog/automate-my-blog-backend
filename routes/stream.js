@@ -1,6 +1,6 @@
 /**
  * SSE stream routes. Phase 1: infrastructure.
- * Auth via ?token= query param (EventSource does not support custom headers).
+ * Auth via query: ?token=JWT (logged-in) or ?sessionId= (anonymous/session). EventSource cannot send headers.
  * GET /api/v1/stream — open SSE connection; client receives connectionId and keepalive.
  */
 
@@ -10,33 +10,45 @@ import { writeSSE } from '../utils/streaming-helpers.js';
 
 const router = express.Router();
 
+/** Minimum length for sessionId (UUIDs are 36 chars; be permissive). */
+const MIN_SESSION_ID_LENGTH = 10;
+
 /**
- * Validate token from query and return decoded payload or null.
- * @param {string} [token]
- * @returns {{ userId: string } | null}
+ * Resolve stream auth from query: JWT (token) or session ID. One must be valid.
+ * @param {object} authService - auth service with verifyToken(token)
+ * @param {{ token?: string, sessionId?: string }} query - req.query
+ * @returns {{ userId?: string, sessionId?: string } | null}
  */
-function validateStreamToken(authService, token) {
-  if (!token || typeof token !== 'string') return null;
-  const t = token.trim();
-  if (!t) return null;
-  try {
-    const decoded = authService.verifyToken(t);
-    return decoded?.userId ? { userId: decoded.userId } : null;
-  } catch {
-    return null;
+function validateStreamAuth(authService, query) {
+  const token = query?.token;
+  if (token && typeof token === 'string') {
+    const t = token.trim();
+    if (t) {
+      try {
+        const decoded = authService.verifyToken(t);
+        if (decoded?.userId) return { userId: decoded.userId };
+      } catch {
+        // fall through to sessionId
+      }
+    }
   }
+  const sessionId = query?.sessionId;
+  if (sessionId && typeof sessionId === 'string') {
+    const s = sessionId.trim();
+    if (s.length >= MIN_SESSION_ID_LENGTH) return { sessionId: s };
+  }
+  return null;
 }
 
 /**
- * GET /api/v1/stream/:connectionId?token=JWT
- * Joins an existing stream by connectionId (returned from POST /audiences/generate-stream,
- * POST /blog/generate-stream, POST /topics/generate-stream, etc.). Auth via ?token= (JWT).
+ * GET /api/v1/stream/:connectionId?token=JWT | ?sessionId=
+ * Joins an existing stream by connectionId (returned from POST .../generate-stream).
+ * Auth: ?token= (JWT) for logged-in users, or ?sessionId= for anonymous/session users.
  * Response: SSE stream of events for that connection.
  */
 function handleStreamByConnectionId(authService, req, res) {
   const connectionId = req.params.connectionId;
-  const token = req.query.token;
-  const context = validateStreamToken(authService, token);
+  const context = validateStreamAuth(authService, req.query);
   if (!context) {
     res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
     return;
@@ -54,21 +66,20 @@ function handleStreamByConnectionId(authService, req, res) {
 
   streamManager.createConnectionWithId(connectionId, res, {
     userId: context.userId,
-    sessionId: undefined
+    sessionId: context.sessionId
   });
   writeSSE(res, 'connected', { connectionId });
 }
 
 /**
- * GET /api/v1/stream?token=JWT
- * Opens an SSE connection. Auth via ?token= (JWT). EventSource cannot send Authorization header.
+ * GET /api/v1/stream?token=JWT | ?sessionId=
+ * Opens an SSE connection. Auth via ?token= (JWT) or ?sessionId= (anonymous).
  * Response: stream of events (connectionId, keepalive, and app events via stream-manager).
  */
 export function registerStreamRoute(authService) {
   // Root first so /stream matches (/:connectionId would match / with connectionId='')
   router.get('/', (req, res) => {
-    const token = req.query.token;
-    const context = validateStreamToken(authService, token);
+    const context = validateStreamAuth(authService, req.query);
     if (!context) {
       res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
       return;
@@ -82,7 +93,7 @@ export function registerStreamRoute(authService) {
 
     const connectionId = streamManager.createConnection(res, {
       userId: context.userId,
-      sessionId: undefined
+      sessionId: context.sessionId
     });
 
     writeSSE(res, 'connected', { connectionId });
