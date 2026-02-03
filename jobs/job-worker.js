@@ -14,7 +14,21 @@ import {
   JOB_TYPES
 } from '../services/job-queue.js';
 
-const connection = new IORedis(process.env.REDIS_URL, { maxRetriesPerRequest: null });
+let url = (process.env.REDIS_URL || '').trim();
+if (!url) {
+  console.error('REDIS_URL is required. Set it to your Redis URL (e.g. rediss://default:token@host.upstash.io:6379).');
+  process.exit(1);
+}
+// Some hosts inject a redis-cli prefix (e.g. " --tls -u redis://..."). Extract only the URL so ioredis gets a valid connection string.
+const urlMatch = url.match(/(redis[s]?:\/\/[^\s]+)/i);
+if (urlMatch && urlMatch[1] !== url) {
+  url = urlMatch[1];
+  console.warn('[job-worker] Extracted Redis URL from REDIS_URL (stripped surrounding text).');
+}
+
+const redisOpts = { maxRetriesPerRequest: null };
+if (process.env.REDIS_TOKEN) redisOpts.password = process.env.REDIS_TOKEN;
+const connection = new IORedis(url, redisOpts);
 
 function isCancelledFactory(jobId) {
   return () => isJobCancelled(jobId).then((v) => v === true);

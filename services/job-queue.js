@@ -14,11 +14,39 @@ const JOB_TYPES = ['website_analysis', 'content_generation'];
 let _connection = null;
 let _queue = null;
 
+/** REDIS_URL must be a TCP URL (redis:// or rediss:// host:port). Reject paths, empty host, or redis-cli fragments (e.g. " -u redis://..."). */
+function isRedisUrlValid(url) {
+  if (!url || typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (trimmed.startsWith('/')) return false;
+  if (/\s(-u|--tls)\s/i.test(trimmed)) return false;
+  try {
+    const u = new URL(trimmed);
+    return (u.protocol === 'redis:' || u.protocol === 'rediss:') && u.hostname;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeRedisUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  const trimmed = url.trim();
+  const urlMatch = trimmed.match(/(redis[s]?:\/\/[^\s]+)/i);
+  return urlMatch ? urlMatch[1] : trimmed;
+}
+
 function getConnection() {
-  const url = process.env.REDIS_URL;
+  const raw = process.env.REDIS_URL;
+  const url = normalizeRedisUrl(raw);
   if (!url) return null;
+  if (!isRedisUrlValid(url)) return null;
   if (!_connection) {
-    _connection = new IORedis(url, { maxRetriesPerRequest: null });
+    const opts = { maxRetriesPerRequest: null };
+    if (process.env.REDIS_TOKEN) opts.password = process.env.REDIS_TOKEN;
+    _connection = new IORedis(url, opts);
+    _connection.on('error', (err) => {
+      console.error('[job-queue] Redis connection error:', err?.message || err);
+    });
   }
   return _connection;
 }
@@ -36,6 +64,14 @@ function getQueue() {
 }
 
 function ensureRedis() {
+  const raw = process.env.REDIS_URL;
+  const url = normalizeRedisUrl(raw);
+  if (!url) throw new Error('REDIS_URL is required for job queue');
+  if (!isRedisUrlValid(url)) {
+    throw new Error(
+      'REDIS_URL must be a full TCP URL (e.g. rediss://default:token@host.upstash.io:6379), not a path or empty host'
+    );
+  }
   if (!getConnection()) throw new Error('REDIS_URL is required for job queue');
 }
 

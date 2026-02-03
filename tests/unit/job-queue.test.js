@@ -11,7 +11,9 @@ vi.mock('../../services/database.js', () => ({
 }));
 
 vi.mock('ioredis', () => ({
-  default: vi.fn().mockImplementation(function MockIORedis() { return {}; }),
+  default: vi.fn().mockImplementation(function MockIORedis() {
+    return { on: vi.fn(), duplicate: vi.fn().mockReturnValue({ on: vi.fn(), psubscribe: vi.fn() }) };
+  }),
 }));
 
 vi.mock('bullmq', () => ({

@@ -39,11 +39,19 @@ import founderEmailRoutes from './routes/founderEmails.js';
 import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
+import { registerStreamRoute } from './routes/stream.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 
 // Load environment variables
 dotenv.config();
+
+if (!process.env.REDIS_URL) {
+  console.warn(
+    'REDIS_URL is not set. POST /api/v1/jobs/website-analysis and other job endpoints will return 503. ' +
+    'Set REDIS_URL (e.g. redis://localhost:6379) and run the job worker: node jobs/job-worker.js'
+  );
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -132,6 +140,7 @@ app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), u
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
+app.use('/api/v1/stream', registerStreamRoute(authService));
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
 app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
