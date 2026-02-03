@@ -2019,14 +2019,23 @@ CRITICAL REQUIREMENTS:
   }
 
   /**
-   * Complete enhanced blog generation with visual content
+   * Complete enhanced blog generation with visual content.
+   * @param {object} options.onPartialResult - Optional (segment, data) => void for job stream partials: context-result, blog-result, visuals-result, seo-result.
    */
   async generateCompleteEnhancedBlog(topic, businessInfo, organizationId, options = {}) {
     try {
+      const onPartialResult = options.onPartialResult;
       console.log(`🎯 Starting complete enhanced blog generation for: ${topic.title}`);
 
       // Load organization context for quality recommendations
       const organizationContext = await this.getOrganizationContext(organizationId);
+      if (typeof onPartialResult === 'function') {
+        onPartialResult('context-result', {
+          organizationId,
+          completenessScore: organizationContext.completenessScore,
+          availability: organizationContext.availability || {}
+        });
+      }
 
       // If tweets were provided in options, attach them to topic for downstream use
       if (options.preloadedTweets && options.preloadedTweets.length > 0) {
@@ -2044,11 +2053,17 @@ CRITICAL REQUIREMENTS:
         organizationId,
         options.additionalInstructions || ''
       );
+      if (typeof onPartialResult === 'function') {
+        onPartialResult('blog-result', { ...blogData });
+      }
 
       // Generate visual content suggestions if requested
       let visualSuggestions = [];
       if (options.includeVisuals !== false) {
         visualSuggestions = await this.generateVisualContentSuggestions(blogData, organizationId);
+        if (typeof onPartialResult === 'function') {
+          onPartialResult('visuals-result', { visualContentSuggestions: visualSuggestions });
+        }
       }
 
       // Run comprehensive SEO analysis on generated content
@@ -2070,7 +2085,9 @@ CRITICAL REQUIREMENTS:
         if (seoResult.success) {
           seoAnalysis = seoResult.analysis;
           console.log(`✅ SEO Analysis complete - Score: ${seoAnalysis.overallScore}/100`);
-
+          if (typeof onPartialResult === 'function') {
+            onPartialResult('seo-result', { seoAnalysis });
+          }
           // Log warning if score is below target
           if (seoAnalysis.overallScore < 95) {
             console.warn(`⚠️ SEO score (${seoAnalysis.overallScore}) is below target (95). Consider regeneration.`);
