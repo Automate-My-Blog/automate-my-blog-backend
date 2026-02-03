@@ -1,5 +1,7 @@
 /**
- * Topics API routes. POST /api/v1/topics/generate-stream for streaming topic generation.
+ * Topics API routes.
+ * - POST /api/v1/topics/generate-stream — streaming topic generation
+ * - POST /api/v1/trending-topics/stream — same (alias for trending-topics)
  * Body: { businessType, targetAudience, contentFocus }
  * Returns 200 { connectionId, streamUrl }. Stream via GET /api/v1/stream/:connectionId?token=
  * Events: topic-complete, topic-image-start, topic-image-complete, complete, error.
@@ -11,7 +13,7 @@ import openaiService from '../services/openai.js';
 
 const router = express.Router();
 
-router.post('/generate-stream', async (req, res) => {
+async function handleGenerateStream(req, res) {
   try {
     const userContext = req.user?.userId
       ? { userId: req.user.userId }
@@ -61,6 +63,9 @@ router.post('/generate-stream', async (req, res) => {
       message: error.message
     });
   }
-});
+}
+
+router.post('/generate-stream', handleGenerateStream);
+router.post('/stream', handleGenerateStream);
 
 export default router;
