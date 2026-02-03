@@ -1,17 +1,32 @@
 /**
- * Job queue API: create jobs, get status, retry, cancel.
+ * Job queue API: create jobs, get status, retry, cancel, stream (Phase 5).
  * Base path: /api/v1/jobs
  * All endpoints require auth or session; jobs are scoped by user or session.
  */
 
 import express from 'express';
 import * as jobQueue from '../services/job-queue.js';
+import streamManager from '../services/stream-manager.js';
+import { writeSSE } from '../utils/streaming-helpers.js';
+import DatabaseAuthService from '../services/auth-database.js';
 
 const router = express.Router();
+const authService = new DatabaseAuthService();
+
+/** Job stream connection timeout (10 min). */
+const JOB_STREAM_MAX_AGE_MS = 10 * 60 * 1000;
 
 function getJobContext(req) {
-  const userId = req.user?.userId ?? null;
+  let userId = req.user?.userId ?? null;
   const sessionId = req.headers['x-session-id'] || req.body?.sessionId || req.query?.sessionId || null;
+  if (!userId && req.query?.token) {
+    try {
+      const decoded = authService.verifyToken(String(req.query.token).trim());
+      if (decoded?.userId) userId = decoded.userId;
+    } catch {
+      // leave userId null
+    }
+  }
   return { userId, sessionId };
 }
 
@@ -129,6 +144,50 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       error: 'Failed to create job',
       message: e.message || 'Internal error'
     });
+  }
+});
+
+/**
+ * GET /api/v1/jobs/:jobId/stream?token=JWT (or Authorization / x-session-id)
+ * SSE stream for real-time job progress. EventSource-compatible (?token=).
+ * Events: connected, progress-update, step-change, complete, failed.
+ * Connection closes on complete/fail or after 10 min.
+ */
+router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const ctx = getJobContext(req);
+    const status = await jobQueue.getJobStatus(jobId, ctx);
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found',
+        message: 'Job not found or access denied'
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const connectionId = streamManager.createConnection(res, {
+      userId: ctx.userId ?? undefined,
+      sessionId: ctx.sessionId ?? undefined
+    }, { keepalive: true, maxAgeMs: JOB_STREAM_MAX_AGE_MS });
+
+    streamManager.subscribeToJob(jobId, connectionId);
+    writeSSE(res, 'connected', { connectionId, jobId });
+  } catch (e) {
+    console.error('GET /jobs/:jobId/stream error:', e);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to open stream',
+        message: e.message || 'Internal error'
+      });
+    }
   }
 });
 
