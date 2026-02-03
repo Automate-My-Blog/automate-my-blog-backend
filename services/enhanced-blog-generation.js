@@ -725,9 +725,11 @@ Keep it simple, specific, and searchable.`;
   /**
    * Search Grok with multiple queries and combine results
    * @param {Array<string>} searchQueries - Array of search queries
+   * @param {{ maxTweets?: number }} options - Optional; maxTweets (default 3)
    * @returns {Array<Object>} Array of unique tweet objects with full data
    */
-  async searchForTweetsWithMultipleQueries(searchQueries) {
+  async searchForTweetsWithMultipleQueries(searchQueries, options = {}) {
+    const maxTweets = options.maxTweets ?? 3;
     // CRITICAL: Limit to 1 query max to avoid Vercel timeout (60s limit)
     const limitedQueries = searchQueries.slice(0, 1);
 
@@ -748,7 +750,7 @@ Keep it simple, specific, and searchable.`;
           topic: query,
           businessType: 'Healthcare', // Generic since we have specific query
           targetAudience: 'General',
-          maxTweets: 3 // Get 3 tweets from the single query
+          maxTweets
         });
 
         // Dedupe tweets by URL
@@ -769,6 +771,40 @@ Keep it simple, specific, and searchable.`;
 
     console.log(`🐦 [TWEET SEARCH] Total unique tweets found: ${allTweets.length}`);
     return allTweets;
+  }
+
+  /**
+   * Streaming tweet search for a topic. Publishes events via streamManager.
+   * Events: queries-extracted, complete, error.
+   * @param {Object} topic - Topic object (title, subheader, trend, seoBenefit, etc.)
+   * @param {Object} businessInfo - { businessType, targetAudience }
+   * @param {number} maxTweets - Max tweets to find (default 3)
+   * @param {string} connectionId - Stream connection ID for publishing events
+   */
+  async searchForTopicStream(topic, businessInfo, maxTweets = 3, connectionId) {
+    try {
+      const topicDescription = `
+      Title: ${topic.title}
+      Subheader: ${topic.subheader || ''}
+      Focus: ${topic.trend || ''}
+      SEO: ${topic.seoBenefit || ''}
+    `.trim();
+
+      const searchQueries = await this.extractTweetSearchQueries(topicDescription, topic, businessInfo);
+      streamManager.publish(connectionId, 'queries-extracted', { searchTermsUsed: searchQueries });
+
+      const tweets = await this.searchForTweetsWithMultipleQueries(searchQueries, { maxTweets });
+      streamManager.publish(connectionId, 'complete', {
+        tweets,
+        searchTermsUsed: searchQueries
+      });
+    } catch (error) {
+      console.error('❌ [TWEET SEARCH STREAM] Error:', error.message);
+      streamManager.publish(connectionId, 'error', {
+        error: error.message,
+        errorCode: error.code ?? null
+      });
+    }
   }
 
   /**
