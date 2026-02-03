@@ -88,13 +88,28 @@ describe('job-queue', () => {
       expect(params[1]).toBe('org1');
     });
 
-    it('throws UserNotFoundError when userId is not in users table', async () => {
+    it('throws UserNotFoundError when userId is not in users table and no sessionId', async () => {
       vi.mocked(db.query).mockResolvedValue({ rows: [] });
       await expect(
         jobQueue.createJob('website_analysis', { url: 'https://x.com' }, { userId: 'nonexistent-user-id' })
       ).rejects.toMatchObject({ name: 'UserNotFoundError', userId: 'nonexistent-user-id' });
       expect(db.query).toHaveBeenCalledWith('SELECT id FROM users WHERE id = $1', ['nonexistent-user-id']);
       expect(db.query).not.toHaveBeenCalledWith(expect.stringContaining('INSERT INTO jobs'), expect.any(Array));
+    });
+
+    it('falls back to session-only when userId not in users table but sessionId present', async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+      const { jobId } = await jobQueue.createJob('website_analysis', { url: 'https://x.com' }, {
+        userId: 'deleted-user-id',
+        sessionId: 'session_anon_123',
+      });
+      expect(jobId).toBeDefined();
+      expect(db.query).toHaveBeenNthCalledWith(1, 'SELECT id FROM users WHERE id = $1', ['deleted-user-id']);
+      const [, params] = vi.mocked(db.query).mock.calls[1];
+      expect(params[2]).toBe(null);
+      expect(params[3]).toBe('session_anon_123');
     });
   });
 
