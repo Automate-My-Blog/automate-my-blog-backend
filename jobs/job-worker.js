@@ -141,6 +141,10 @@ async function processContentGeneration(jobId, input, context) {
     estimatedTimeRemaining: 60
   });
 
+  const onPartialResult = (segment, data) => {
+    publishJobStreamEvent(connection, jobId, segment, data);
+  };
+
   const result = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
     topic,
     businessInfo,
@@ -148,6 +152,7 @@ async function processContentGeneration(jobId, input, context) {
     {
       additionalInstructions,
       includeVisuals: options.includeVisuals !== false,
+      onPartialResult,
       ...options
     }
   );
