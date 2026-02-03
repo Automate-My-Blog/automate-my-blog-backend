@@ -77,6 +77,35 @@ describe('stream route', () => {
     expect(res.text).toBe('Unauthorized');
   });
 
+  it('returns 401 when sessionId is too short', async () => {
+    const res = await request(app).get('/api/v1/stream').query({ sessionId: 'short' }).expect(401);
+    expect(res.text).toBe('Unauthorized');
+  });
+
+  it.skip('opens SSE connection when sessionId is valid', async () => {
+    // SSE connection stays open; verify via integration test or: curl -N ".../api/v1/stream?sessionId=UUID"
+    const res = await request(app)
+      .get('/api/v1/stream')
+      .query({ sessionId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+      .expect(200)
+      .expect('Content-Type', /text\/event-stream/);
+    expect(res.text).toMatch(/event: connected/);
+    expect(res.text).toMatch(/connectionId/);
+    expect(authService.verifyToken).not.toHaveBeenCalled();
+  });
+
+  it.skip('opens SSE by connectionId with sessionId', async () => {
+    // SSE connection stays open; verify via integration test or curl.
+    const connectionId = 'aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee';
+    const res = await request(app)
+      .get(`/api/v1/stream/${connectionId}`)
+      .query({ sessionId: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890' })
+      .expect(200)
+      .expect('Content-Type', /text\/event-stream/);
+    expect(res.text).toMatch(/event: connected/);
+    expect(res.text).toMatch(new RegExp(connectionId));
+  });
+
   it.skip('opens SSE connection when token is valid', async () => {
     // Success path: GET /api/v1/stream?token=JWT returns 200 + SSE with connectionId.
     // In minimal app, supertest may not populate req.query for GET; verify via integration test or: curl -N "http://localhost:3001/api/v1/stream?token=YOUR_JWT"

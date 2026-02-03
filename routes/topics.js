@@ -39,7 +39,9 @@ router.post('/generate-stream', async (req, res) => {
     const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
     const streamUrl = token
       ? `${baseUrl}/api/v1/stream/${connectionId}?token=${encodeURIComponent(token)}`
-      : `${baseUrl}/api/v1/stream/${connectionId}`;
+      : userContext.sessionId
+        ? `${baseUrl}/api/v1/stream/${connectionId}?sessionId=${encodeURIComponent(userContext.sessionId)}`
+        : `${baseUrl}/api/v1/stream/${connectionId}`;
 
     setImmediate(() => {
       openaiService.generateTrendingTopicsStream(
