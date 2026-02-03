@@ -3,6 +3,7 @@ import db from '../services/database.js';
 import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
 import OpenAI from 'openai';
+import streamManager from '../services/stream-manager.js';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -145,8 +146,87 @@ Make it outcome-focused, not feature-focused. Focus on business results, not jus
 }
 
 /**
+ * Generate bundle overview with streaming (Phase 4). Emits overview-chunk then complete or error.
+ */
+async function generateBundleOverviewStream(strategies, connectionId) {
+  const strategySummaries = strategies.map((strategy) => {
+    const targetSegment = typeof strategy.target_segment === 'string'
+      ? JSON.parse(strategy.target_segment)
+      : strategy.target_segment;
+    const demographics = targetSegment?.demographics || 'Unknown audience';
+    const keywords = strategy.keywords || [];
+    const totalSearchVolume = keywords.reduce((sum, kw) => sum + (kw.search_volume || 0), 0);
+    const profitMatch = strategy.pitch?.match(/Profit of \$([0-9,]+)-\$([0-9,]+)/);
+    const profitLow = profitMatch ? parseInt(profitMatch[1].replace(/,/g, ''), 10) : null;
+    const profitHigh = profitMatch ? parseInt(profitMatch[2].replace(/,/g, ''), 10) : null;
+    return {
+      audience: demographics,
+      searchVolume: totalSearchVolume,
+      profitLow,
+      profitHigh,
+      customerProblem: strategy.customer_problem
+    };
+  });
+
+  const prompt = `You are a strategic SEO consultant. Create a compelling, outcome-focused overview for a comprehensive SEO plan that targets multiple audience segments.
+
+Here are the audience strategies included:
+${strategySummaries.map((s, i) => `
+${i + 1}. ${s.audience}
+   - Monthly search volume: ${s.searchVolume.toLocaleString()}
+   - Projected monthly profit: $${s.profitLow?.toLocaleString() || 'N/A'}-$${s.profitHigh?.toLocaleString() || 'N/A'}
+   - Problem they're solving: ${s.customerProblem}
+`).join('\n')}
+
+Write a compelling 2-3 sentence overview that:
+1. Describes the comprehensive strategy and how these audiences work together
+2. Emphasizes the OUTCOMES (total traffic potential, revenue opportunity, market coverage)
+3. Makes it clear this is a complete SEO solution, not just separate strategies
+
+Format your response as JSON with these fields:
+{
+  "title": "Compelling title for the bundle (4-6 words)",
+  "overview": "The compelling 2-3 sentence overview",
+  "totalMonthlySearches": <total search volume across all audiences>,
+  "projectedMonthlyProfit": { "low": <sum of all low profit projections>, "high": <sum of all high profit projections> },
+  "audienceCount": ${strategies.length},
+  "keyBenefits": ["benefit 1", "benefit 2", "benefit 3"]
+}
+Make it outcome-focused. Return only valid JSON.`;
+
+  try {
+    const stream = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: 'You are a strategic SEO consultant who writes compelling, outcome-focused marketing copy. Respond with valid JSON only.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      stream: true
+    });
+
+    let fullContent = '';
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta?.content ?? '';
+      if (delta) {
+        fullContent += delta;
+        streamManager.publish(connectionId, 'overview-chunk', { content: delta });
+      }
+    }
+
+    const result = JSON.parse(fullContent);
+    result.strategies = strategySummaries;
+    streamManager.publish(connectionId, 'complete', { result });
+  } catch (error) {
+    console.error('Bundle overview stream error:', error);
+    streamManager.publish(connectionId, 'error', { error: error.message, errorCode: error.code ?? null });
+  }
+}
+
+/**
  * GET /api/v1/strategies/bundle/calculate
- * Calculate bundle pricing for all user's strategies
+ * Calculate bundle pricing for all user's strategies.
+ * Optional ?stream=true&connectionId=xxx — returns 202 { connectionId, streamUrl } and streams overview chunks (Phase 4).
  */
 router.get('/calculate',  async (req, res) => {
   try {
@@ -177,7 +257,29 @@ router.get('/calculate',  async (req, res) => {
       });
     }
 
-    // Generate outcome-focused bundle overview using AI
+    const streamRequested = req.query.stream === 'true';
+    const connectionId = req.query.connectionId;
+
+    if (streamRequested && connectionId) {
+      const baseUrl = req.protocol + '://' + (req.get('host') || '');
+      const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
+      const streamUrl = token ? `${baseUrl}/api/v1/stream?token=${encodeURIComponent(token)}` : `${baseUrl}/api/v1/stream`;
+
+      setImmediate(() => {
+        generateBundleOverviewStream(strategies, connectionId).catch((err) =>
+          console.error('bundle overview stream error:', err)
+        );
+      });
+
+      return res.status(202).json({
+        connectionId,
+        streamUrl,
+        bundlePricing,
+        message: pricingCalculator.formatBundlePricingMessage(bundlePricing)
+      });
+    }
+
+    // Non-streaming path (default)
     const bundleOverview = await generateBundleOverview(strategies);
 
     res.json({
