@@ -8,6 +8,7 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import { getConnection } from './job-queue.js';
 import { writeSSE, sendKeepalive, DEFAULT_KEEPALIVE_MS } from '../utils/streaming-helpers.js';
+
 import { getJobEventsChannel as getJobEventsChannelUtil, JOB_EVENTS_PATTERN } from '../utils/job-stream-channels.js';
 
 const STREAM_CHANNEL_PREFIX = 'stream:';

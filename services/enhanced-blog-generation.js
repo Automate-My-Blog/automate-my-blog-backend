@@ -5,6 +5,7 @@ import { OpenAIService } from './openai.js';
 import grokTweetSearch from './grok-tweet-search.js';
 import emailService from './email.js';
 import crypto from 'crypto';
+import streamManager from './stream-manager.js';
 
 /**
  * Enhanced Blog Generation Service
@@ -1912,6 +1913,72 @@ CRITICAL REQUIREMENTS:
     } catch (error) {
       console.error('Visual content suggestion error:', error);
       return []; // Return empty array on failure, don't break blog generation
+    }
+  }
+
+  /**
+   * Stream blog post content via SSE (Phase 2). Emits content-chunk then complete or error.
+   * Client must open GET /api/v1/stream?token= first to get connectionId, then POST here with connectionId.
+   */
+  async generateBlogPostStream(topic, businessInfo, organizationId, connectionId, options = {}) {
+    const model = process.env.OPENAI_MODEL || 'gpt-4o';
+    const additionalInstructions = options.additionalInstructions ?? '';
+    try {
+      const organizationContext = await this.getOrganizationContext(organizationId);
+      const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
+      const tweetPlaceholders = (topic.preloadedTweets || []).map((tweet) => {
+        const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
+        return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
+      });
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
+
+      const stream = await this.openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert SEO content strategist who creates blog posts that consistently score 95+ on comprehensive SEO analysis. You understand both technical SEO requirements and user experience needs. You integrate brand voice, internal linking, and CTAs naturally into valuable content.
+
+CRITICAL REQUIREMENTS:
+1. SEO EXCELLENCE: Target 95+ SEO score through comprehensive optimization
+2. BRAND CONSISTENCY: Match provided brand voice and style patterns exactly
+3. STRATEGIC LINKING: Include internal links that genuinely add value
+4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
+5. MOBILE-FIRST: Structure content for mobile readability and engagement
+6. FACTUAL ACCURACY: No fabricated statistics or false claims
+7. GENUINE VALUE: Every section must provide actionable insights`
+          },
+          { role: 'user', content: enhancedPrompt }
+        ],
+        temperature: 0.3,
+        max_tokens: 7000,
+        stream: true
+      });
+
+      let fullContent = '';
+      for await (const chunk of stream) {
+        const delta = chunk.choices[0]?.delta?.content ?? '';
+        if (delta) {
+          fullContent += delta;
+          streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: delta });
+        }
+      }
+
+      const blogData = this.parseOpenAIResponse(fullContent);
+      if (blogData.content && blogData.content.includes('![TWEET:')) {
+        blogData.content = await this.processTweetPlaceholders(blogData.content);
+      }
+      blogData.content = blogData.content ? this.cleanupFormatting(blogData.content) : blogData.content;
+      blogData.organizationContext = {
+        dataCompleteness: organizationContext.completenessScore,
+        hasWebsiteData: organizationContext.hasWebsiteData,
+        hasManualInputs: organizationContext.hasManualFallbacks,
+        enhancementLevel: organizationContext.completenessScore > 60 ? 'high' : organizationContext.completenessScore > 30 ? 'medium' : 'basic'
+      };
+      streamManager.publish(connectionId, 'complete', { result: blogData });
+    } catch (error) {
+      console.error('Blog stream error:', error);
+      streamManager.publish(connectionId, 'error', { error: error.message, errorCode: error.code ?? null });
     }
   }
 
