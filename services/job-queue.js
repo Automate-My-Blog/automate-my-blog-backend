@@ -244,4 +244,4 @@ export async function getJobRow(jobId) {
   return r.rows[0] || null;
 }
 
-export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME };
+export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME, normalizeRedisUrl, isRedisUrlValid };

@@ -11,20 +11,26 @@ import {
   updateJobProgress,
   isJobCancelled,
   QUEUE_NAME,
-  JOB_TYPES
+  JOB_TYPES,
+  normalizeRedisUrl,
+  isRedisUrlValid
 } from '../services/job-queue.js';
 import { getJobEventsChannel } from '../utils/job-stream-channels.js';
 
-let url = (process.env.REDIS_URL || '').trim();
+const raw = process.env.REDIS_URL || '';
+const url = normalizeRedisUrl(raw);
 if (!url) {
   console.error('REDIS_URL is required. Set it to your Redis URL (e.g. rediss://default:token@host.upstash.io:6379).');
   process.exit(1);
 }
-// Some hosts inject a redis-cli prefix (e.g. " --tls -u redis://..."). Extract only the URL so ioredis gets a valid connection string.
-const urlMatch = url.match(/(redis[s]?:\/\/[^\s]+)/i);
-if (urlMatch && urlMatch[1] !== url) {
-  url = urlMatch[1];
-  console.warn('[job-worker] Extracted Redis URL from REDIS_URL (stripped surrounding text).');
+if (!isRedisUrlValid(url)) {
+  console.error(
+    'REDIS_URL must be a full TCP URL (e.g. rediss://default:token@host.upstash.io:6379), not a path or redis-cli fragment.'
+  );
+  process.exit(1);
+}
+if (raw.trim() !== url) {
+  console.warn('[job-worker] Using extracted Redis URL from REDIS_URL (stripped surrounding text).');
 }
 
 const redisOpts = { maxRetriesPerRequest: null };

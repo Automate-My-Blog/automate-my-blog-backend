@@ -169,12 +169,12 @@ Progress is optional; you may see a single “running” step or simple 0–100 
 
 ## 7. Checklist
 
-- [ ] Switch website analysis to `POST /jobs/website-analysis` → poll `GET /jobs/:jobId/status`; use `result` on success.
-- [ ] Switch content generation to `POST /jobs/content-generation` → poll `GET /jobs/:jobId/status`; use `result` on success.
+- [ ] Switch website analysis to `POST /api/v1/jobs/website-analysis` → poll `GET /api/v1/jobs/:jobId/status`; use `result` on success.
+- [ ] Switch content generation to `POST /api/v1/jobs/content-generation` → poll `GET /api/v1/jobs/:jobId/status`; use `result` on success.
 - [ ] Add progress UI using `progress` / `currentStep` (and optionally `estimatedTimeRemaining`).
 - [ ] Persist `jobId` and support resumption on refresh.
-- [ ] Handle `failed` (show `error`; optional retry via `POST /jobs/:jobId/retry`).
-- [ ] Optional: cancel via `POST /jobs/:jobId/cancel` for running jobs.
+- [ ] Handle `failed` (show `error`; optional retry via `POST /api/v1/jobs/:jobId/retry`).
+- [ ] Optional: cancel via `POST /api/v1/jobs/:jobId/cancel` for running jobs.
 - [ ] Keep using the same auth (JWT) and `x-session-id` behavior as today.
 
 ---
