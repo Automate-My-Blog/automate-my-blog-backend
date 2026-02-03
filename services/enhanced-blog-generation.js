@@ -2057,45 +2057,47 @@ CRITICAL REQUIREMENTS:
         onPartialResult('blog-result', { ...blogData });
       }
 
-      // Generate visual content suggestions if requested
+      // Run visual suggestions and SEO analysis in parallel (both only need blogData)
       let visualSuggestions = [];
-      if (options.includeVisuals !== false) {
-        visualSuggestions = await this.generateVisualContentSuggestions(blogData, organizationId);
-        if (typeof onPartialResult === 'function') {
-          onPartialResult('visuals-result', { visualContentSuggestions: visualSuggestions });
-        }
-      }
-
-      // Run comprehensive SEO analysis on generated content
       let seoAnalysis = null;
-      if (blogData.content && options.skipSEOAnalysis !== true) {
-        console.log('🔍 Running comprehensive SEO analysis on generated content...');
-        const seoResult = await this.runSEOAnalysis(
-          blogData.content,
-          businessInfo.userId || options.userId,
-          options.postId || null, // PostId may not exist yet if saving happens after
-          {
-            businessType: businessInfo.businessType || businessInfo.industry,
-            targetAudience: businessInfo.targetAudience || topic.targetAudience,
-            primaryKeywords: blogData.seoKeywords || [],
-            businessGoals: 'Generate more customers through content'
+      const wantVisuals = options.includeVisuals !== false;
+      const wantSeo = blogData.content && options.skipSEOAnalysis !== true;
+      if (wantVisuals || wantSeo) {
+        const [visualResult, seoResult] = await Promise.all([
+          wantVisuals ? this.generateVisualContentSuggestions(blogData, organizationId) : [],
+          wantSeo
+            ? this.runSEOAnalysis(
+                blogData.content,
+                businessInfo.userId || options.userId,
+                options.postId || null,
+                {
+                  businessType: businessInfo.businessType || businessInfo.industry,
+                  targetAudience: businessInfo.targetAudience || topic.targetAudience,
+                  primaryKeywords: blogData.seoKeywords || [],
+                  businessGoals: 'Generate more customers through content'
+                }
+              )
+            : { success: false, analysis: null }
+        ]);
+        if (wantVisuals) {
+          visualSuggestions = visualResult;
+          if (typeof onPartialResult === 'function') {
+            onPartialResult('visuals-result', { visualContentSuggestions: visualSuggestions });
           }
-        );
-
-        if (seoResult.success) {
+        }
+        if (wantSeo && seoResult?.success) {
           seoAnalysis = seoResult.analysis;
           console.log(`✅ SEO Analysis complete - Score: ${seoAnalysis.overallScore}/100`);
           if (typeof onPartialResult === 'function') {
             onPartialResult('seo-result', { seoAnalysis });
           }
-          // Log warning if score is below target
           if (seoAnalysis.overallScore < 95) {
             console.warn(`⚠️ SEO score (${seoAnalysis.overallScore}) is below target (95). Consider regeneration.`);
             console.warn(`📊 Top improvements needed:`, seoAnalysis.topImprovements);
           }
-        } else {
+        } else if (wantSeo && seoResult?.analysis) {
           console.warn('⚠️ SEO Analysis failed, using fallback analysis');
-          seoAnalysis = seoResult.analysis; // Fallback analysis
+          seoAnalysis = seoResult.analysis;
         }
       }
 
