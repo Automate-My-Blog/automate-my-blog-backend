@@ -265,34 +265,16 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   const findOrgForCache = async () => {
     const websiteDomain = new URL(url).hostname;
     const urlVariants = [url, `http://${websiteDomain}`, `https://${websiteDomain}`];
-    if (userId) {
-      const result = await db.query(
-        `SELECT id, website_url, last_analyzed_at
-         FROM organizations
-         WHERE owner_user_id = $1
-           AND website_url = ANY($2)
-           AND last_analyzed_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [userId, urlVariants]
-      );
-      return result.rows[0] || null;
-    }
-    if (sessionId) {
-      const result = await db.query(
-        `SELECT id, website_url, last_analyzed_at
-         FROM organizations
-         WHERE owner_user_id IS NULL
-           AND session_id = $1
-           AND website_url = ANY($2)
-           AND last_analyzed_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [sessionId, urlVariants]
-      );
-      return result.rows[0] || null;
-    }
-    return null;
+    const result = await db.query(
+      `SELECT id, website_url, last_analyzed_at
+       FROM organizations
+       WHERE website_url = ANY($1)
+         AND last_analyzed_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
+       ORDER BY last_analyzed_at DESC
+       LIMIT 1`,
+      [urlVariants]
+    );
+    return result.rows[0] || null;
   };
 
   const maybeReturnCachedResult = async () => {
