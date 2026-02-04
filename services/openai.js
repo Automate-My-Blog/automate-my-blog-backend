@@ -392,6 +392,97 @@ Format your response as JSON:
   }
 
   /**
+   * Generate a brief conversational observation during scraping (Moment 1).
+   * Used for narrative-driven streaming UX - "thinking out loud" observations.
+   * @param {{ domain: string, initialContent: string }} context
+   * @returns {Promise<string>} 1-2 sentence casual observation
+   */
+  async generateScrapingObservation(context) {
+    const prompt = `You're an expert business analyst examining ${context.domain}.
+
+You just saw: "${(context.initialContent || '').slice(0, 200)}"
+
+React naturally with 1-2 casual, insightful observations. Show you understand their industry.
+Examples: "Ok, auto dealership... competitive space." or "Hm, B2B SaaS... nice focus."
+
+Be conversational, brief, and demonstrate genuine industry knowledge.`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are a thoughtful business analyst thinking out loud.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 80,
+      temperature: 0.8
+    });
+
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
+   * Generate a brief CTA observation during analysis (Moment 1).
+   * @param {{ ctasFound: number, ctaTypes: string[] }} context
+   * @returns {Promise<string>} 1-2 sentence casual observation
+   */
+  async generateCTAObservation(context) {
+    const types = (context.ctaTypes || []).join(', ') || 'various';
+    const prompt = `You found ${context.ctasFound} CTAs of types: ${types}.
+
+React with a brief, casual observation about their conversion strategy.
+Examples: "Found 3 CTAs... pretty standard - login, signup, demo" or "Only 1 CTA... might want more options"
+
+Show genuine analysis, keep it conversational.`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are a thoughtful business analyst thinking out loud.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 60,
+      temperature: 0.8
+    });
+
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
+   * Generate full analysis narrative as plain text for word-by-word streaming (Moment 2).
+   * Conversational, consultative tone - "Here's what I discovered..."
+   * @param {object} data - Business analysis data
+   * @returns {Promise<string>} 4-6 paragraph narrative
+   */
+  async generateFullAnalysisNarrative(data) {
+    const analysis = data.analysis || {};
+    const prompt = `You just analyzed ${analysis.businessName || analysis.companyName || 'this business'} (${analysis.businessType || 'business'}).
+
+Write a comprehensive but conversational analysis (4-6 paragraphs) covering:
+1. What they do and their market position
+2. Who they serve and customer problems
+3. Their content opportunities and challenges
+4. Your recommendations for their blog strategy
+
+Tone: Expert consultant presenting findings. Show clarity, focus, and dedication to solving their problems.
+This will set up audience recommendations, so emphasize understanding their business deeply.
+
+Business data:
+${JSON.stringify(data, null, 2).slice(0, 3000)}`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You are an expert business consultant presenting analysis findings.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 800,
+      temperature: 0.7
+    });
+
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
    * Generate trending topics for a specific industry
    */
   async generateTrendingTopics(businessType, targetAudience, contentFocus) {

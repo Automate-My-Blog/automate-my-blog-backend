@@ -10,12 +10,13 @@ import {
   getJobRow,
   updateJobProgress,
   isJobCancelled,
+  appendNarrativeStream,
   QUEUE_NAME,
   JOB_TYPES,
   normalizeRedisUrl,
   isRedisUrlValid
 } from '../services/job-queue.js';
-import { getJobEventsChannel } from '../utils/job-stream-channels.js';
+import { getJobEventsChannel, getJobNarrativeChannel } from '../utils/job-stream-channels.js';
 
 const raw = process.env.REDIS_URL || '';
 const url = normalizeRedisUrl(raw);
@@ -46,6 +47,29 @@ function publishJobStreamEvent(connection, jobId, event, data) {
   const payload = JSON.stringify({ event, data });
   connection.publish(channel, payload).catch((err) => {
     console.warn('[job-worker] stream publish error:', err?.message || err);
+  });
+}
+
+/**
+ * Stream a narrative event: store in DB for replay, then publish to Redis.
+ * Used for website_analysis narrative UX (scraping-thought, transition, analysis-chunk, complete).
+ * @param {import('ioredis').Redis} connection - Redis connection
+ * @param {string} jobId
+ * @param {{ type: string, content: string, progress?: number }} event
+ */
+async function streamNarrative(connection, jobId, event) {
+  const item = {
+    type: event.type,
+    content: event.content ?? '',
+    ...(event.progress != null && { progress: event.progress }),
+    timestamp: Date.now()
+  };
+  await appendNarrativeStream(jobId, item).catch((err) => {
+    console.warn('[job-worker] narrative append error:', err?.message || err);
+  });
+  const channel = getJobNarrativeChannel(jobId);
+  connection.publish(channel, JSON.stringify(item)).catch((err) => {
+    console.warn('[job-worker] narrative publish error:', err?.message || err);
   });
 }
 
@@ -96,9 +120,12 @@ async function processWebsiteAnalysis(jobId, input, context) {
     publishJobStreamEvent(connection, jobId, eventType, data);
   };
 
+  const onStreamNarrative = (event) => streamNarrative(connection, jobId, event);
+
   const result = await runWebsiteAnalysisPipeline(input, context, {
     onProgress,
     onPartialResult,
+    onStreamNarrative,
     isCancelled: isCancelledFactory(jobId)
   });
   return result;

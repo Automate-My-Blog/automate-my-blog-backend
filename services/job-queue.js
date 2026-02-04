@@ -269,4 +269,38 @@ export async function getJobRow(jobId) {
   return r.rows[0] || null;
 }
 
+/**
+ * Append a narrative event to jobs.narrative_stream for replay on reconnect.
+ * Used by job worker when streaming narrative (scraping-thought, analysis-chunk, etc.).
+ * @param {string} jobId
+ * @param {{ type: string, content: string, progress?: number, timestamp?: number }} event
+ */
+export async function appendNarrativeStream(jobId, event) {
+  const item = {
+    type: event.type,
+    content: event.content ?? '',
+    ...(event.progress != null && { progress: event.progress }),
+    timestamp: event.timestamp ?? Date.now()
+  };
+  await db.query(
+    `UPDATE jobs SET narrative_stream = COALESCE(narrative_stream, '[]'::jsonb) || $2::jsonb, updated_at = NOW() WHERE id = $1`,
+    [jobId, JSON.stringify([item])]
+  );
+}
+
+/**
+ * Get narrative_stream array for a job (for SSE replay on reconnect).
+ * @param {string} jobId
+ * @returns {Promise<Array<{ type: string, content: string, progress?: number, timestamp?: number }>>}
+ */
+export async function getNarrativeStream(jobId) {
+  const r = await db.query(
+    `SELECT narrative_stream FROM jobs WHERE id = $1`,
+    [jobId]
+  );
+  const raw = r.rows[0]?.narrative_stream;
+  if (!raw || !Array.isArray(raw)) return [];
+  return raw;
+}
+
 export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME, normalizeRedisUrl, isRedisUrlValid };

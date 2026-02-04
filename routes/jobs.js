@@ -9,6 +9,7 @@ import * as jobQueue from '../services/job-queue.js';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import { getJobNarrativeChannel } from '../utils/job-stream-channels.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -172,6 +173,105 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       error: 'Failed to create job',
       message: e.message || 'Internal error'
     });
+  }
+});
+
+/**
+ * GET /api/v1/jobs/:jobId/narrative-stream?token=JWT (or sessionId)
+ * SSE stream for narrative UX (Issue #157): scraping-thought, transition, analysis-chunk, narrative-complete, complete.
+ * Used for website_analysis jobs. Replays stored narrative on reconnect.
+ * Returns 404 if job not found, not website_analysis, or narrative stream unavailable.
+ */
+router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const ctx = getJobContext(req);
+    const status = await jobQueue.getJobStatus(jobId, ctx);
+    if (!status) {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found',
+        message: 'Job not found or access denied'
+      });
+    }
+
+    const row = await jobQueue.getJobRow(jobId);
+    if (row?.type !== 'website_analysis') {
+      return res.status(404).json({
+        success: false,
+        error: 'Not found',
+        message: 'Narrative stream is only available for website_analysis jobs'
+      });
+    }
+
+    const redis = jobQueue.getConnection?.();
+    if (!redis) {
+      return res.status(503).json({
+        success: false,
+        error: 'Service unavailable',
+        message: 'Redis is not configured (narrative stream requires Redis)'
+      });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
+
+    writeSSE(res, 'connected', { jobId });
+
+    // Replay stored narrative for reconnects
+    const stored = await jobQueue.getNarrativeStream(jobId);
+    for (const item of stored) {
+      if (res.writableEnded) break;
+      writeSSE(res, item.type, { content: item.content, ...(item.progress != null && { progress: item.progress }) });
+    }
+
+    const channel = getJobNarrativeChannel(jobId);
+    const subscriber = redis.duplicate();
+    await subscriber.subscribe(channel);
+
+    subscriber.on('message', (ch, message) => {
+      if (res.writableEnded) return;
+      try {
+        const item = JSON.parse(message);
+        writeSSE(res, item.type, { content: item.content, ...(item.progress != null && { progress: item.progress }) });
+      } catch (e) {
+        console.warn('[narrative-stream] invalid message:', e?.message || e);
+      }
+    });
+
+    const checkInterval = setInterval(async () => {
+      if (res.writableEnded) return;
+      const s = await jobQueue.getJobStatus(jobId, ctx);
+      if (s?.status === 'succeeded' || s?.status === 'failed') {
+        clearInterval(checkInterval);
+        if (!res.writableEnded) {
+          writeSSE(res, 'complete', {});
+          subscriber.unsubscribe(channel);
+          subscriber.disconnect();
+          res.end();
+        }
+      }
+    }, 2000);
+
+    req.on('close', () => {
+      clearInterval(checkInterval);
+      subscriber.unsubscribe(channel).catch(() => {});
+      subscriber.disconnect();
+      if (!res.writableEnded) res.end();
+    });
+  } catch (e) {
+    console.error('GET /jobs/:jobId/narrative-stream error:', e);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to open narrative stream',
+        message: e.message || 'Internal error'
+      });
+    }
   }
 });
 

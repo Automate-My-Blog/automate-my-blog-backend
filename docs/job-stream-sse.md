@@ -42,6 +42,10 @@ Real-time job progress via SSE. Replaces polling `GET /api/v1/jobs/:jobId/status
 { "type": "failed", "data": { "error": "...", "errorCode": "..." } }
 ```
 
+### Narrative stream (GET /jobs/:jobId/narrative-stream)
+
+Separate SSE stream for website-analysis narrative UX (Issue #157). Events: `connected`, `scraping-thought`, `transition`, `analysis-chunk`, `narrative-complete`, `complete`. See [website-analysis-narrative-stream-frontend-handoff.md](./website-analysis-narrative-stream-frontend-handoff.md).
+
 - **connected** — First event: `{ connectionId, jobId }`.
 - **progress-update** — Progress percentage, current step, estimated time remaining. Optional **phase** (granular sub-step for Thinking UX) and **detail** (e.g. "5 audiences").
 - **scrape-phase** — Granular website-scraping “thoughts”: one event per sub-step (validate, browser-launch, navigate, extract, ctas, fallbacks). Use for a step-by-step scraping log. **phase** = machine key, **message** = human-readable text, **url** only on first event.
