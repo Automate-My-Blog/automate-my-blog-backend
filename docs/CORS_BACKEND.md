@@ -11,23 +11,16 @@ The browser enforces CORS: the backend must send the right headers. The frontend
 
 ## Where it’s configured
 
-1. **Express (index.js)**  
-   The `cors` middleware is configured with:
-   - Dynamic origin (allowed list includes `https://www.automatemyblog.com`, `https://automatemyblog.com`, Vercel previews, localhost).
-   - `allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']`.
-   - `optionsSuccessStatus: 204`.
+**Express (index.js)** — CORS is handled by the `cors` middleware:
+- Dynamic origin (allowed list includes `https://www.automatemyblog.com`, `https://automatemyblog.com`, Vercel previews, localhost).
+- `allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']`.
+- `optionsSuccessStatus: 204`.
 
-2. **Vercel (vercel.json)**  
-   A `headers` block adds CORS headers for all routes so the production origin always receives them, including for OPTIONS and streaming/SSE responses:
-   - `Access-Control-Allow-Origin: https://www.automatemyblog.com`
-   - `Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS`
-   - `Access-Control-Allow-Headers: Content-Type, Authorization, x-session-id`
-   - `Access-Control-Allow-Credentials: true`
+This project uses the legacy Vercel `routes` property in `vercel.json`. Vercel does not allow `headers` (or rewrites, redirects, etc.) when `routes` is defined, so CORS is configured only in Express.
 
 ## Adding more origins
 
-- **Express:** Extend `allowedOriginList` in `index.js` or set env `CORS_ORIGINS` (comma-separated).
-- **vercel.json:** Only one static origin is set there (production). For multiple origins, rely on Express; the vercel.json block is a safety net for the production origin.
+Extend `allowedOriginList` in `index.js` or set env `CORS_ORIGINS` (comma-separated).
 
 ## Express example (reference)
 
@@ -76,4 +69,4 @@ export default function handler(req, res) {
 }
 ```
 
-In this project, CORS is handled by Express + vercel.json, so API handlers do not need to set CORS manually.
+In this project, CORS is handled by Express, so API handlers do not need to set CORS manually.
