@@ -9,15 +9,17 @@ class AnalyticsService {
   /**
    * Track a single event
    * @param {String} userId - User ID (null for anonymous users)
-   * @param {String} sessionId - Session ID
+   * @param {String} sessionId - Session ID (required for anonymous session continuity)
    * @param {String} eventType - Type of event (page_view, click, form_submit, etc.)
    * @param {Object} eventData - Event-specific data
-   * @param {Object} metadata - Additional metadata (conversionFunnelStep, revenueAttributed, etc.)
+   * @param {Object} metadata - Additional metadata (conversionFunnelStep, revenueAttributed, workflowWebsiteUrl, etc.)
    * @returns {Promise<Object>} Created event
    */
   async trackEvent(userId, sessionId, eventType, eventData = {}, metadata = {}) {
     try {
       console.log(`📊 Analytics: Tracking event ${eventType} for user ${userId || 'anonymous'}`);
+
+      const workflowWebsiteUrl = metadata.workflowWebsiteUrl || null;
 
       const result = await db.query(`
         INSERT INTO user_activity_events (
@@ -29,8 +31,9 @@ class AnalyticsService {
           referrer,
           conversion_funnel_step,
           revenue_attributed,
+          workflow_website_url,
           timestamp
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
         RETURNING *
       `, [
         userId,
@@ -40,7 +43,8 @@ class AnalyticsService {
         metadata.pageUrl || null,
         metadata.referrer || null,
         metadata.conversionFunnelStep || null,
-        metadata.revenueAttributed || null
+        metadata.revenueAttributed || null,
+        workflowWebsiteUrl
       ]);
 
       return result.rows[0];
@@ -53,7 +57,8 @@ class AnalyticsService {
 
   /**
    * Track multiple events in bulk (for batch processing)
-   * @param {Array} events - Array of event objects
+   * Each event may have userId, sessionId, workflowWebsiteUrl (or metadata.workflowWebsiteUrl).
+   * @param {Array} events - Array of event objects (userId, sessionId, eventType, eventData, metadata, workflowWebsiteUrl)
    * @returns {Promise<Number>} Number of events tracked
    */
   async bulkTrackEvents(events) {
@@ -63,12 +68,16 @@ class AnalyticsService {
       let trackedCount = 0;
 
       for (const event of events) {
+        const meta = event.metadata || {};
+        const workflowWebsiteUrl = event.workflowWebsiteUrl ?? meta.workflowWebsiteUrl ?? null;
+        const metadata = { ...meta, workflowWebsiteUrl };
+
         const result = await this.trackEvent(
           event.userId,
-          event.sessionId,
+          event.sessionId ?? meta.sessionId,
           event.eventType,
           event.eventData,
-          event.metadata || {}
+          metadata
         );
 
         if (result) trackedCount++;

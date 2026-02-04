@@ -21,18 +21,21 @@ function requireSuperAdmin(req, res, next) {
 }
 
 /**
- * Event Tracking Routes (authenticated users only)
+ * Event Tracking Routes (auth optional: accept logged-in and anonymous; no 401 for missing auth)
  */
 
 /**
  * Track a single event
  * POST /api/v1/analytics/track
+ * Accepts requests without Authorization; events with userId null are stored keyed by sessionId/workflowWebsiteUrl.
  */
-router.post('/track', authService.authMiddleware.bind(authService), async (req, res) => {
+router.post('/track', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   try {
-    const { eventType, eventData, pageUrl, metadata } = req.body;
-    const userId = req.user?.userId || null;
-    const { sessionId, referrer, conversionFunnelStep, revenueAttributed } = metadata || {};
+    const { eventType, eventData, pageUrl, userId: bodyUserId, workflowWebsiteUrl: bodyWorkflowUrl, metadata } = req.body;
+    // Prefer JWT user when present; otherwise use body userId (may be null for anonymous)
+    const userId = req.user?.userId ?? bodyUserId ?? null;
+    const { sessionId, referrer, conversionFunnelStep, revenueAttributed, workflowWebsiteUrl: metaWorkflowUrl } = metadata || {};
+    const workflowWebsiteUrl = bodyWorkflowUrl ?? metaWorkflowUrl ?? null;
 
     if (!eventType) {
       return res.status(400).json({
@@ -50,7 +53,8 @@ router.post('/track', authService.authMiddleware.bind(authService), async (req, 
         pageUrl,
         referrer,
         conversionFunnelStep,
-        revenueAttributed
+        revenueAttributed,
+        workflowWebsiteUrl
       }
     );
 
@@ -71,10 +75,12 @@ router.post('/track', authService.authMiddleware.bind(authService), async (req, 
 /**
  * Track batch events
  * POST /api/v1/analytics/track-batch
+ * Accepts requests without Authorization; events with userId null are stored keyed by sessionId/workflowWebsiteUrl.
  */
-router.post('/track-batch', authService.authMiddleware.bind(authService), async (req, res) => {
+router.post('/track-batch', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
   try {
     const { events } = req.body;
+    const jwtUserId = req.user?.userId ?? null;
 
     if (!events || !Array.isArray(events)) {
       return res.status(400).json({
@@ -83,7 +89,20 @@ router.post('/track-batch', authService.authMiddleware.bind(authService), async 
       });
     }
 
-    const eventsTracked = await analyticsService.bulkTrackEvents(events);
+    // Normalize: use JWT userId when present, else each event's userId; add workflowWebsiteUrl from body or metadata
+    const normalizedEvents = events.map(evt => {
+      const userId = jwtUserId ?? evt.userId ?? null;
+      const meta = evt.metadata || {};
+      const workflowWebsiteUrl = evt.workflowWebsiteUrl ?? meta.workflowWebsiteUrl ?? null;
+      return {
+        ...evt,
+        userId,
+        metadata: { ...meta, workflowWebsiteUrl },
+        workflowWebsiteUrl
+      };
+    });
+
+    const eventsTracked = await analyticsService.bulkTrackEvents(normalizedEvents);
 
     res.json({
       success: true,
