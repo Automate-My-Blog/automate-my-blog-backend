@@ -616,11 +616,22 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     if (obs) return streamNarrative({ type: 'scraping-thought', content: obs, progress: 10 });
   }).catch((e) => console.warn('⚠️ Scraping observation failed:', e?.message || e));
 
+  // Normalize headings to strings (Cheerio returns { text, level, id }; Puppeteer/Playwright return strings)
+  const headingStrings = (scrapedContent.headings || []).map(h =>
+    typeof h === 'string' ? h : (h?.text ?? '')
+  ).filter(Boolean);
+
+  const maxContentChars = Math.max(0, parseInt(process.env.WEBSITE_ANALYSIS_MAX_CONTENT_CHARS || '50000', 10)) || 50000;
+  let contentForAnalysis = scrapedContent.content || '';
+  if (contentForAnalysis.length > maxContentChars) {
+    contentForAnalysis = contentForAnalysis.slice(0, maxContentChars) + '\n\n[Content truncated for analysis.]';
+  }
+
   const fullContent = [
     `Title: ${scrapedContent.title}`,
     `Meta Description: ${scrapedContent.metaDescription}`,
-    `Headings: ${(scrapedContent.headings || []).join(', ')}`,
-    `Content: ${scrapedContent.content}`
+    `Headings: ${headingStrings.join(', ')}`,
+    `Content: ${contentForAnalysis}`
   ].join('\n').trim();
 
   await report(0, PROGRESS_STEPS[0], 10, 85, { phase: PROGRESS_PHASES[0][1] });
