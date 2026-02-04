@@ -253,14 +253,14 @@ export class OpenAIService {
 
   /**
    * Generate narrative analysis from website analysis data
-   * Outputs short factual snippets about the company, separated by double paragraph breaks
+   * Short snippets that echo back what we learned (active listener), separated by double paragraph breaks
    */
   async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
     console.log('📝 [NARRATIVE-GEN] Starting narrative generation');
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
 
-    const prompt = `You're analyzing a company's website and market position. Produce a set of short, factual snippets about the company. Each snippet is 1-3 sentences on one aspect. Separate each snippet with a double paragraph break (two newlines). No section headers, no conversational wrap—just the snippet text.
+    const prompt = `You're an active listener summarizing what you learned about a company. Echo back what we discovered in short, natural snippets. Each snippet should reflect what we found and add a brief reaction or observation—like "Oh, you're in the car industry. That's a big market." Separate each snippet with a double paragraph break (two newlines). No section headers—just the snippet text.
 
 Here's what we discovered:
 
@@ -289,23 +289,23 @@ ${intelligenceData.content_strategy_recommendations ? `- Content Recommendations
 ${intelligenceData.business_value_assessment ? `- Value Assessment: ${intelligenceData.business_value_assessment}` : ''}
 
 OUTPUT FORMAT:
-- Write 4-6 short snippets. Each snippet = 1-3 factual sentences on one topic (what they do, who they serve, how customers search, what’s on the site, content opportunity).
-- Separate snippets with a double paragraph break (exactly \\n\\n between snippets). No bold headers, no "About Your Business" labels—only the snippet content.
-- Tone: Factual and direct. State what the data shows. Avoid conversational phrasing like "We found" or "Your customers are"; write as neutral facts (e.g. "Customers search for X when Y.").
-- No sales language. No bullet lists inside snippets unless it’s a single short list in one snippet.
+- Write 4-6 short snippets. Each snippet echoes back something we found and adds a brief reaction (e.g. "So you're in [X]. That means [short observation]." or "Your customers are searching when [Y]. Good moment to reach them.").
+- Separate snippets with a double paragraph break (exactly \\n\\n between snippets). No bold headers—only the snippet content.
+- Tone: Active listener. Natural, warm, brief. Echo what we learned and react a little—not salesy, not stiff. Avoid long paragraphs.
+- No bullet lists inside snippets unless it's a single short list in one snippet.
 
 Example shape (snippet text only, \\n\\n between):
-[First snippet: what the business does and who it serves.]
+"Oh, you're in the car industry. That's a big market."
 \\n\\n
-[Second snippet: how and when customers search.]
+"Your customers are searching when they're comparing options—good moment to show up."
 \\n\\n
-[Third snippet: what’s on the site—goals, CTAs.]
+"You've got a few clear CTAs on the site. That helps."
 \\n\\n
-[Fourth snippet: content or strategic opportunity.]
+"Content around [topic] could connect well with how they're already searching."
 
 Format your response as JSON:
 {
-  "narrative": "Snippet one. Short and factual.\\n\\nSnippet two. Also direct.\\n\\nSnippet three.\\n\\nSnippet four.",
+  "narrative": "Echo and react snippet one.\\n\\nSnippet two.\\n\\nSnippet three.\\n\\nSnippet four.",
   "confidence": <0-1 score based on data quality>,
   "keyInsights": [
     "Insight 1 (one sentence)",
@@ -320,7 +320,7 @@ Format your response as JSON:
     console.log('📝 [NARRATIVE-GEN] First 300 chars of prompt:', prompt.substring(0, 300));
 
     try {
-      const systemMessage = 'You produce short, factual snippets about companies from analysis data. No conversational tone—write direct, neutral statements. Separate each snippet with a double paragraph break (\\n\\n). No section headers in the output.';
+      const systemMessage = 'You are an active listener. Echo back what you learned about the company in short snippets and add a brief, natural reaction (e.g. "Oh, you\'re in X. That\'s a big market."). Separate each snippet with a double paragraph break (\\n\\n). No section headers. Warm and concise.';
 
       console.log('📝 [NARRATIVE-GEN] System message:', systemMessage);
       console.log('📝 [NARRATIVE-GEN] Model: gpt-4o');
@@ -365,9 +365,9 @@ Format your response as JSON:
     } catch (error) {
       console.error('❌ Error generating narrative:', error);
 
-      // Fallback to basic narrative (snippets separated by double paragraph break)
+      // Fallback: active-listener snippets separated by double paragraph break
       return {
-        narrative: `${analysisData.businessName} is a ${analysisData.businessType} serving ${analysisData.endUsers}. ${analysisData.description || ''}\n\nCustomers search for solutions when ${analysisData.searchBehavior}.\n\nContent focused on ${analysisData.contentFocus} can reach them at key decision moments.`,
+        narrative: `Oh, you're in ${analysisData.businessType}. ${analysisData.businessName} serves ${analysisData.endUsers}—${(analysisData.description || '').slice(0, 80)}.\n\nYour customers are searching when ${analysisData.searchBehavior}. Good moment to show up.\n\nContent around ${analysisData.contentFocus} could connect well with how they're already looking.`,
         confidence: 0.5,
         keyInsights: [],
         isAIGenerated: false
@@ -433,7 +433,7 @@ Show genuine analysis, keep it conversational.`;
 
   /**
    * Generate full analysis narrative as plain text for word-by-word streaming (Moment 2).
-   * Short factual snippets about the company, separated by double paragraph breaks.
+   * Active-listener snippets (echo back + brief reaction), separated by double paragraph breaks.
    * @param {object} data - Business analysis data
    * @returns {Promise<string>} Snippets separated by double paragraph breaks
    */
@@ -441,7 +441,7 @@ Show genuine analysis, keep it conversational.`;
     const analysis = data.analysis || {};
     const prompt = `You just analyzed ${analysis.businessName || analysis.companyName || 'this business'} (${analysis.businessType || 'business'}).
 
-Write 4-6 short factual snippets about the company. Each snippet is 1-3 sentences on one aspect (what they do, who they serve, content opportunities, blog strategy). Separate each snippet with a double paragraph break (two newlines). No section headers. Tone: factual and direct, not conversational. State what the data shows; avoid "We found" or "Your customers are."
+Write 4-6 short snippets as an active listener: echo back what you learned and add a brief, natural reaction (e.g. "Oh, you're in the car industry. That's a big market." or "Your customers are searching when they're comparing—good moment to show up."). Separate each snippet with a double paragraph break (two newlines). No section headers. Warm and concise.
 
 Business data:
 ${JSON.stringify(data, null, 2).slice(0, 3000)}`;
