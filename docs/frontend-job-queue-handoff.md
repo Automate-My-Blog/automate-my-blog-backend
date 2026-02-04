@@ -77,6 +77,8 @@ x-session-id: <sessionId>             // when anonymous
 
 **Errors:** `404` when `jobId` not found or not owned by current user/session.
 
+**Caching:** When `status` is `succeeded` or `failed`, the response is cacheable: the server sets `Cache-Control: private, max-age=60` and backs the status in Redis. Repeat requests for the same completed job (e.g. after closing the stream or on revisit) are fast; you may rely on polling or re-fetching without worrying about overloading the DB.
+
 ### 3.3 Progress steps (for UX)
 
 You’ll see `currentStep` values such as:

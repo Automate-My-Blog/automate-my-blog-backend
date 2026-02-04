@@ -342,6 +342,9 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
  * GET /api/v1/jobs/:jobId/status
  * Returns: 200 { jobId, status, progress, currentStep, estimatedTimeRemaining, error, result, createdAt, updatedAt }
  */
+/** Allow client to cache completed job status (e.g. after stream ends). In-progress jobs are not cached. */
+const STATUS_CACHE_MAX_AGE = 60; // 1 minute
+
 router.get('/:jobId/status', requireUserOrSession, async (req, res) => {
   try {
     const { jobId } = req.params;
@@ -353,6 +356,10 @@ router.get('/:jobId/status', requireUserOrSession, async (req, res) => {
         error: 'Not found',
         message: 'Job not found or access denied'
       });
+    }
+    // Completed jobs (from streaming or poll) are cacheable so repeat requests are fast
+    if (status.status === 'succeeded' || status.status === 'failed') {
+      res.setHeader('Cache-Control', `private, max-age=${STATUS_CACHE_MAX_AGE}`);
     }
     return res.json(status);
   } catch (e) {

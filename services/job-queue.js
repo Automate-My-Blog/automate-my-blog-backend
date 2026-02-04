@@ -11,6 +11,11 @@ import db from './database.js';
 const QUEUE_NAME = 'amb-jobs';
 const JOB_TYPES = ['website_analysis', 'content_generation'];
 
+/** Redis key prefix for cached job status (completed jobs only). */
+const JOB_STATUS_CACHE_PREFIX = 'amb:job:status:';
+/** TTL for completed job status cache (seconds). */
+const JOB_STATUS_CACHE_TTL = 3600; // 1 hour
+
 let _connection = null;
 let _queue = null;
 
@@ -160,12 +165,39 @@ export async function createJob(type, input, context = {}) {
 
 /**
  * Get job status. 404 if not found or not owned.
+ * Completed jobs (succeeded/failed) are cached in Redis for fast repeat reads (e.g. after stream ends).
  * @returns {Promise<object|null>} Status object or null
  */
 export async function getJobStatus(jobId, context) {
+  const conn = getConnection();
+  if (conn) {
+    const cacheKey = `${JOB_STATUS_CACHE_PREFIX}${jobId}`;
+    try {
+      const cached = await conn.get(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return parsed;
+      }
+    } catch (e) {
+      // Ignore cache errors; fall through to DB
+    }
+  }
+
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
-  return rowToStatus(row);
+  const status = rowToStatus(row);
+
+  // Cache completed job status so repeat GET /jobs/:jobId/status (e.g. after stream) is fast
+  if (conn && (row.status === 'succeeded' || row.status === 'failed')) {
+    const cacheKey = `${JOB_STATUS_CACHE_PREFIX}${jobId}`;
+    try {
+      await conn.setex(cacheKey, JOB_STATUS_CACHE_TTL, JSON.stringify(status));
+    } catch (e) {
+      // Non-fatal
+    }
+  }
+
+  return status;
 }
 
 /**
@@ -189,6 +221,13 @@ export async function retryJob(jobId, context) {
      WHERE id = $1`,
     [jobId]
   );
+
+  // Invalidate completed-job cache so next getJobStatus reads fresh state
+  const conn = getConnection();
+  if (conn) {
+    const cacheKey = `${JOB_STATUS_CACHE_PREFIX}${jobId}`;
+    conn.del(cacheKey).catch(() => {});
+  }
 
   const queue = getQueue();
   await queue.add(row.type, { jobId }, { jobId });
