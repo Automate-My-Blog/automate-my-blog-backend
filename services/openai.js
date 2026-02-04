@@ -281,7 +281,7 @@ ${intelligenceData.customer_scenarios ? `- Customer Scenarios: ${JSON.stringify(
 **Website & Conversion:**
 - Website Goals: ${analysisData.websiteGoals}
 - Blog Strategy: ${analysisData.blogStrategy}
-${ctaData && ctaData.length > 0 ? `- CTAs Found: ${ctaData.map(c => c.cta_text).join(', ')}` : ''}
+${ctaData && ctaData.length > 0 ? `- CTAs Found: ${ctaData.map(c => c.cta_text ?? c.text ?? '').filter(Boolean).join(', ')}` : ''}
 
 **Strategic Insights:**
 ${intelligenceData.seo_opportunities ? `- SEO Opportunities: ${intelligenceData.seo_opportunities}` : ''}

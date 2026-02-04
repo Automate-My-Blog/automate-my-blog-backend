@@ -299,8 +299,10 @@ export async function getNarrativeStream(jobId) {
     [jobId]
   );
   const raw = r.rows[0]?.narrative_stream;
-  if (!raw || !Array.isArray(raw)) return [];
-  return raw;
+  if (raw == null) return [];
+  const arr = typeof raw === 'string' ? (() => { try { return JSON.parse(raw); } catch { return []; } })() : raw;
+  if (!Array.isArray(arr)) return [];
+  return arr;
 }
 
 export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME, normalizeRedisUrl, isRedisUrlValid };
