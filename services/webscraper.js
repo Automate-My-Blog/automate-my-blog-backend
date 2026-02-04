@@ -6,8 +6,12 @@ import xml2js from 'xml2js';
 
 export class WebScraperService {
   constructor() {
-    this.timeout = parseInt(process.env.ANALYSIS_TIMEOUT) || 10000;
+    this.timeout = parseInt(process.env.ANALYSIS_TIMEOUT, 10) || 10000;
     this.userAgent = process.env.USER_AGENT || 'AutoBlog Bot 1.0';
+    this.waitAfterLoadMs = Math.max(0, parseInt(process.env.SCRAPE_WAIT_AFTER_LOAD_MS, 10)) || 2000;
+    this.waitForContentTimeoutMs = Math.max(2000, parseInt(process.env.SCRAPE_WAIT_FOR_CONTENT_TIMEOUT_MS, 10)) || 8000;
+    this.fastPathTimeoutMs = Math.max(2000, parseInt(process.env.SCRAPE_FAST_PATH_TIMEOUT_MS, 10)) || 5000;
+    this.fastPathMinContentChars = Math.max(200, parseInt(process.env.SCRAPE_FAST_PATH_MIN_CONTENT_CHARS, 10)) || 500;
   }
 
   /**
@@ -113,14 +117,47 @@ export class WebScraperService {
     try {
       this._scrapeProgress(onScrapeProgress, 'start', 'Starting website scrape', { url });
 
-      // Validate URL
       this._scrapeProgress(onScrapeProgress, 'validate', 'Validating URL');
       const urlObj = new URL(url);
       if (!['http:', 'https:'].includes(urlObj.protocol)) {
         throw new Error('Invalid URL protocol. Only HTTP and HTTPS are supported.');
       }
 
-      // Try Puppeteer first for dynamic content
+      // Fast path: try HTTP + Cheerio first for static/SSR sites (short timeout)
+      this._scrapeProgress(onScrapeProgress, 'method-cheerio-fast', 'Trying fast path (HTTP)');
+      try {
+        const response = await axios.get(url, {
+          headers: {
+            'User-Agent': this.userAgent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          timeout: this.fastPathTimeoutMs,
+          maxRedirects: 5,
+          validateStatus: (status) => status === 200
+        });
+        if (response.data && typeof response.data === 'string' && response.data.includes('</')) {
+          const extracted = this._extractContentAndCTAsFromHTML(response.data, url);
+          const bodyText = (extracted.content || '').trim();
+          if (bodyText.length >= this.fastPathMinContentChars) {
+            console.log(`✅ Fast path succeeded: ${bodyText.length} chars`);
+            const content = {
+              title: extracted.title,
+              metaDescription: extracted.metaDescription,
+              content: extracted.content,
+              headings: extracted.headings,
+              url,
+              internalLinks: extracted.internalLinks || [],
+              externalLinks: [],
+              ctas: extracted.ctas || [],
+              extractionMethod: 'cheerio_fast_path'
+            };
+            return this.cleanContent(content);
+          }
+        }
+      } catch (fastPathError) {
+        // Expected for JS-heavy or slow sites; fall through to browser
+      }
+
       this._scrapeProgress(onScrapeProgress, 'method-puppeteer', 'Trying Puppeteer (dynamic content)');
       try {
         return await this.scrapeWithPuppeteer(url, opts);
@@ -194,13 +231,13 @@ export class WebScraperService {
 
       this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
       await page.goto(url, {
-        waitUntil: 'networkidle0',
+        waitUntil: 'domcontentloaded',
         timeout: this.timeout
       });
 
       this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
+      await new Promise(resolve => setTimeout(resolve, this.waitAfterLoadMs));
+
       await page.waitForFunction(() => {
         const paragraphs = document.querySelectorAll('p');
         if (paragraphs.length > 2) {
@@ -208,13 +245,11 @@ export class WebScraperService {
             .map(p => p.innerText || p.textContent || '')
             .join(' ')
             .trim();
-          if (totalText.length > 100) {
-            return true;
-          }
+          if (totalText.length > 100) return true;
         }
         const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
         return bodyText.length > 1000;
-      }, { timeout: 15000, polling: 1000 }).catch(() => {
+      }, { timeout: this.waitForContentTimeoutMs, polling: 1000 }).catch(() => {
         console.log('Dynamic content wait timed out, proceeding with extraction...');
       });
 
@@ -583,13 +618,13 @@ export class WebScraperService {
       this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
       console.log('🌐 Navigating to page with Playwright...');
       await page.goto(url, {
-        waitUntil: 'networkidle',
+        waitUntil: 'domcontentloaded',
         timeout: this.timeout
       });
 
       this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
-      await page.waitForTimeout(5000);
-      
+      await new Promise(r => setTimeout(r, this.waitAfterLoadMs));
+
       try {
         await page.waitForFunction(() => {
           const paragraphs = document.querySelectorAll('p');
@@ -598,13 +633,11 @@ export class WebScraperService {
               .map(p => p.innerText || p.textContent || '')
               .join(' ')
               .trim();
-            if (totalText.length > 100) {
-              return true;
-            }
+            if (totalText.length > 100) return true;
           }
           const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
           return bodyText.length > 1000;
-        }, { timeout: 15000 });
+        }, { timeout: this.waitForContentTimeoutMs });
       } catch (waitError) {
         console.log('Playwright dynamic content wait timed out, proceeding with extraction...');
       }
@@ -869,6 +902,99 @@ export class WebScraperService {
   }
 
   /**
+   * Shared HTML → content + CTAs extraction (Cheerio). Used by scrapeWithCheerio and scrapeWithBrowserService.
+   * @param {string} html - Raw HTML
+   * @param {string} url - Page URL (for internal links and context)
+   * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object> }}
+   */
+  _extractContentAndCTAsFromHTML(html, url) {
+    const $ = cheerio.load(html);
+    $('script, style, .cookie-banner, .popup, .modal, .advertisement, .social-share, .comments').remove();
+
+    const title = $('title').text().trim() || '';
+    const metaDescription = $('meta[name="description"]').attr('content') || $('meta[property="og:description"]').attr('content') || '';
+
+    const mainSelectors = [
+      'main', '[role="main"]', '.main-content', '.content', '.page-content',
+      'article', '.post-content', '.entry-content', '.blog-post', '.post-body',
+      '.single-post', '[data-post]', '.content-area', '.post', '.article-content'
+    ];
+    let mainContent = '';
+    for (const selector of mainSelectors) {
+      const element = $(selector);
+      if (element.length > 0) {
+        const text = element.text().trim();
+        if (text.length > 100) {
+          mainContent = text;
+          break;
+        }
+      }
+    }
+    if (!mainContent || mainContent.length < 100) {
+      const paragraphs = [];
+      $('p').each((i, el) => {
+        const text = $(el).text().trim();
+        if (text.length > 20) paragraphs.push(text);
+      });
+      if (paragraphs.length > 0) mainContent = paragraphs.join(' ');
+    }
+    if (!mainContent || mainContent.length < 100) {
+      $('nav, header, footer, aside, .sidebar, .menu, .navigation').remove();
+      mainContent = $('body').text().trim();
+    }
+
+    const headings = [];
+    $('h1, h2, h3, h4, h5, h6').each((i, el) => {
+      if (i >= 15) return;
+      const text = $(el).text().trim();
+      const level = parseInt(el.tagName.charAt(1), 10) || 1;
+      if (text) headings.push({ text, level, id: $(el).attr('id') || '' });
+    });
+
+    let domain = '';
+    try {
+      domain = new URL(url).hostname;
+    } catch (e) { /* ignore */ }
+    const internalLinks = [];
+    $('a[href]').each((i, el) => {
+      const href = $(el).attr('href');
+      const linkText = $(el).text().trim();
+      if (!href || !linkText) return;
+      try {
+        const linkUrl = new URL(href, url);
+        if (linkUrl.hostname === domain || linkUrl.hostname.replace('www.', '') === domain.replace('www.', '')) {
+          internalLinks.push({ url: linkUrl.href, text: linkText, context: 'content' });
+        }
+      } catch (err) { /* ignore */ }
+    });
+
+    const ctas = [];
+    const ctaSelectors = [
+      'button',
+      'a[class*="btn"]', 'a[class*="button"]', 'a[class*="cta"]',
+      '[data-cta]', '.cta', '.call-to-action',
+      'input[type="submit"]', '[role="button"]'
+    ];
+    ctaSelectors.forEach(selector => {
+      $(selector).each((i, el) => {
+        const text = $(el).text().trim();
+        const href = $(el).attr('href') || '';
+        if (text && text.length > 0 && text.length < 100) {
+          ctas.push({
+            text,
+            href,
+            type: this.classifyCTA(text, href),
+            placement: 'main_content',
+            tagName: el.tagName ? el.tagName.toLowerCase() : ''
+          });
+        }
+      });
+    });
+
+    return { title, metaDescription, content: mainContent, headings, internalLinks, ctas };
+  }
+
+  /**
    * Scrape with Browserless.io cloud service (serverless browser automation)
    * @param {string} url
    * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
@@ -878,16 +1004,14 @@ export class WebScraperService {
     try {
       console.log('🚀 Starting Browserless.io scraping for:', url);
       this._scrapeProgress(onScrapeProgress, 'api-request', 'Requesting page from Browserless.io');
-      
+
       const browserlessToken = process.env.BROWSERLESS_API_TOKEN || process.env.BROWSERLESS_TOKEN;
       if (!browserlessToken) {
         console.warn('⚠️ BROWSERLESS_API_TOKEN not found, skipping Browserless.io...');
         throw new Error('Browserless API token not configured');
       }
 
-      console.log('✅ Browserless API token found, using Browserless.io service');
       const browserlessEndpoint = `https://production-sfo.browserless.io/content?token=${browserlessToken}`;
-
       const scrapeRequest = {
         url: url,
         gotoOptions: {
@@ -896,79 +1020,33 @@ export class WebScraperService {
         }
       };
 
-      console.log('🌐 Making request to Browserless.io...');
       const response = await axios.post(browserlessEndpoint, scrapeRequest, {
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         timeout: this.timeout + 5000
       });
-      
+
       if (!response.data) {
         throw new Error('No data returned from Browserless.io');
       }
 
       this._scrapeProgress(onScrapeProgress, 'parse-html', 'Parsing HTML');
-      console.log('✅ Browserless.io response received, parsing HTML...');
-
-      const $ = cheerio.load(response.data);
-
-      // Extract title
-      const title = $('title').text().trim() || '';
-
-      // Extract meta description
-      const metaDescription = $('meta[name="description"]').attr('content') ||
-                             $('meta[property="og:description"]').attr('content') || '';
-
       this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
-      let mainContent = '';
-      const contentSelectors = [
-        'main',
-        'article',
-        '.content',
-        '.post-content',
-        '.entry-content',
-        '#content',
-        '.main-content'
-      ];
-
-      for (const selector of contentSelectors) {
-        const content = $(selector).text().trim();
-        if (content && content.length > 100) {
-          mainContent = content;
-          console.log(`Browserless found content using selector "${selector}", length: ${content.length}`);
-          break;
-        }
-      }
-
-      // If no main content found, get all paragraphs
-      if (!mainContent || mainContent.length < 100) {
-        mainContent = $('p').map((i, el) => $(el).text().trim()).get()
-          .filter(p => p.length > 20)
-          .join(' ');
-        console.log(`Browserless found content from paragraphs, length: ${mainContent.length}`);
-      }
-
-      // Extract headings
-      const headings = $('h1, h2, h3, h4, h5, h6').map((i, el) => $(el).text().trim()).get()
-        .filter(h => h.length > 0)
-        .slice(0, 10);
-
-      console.log('Browserless final extraction results:');
-      console.log('- Title:', title);
-      console.log('- Content length:', mainContent.length);
-      console.log('- Headings found:', headings.length);
+      const extracted = this._extractContentAndCTAsFromHTML(response.data, url);
+      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
 
       const content = {
-        title: title.trim(),
-        metaDescription: metaDescription.trim(),
-        content: mainContent.trim(),
-        headings,
-        url
+        title: extracted.title.trim(),
+        metaDescription: extracted.metaDescription.trim(),
+        content: extracted.content.trim(),
+        headings: extracted.headings,
+        url,
+        internalLinks: extracted.internalLinks || [],
+        externalLinks: [],
+        ctas: extracted.ctas || [],
+        extractionMethod: 'browserless'
       };
 
       return this.cleanContent(content);
-      
     } catch (error) {
       console.error('❌ Browserless.io scraping failed:', error.message);
       throw error;
@@ -976,7 +1054,7 @@ export class WebScraperService {
   }
 
   /**
-   * Scrape with Axios + Cheerio for static content
+   * Scrape with Axios + Cheerio for static content. Uses shared _extractContentAndCTAsFromHTML.
    * @param {string} url
    * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
    */
@@ -985,7 +1063,7 @@ export class WebScraperService {
     try {
       console.log('🔧 Using enhanced Cheerio fallback for:', url);
       this._scrapeProgress(onScrapeProgress, 'fetch', 'Fetching page with HTTP');
-      
+
       const response = await axios.get(url, {
         headers: {
           'User-Agent': this.userAgent,
@@ -999,144 +1077,25 @@ export class WebScraperService {
       });
 
       this._scrapeProgress(onScrapeProgress, 'parse-html', 'Parsing HTML');
-      const $ = cheerio.load(response.data);
-      const urlObj = new URL(url);
-      const domain = urlObj.hostname;
-
-      $('script, style, .cookie-banner, .popup, .modal, .advertisement, .social-share, .comments').remove();
-
       this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
-      const title = $('title').text().trim();
-      const metaDescription = $('meta[name="description"]').attr('content') || '';
-
-      // Enhanced main content extraction with blog-specific selectors
-      let mainContent = '';
-      const mainSelectors = [
-        'main', '[role="main"]', '.main-content', '.content', '.page-content',
-        'article', '.post-content', '.entry-content', '.blog-post', '.post-body',
-        '.single-post', '[data-post]', '.content-area', '.post', '.article-content'
-      ];
-
-      for (const selector of mainSelectors) {
-        const element = $(selector);
-        if (element.length > 0) {
-          const text = element.text().trim();
-          if (text.length > 100) { // Only use if substantial content
-            mainContent = text;
-            console.log(`📄 Found main content using ${selector}, length: ${text.length}`);
-            break;
-          }
-        }
-      }
-
-      // Enhanced fallback: extract from paragraphs
-      if (!mainContent || mainContent.length < 100) {
-        console.log('⚠️ No main content found, extracting from paragraphs...');
-        const paragraphs = [];
-        $('p').each((i, el) => {
-          const text = $(el).text().trim();
-          if (text.length > 20) {
-            paragraphs.push(text);
-          }
-        });
-        
-        if (paragraphs.length > 0) {
-          mainContent = paragraphs.join(' ');
-          console.log(`📄 Extracted ${paragraphs.length} paragraphs, total length: ${mainContent.length}`);
-        }
-      }
-
-      // Last resort: get filtered body content
-      if (!mainContent || mainContent.length < 100) {
-        console.log('⚠️ Using body content as last resort...');
-        // Remove navigation and footer content more aggressively
-        $('nav, header, footer, aside, .sidebar, .menu, .navigation').remove();
-        mainContent = $('body').text().trim();
-      }
-
-      // Get headings with hierarchy
-      const headings = [];
-      $('h1, h2, h3, h4, h5, h6').each((i, el) => {
-        if (i < 15) {
-          const text = $(el).text().trim();
-          const level = parseInt(el.tagName.charAt(1));
-          if (text) {
-            headings.push({
-              text,
-              level,
-              id: $(el).attr('id') || ''
-            });
-          }
-        }
-      });
-
-      // Extract internal links
-      const internalLinks = [];
-      $('a[href]').each((i, el) => {
-        const href = $(el).attr('href');
-        const linkText = $(el).text().trim();
-        
-        if (href && linkText) {
-          try {
-            const linkUrl = new URL(href, url);
-            
-            // Check if it's an internal link
-            if (linkUrl.hostname === domain || linkUrl.hostname.replace('www.', '') === domain.replace('www.', '')) {
-              internalLinks.push({
-                url: linkUrl.href,
-                text: linkText,
-                context: 'content'
-              });
-            }
-          } catch (e) {
-            // Ignore malformed URLs
-          }
-        }
-      });
-
+      const extracted = this._extractContentAndCTAsFromHTML(response.data, url);
       this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
-      const ctas = [];
-      const ctaSelectors = [
-        'button', 
-        'a[class*="btn"]', 'a[class*="button"]', 'a[class*="cta"]',
-        '[data-cta]', '.cta', '.call-to-action',
-        'input[type="submit"]', '[role="button"]'
-      ];
-      
-      ctaSelectors.forEach(selector => {
-        $(selector).each((i, el) => {
-          const text = $(el).text().trim();
-          const href = $(el).attr('href') || '';
 
-          if (text && text.length > 0 && text.length < 100) {
-            ctas.push({
-              text,
-              href,
-              type: this.classifyCTA(text, href),
-              placement: 'main_content', // Database-valid placement value
-              tagName: el.tagName.toLowerCase()
-            });
-          }
-        });
-      });
-
-      // Calculate word count
-      const wordCount = mainContent ? mainContent.split(/\s+/).filter(word => word.length > 0).length : 0;
-
+      const wordCount = extracted.content ? extracted.content.split(/\s+/).filter(w => w.length > 0).length : 0;
       const content = {
-        title,
-        metaDescription: metaDescription.trim(),
-        content: mainContent,
-        headings,
+        title: extracted.title,
+        metaDescription: extracted.metaDescription,
+        content: extracted.content,
+        headings: extracted.headings,
         url,
         wordCount,
-        internalLinks,
-        externalLinks: [], // We'll only focus on internal links for Cheerio fallback
-        ctas,
+        internalLinks: extracted.internalLinks || [],
+        externalLinks: [],
+        ctas: extracted.ctas || [],
         extractionMethod: 'cheerio_enhanced'
       };
 
-      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${internalLinks.length} internal links, ${ctas.length} CTAs`);
+      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${(extracted.internalLinks || []).length} internal links, ${(extracted.ctas || []).length} CTAs`);
       return this.cleanContent(content);
     } catch (error) {
       console.error('Enhanced Cheerio extraction failed:', error);
