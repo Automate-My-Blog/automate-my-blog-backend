@@ -4,6 +4,8 @@
 **Purpose:** Step-by-step instructions to switch from sync endpoints to the new job-queue APIs for website analysis and content generation.  
 **Related:** Backend spec and implementation — `docs/backend-queue-system.md`, `docs/backend-audit.md` (§ queue).
 
+**Streaming (optional):** Instead of (or in addition to) polling `GET /api/v1/jobs/:jobId/status`, you can open `GET /api/v1/jobs/:jobId/stream?token=...` (or `?sessionId=...`) and receive **progress-update** and **partial-result** events in real time. See [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) for content-generation events and [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) for website-analysis events. Full event schema: [job-stream-sse.md](./job-stream-sse.md).
+
 ---
 
 ## 1. What’s changing
@@ -193,3 +195,6 @@ Until then, existing sync endpoints remain available. Once you’ve fully migrat
 
 - **Backend queue system:** `docs/backend-queue-system.md`  
 - **API base:** same as current (e.g. `https://your-api-host/api/v1/jobs`).
+- **Job stream (SSE):** [job-stream-sse.md](./job-stream-sse.md) — event schema.  
+- **Content-generation stream:** [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) — partial events (context, blog, visuals, seo).  
+- **Website-analysis stream:** [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) — partial events (scrape, analysis, audiences, pitches, scenarios).

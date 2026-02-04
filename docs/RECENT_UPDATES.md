@@ -1,6 +1,6 @@
 # Recent updates: what was added and why guardrails matter
 
-This doc summarizes what Sam added recently (CI, deployment, and docs) and why having these guardrails in place is important.
+This doc summarizes recent additions: CI and deployment guardrails, job-stream partial results and auth fixes, and website-analysis/content-generation speed and caching. It also explains why these changes matter.
 
 ---
 
@@ -62,6 +62,59 @@ If only one person knows how the guardrails work, they become fragile. Written d
 
 ---
 
+---
+
+## 5. Job stream partial results (SSE)
+
+**What**  
+The job stream (`GET /api/v1/jobs/:jobId/stream`) now pushes **partial results** as each stage finishes, instead of only progress and a final `complete` event.
+
+- **Content generation:** After you open the stream for a content-generation job, you get **context-result** (organization context loaded), **blog-result** (post body ready so the user can read while visuals/SEO run), **visuals-result**, **seo-result**, then **complete**. Existing clients that only listen for **progress-update** and **complete** keep working.
+- **Website analysis:** You get **scrape-result** (page title, meta, headings), **analysis-result** (org summary, CTAs), then per-item events (**audience-complete**, **pitch-complete**, **scenario-image-complete**) and step-level results (**audiences-result**, **pitches-result**, **scenarios-result**) before **complete**. The UI can show each audience, pitch, or image as it lands. Progress events include a **phase** field and a **scrape-phase** event for granular “thinking” steps during scraping.
+
+**Why it matters**  
+Users see value sooner (e.g. blog body or analysis summary) instead of waiting for the full pipeline. Frontend can build incremental UIs (one card per audience, update as pitch/image arrives) or keep the simpler “wait for complete” flow.
+
+**Docs**  
+- [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) — content-generation events and payloads.  
+- [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) — website-analysis events and payloads.  
+- [job-stream-sse.md](./job-stream-sse.md) — full event schema and scrape/phase details.
+
+---
+
+## 6. Job stream and auth fixes
+
+**What**  
+- **Pacing:** Job SSE events are sent one per tick on the API so the frontend doesn’t get bursts of events; progress and partial results stream in real time.  
+- **Auth:** If the job’s `user_id` is not in the `users` table (e.g. JWT user not yet synced), the API returns 401 for the job stream/status. When a JWT is present but the user isn’t in the DB, the job queue falls back to session-only (e.g. `sessionId`) so anonymous/session jobs still run and can be streamed with `?sessionId=`.
+
+**Why it matters**  
+Predictable event pacing avoids UI jank. Strict ownership (user must exist for JWT jobs) keeps streams secure; session fallback keeps anonymous flows working.
+
+---
+
+## 7. Website analysis: speed, caching, and research
+
+**What**  
+- **Faster research:** Website analysis uses a single batched research call (brand, competitors, keywords) instead of multiple sequential calls; progress phases are more granular so the UI can show “Researching business”, “Researching keywords & SEO”, etc.  
+- **Caching:** Website analysis results are cached by URL for up to 30 days. Cache key is URL-only (no user/session) so repeat analyses of the same site are fast.  
+- **Scraping “thoughts”:** The **scrape-phase** SSE event streams sub-steps (validating URL, launching browser, navigating, extracting, etc.) so the frontend can show a step-by-step log during “Fetching page content”.
+
+**Why it matters**  
+Faster analysis and cache reuse improve perceived speed; granular phases and scrape-phase events improve the “thinking” UX without changing the final result shape.
+
+---
+
+## 8. Content generation: parallel visuals and SEO
+
+**What**  
+Visual suggestions and SEO analysis for blog posts now run **in parallel** after the blog content is ready. The existing-audiences query is overlapped with the analyze step where possible. No change to API shape; **blog-result** still fires first, then **visuals-result** and **seo-result** (order may vary), then **complete**.
+
+**Why it matters**  
+Shorter time to **complete**; the user still sees the post body as soon as **blog-result** arrives.
+
+---
+
 ## Quick reference
 
 | Addition            | Where it lives                          | When it runs / what it does                    |
@@ -71,3 +124,4 @@ If only one person knows how the guardrails work, they become fragile. Written d
 | Vercel ignore step  | Vercel Dashboard → Git → Ignore Build Step | Only production builds; PRs/branches skip.     |
 | Quick wins / CI list| [github-actions-quick-wins.md](./github-actions-quick-wins.md) | Full list of workflows and how they work.      |
 | Vercel setup        | [vercel-preview-builds.md](./vercel-preview-builds.md) | Copy-paste command and one-time setup.         |
+| Job stream partials | [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md), [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) | SSE events and payloads for incremental UI.   |
