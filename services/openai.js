@@ -260,15 +260,20 @@ export class OpenAIService {
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
 
-    const prompt = `You're an active listener summarizing what you learned about a company. Echo back what we discovered in short, natural snippets. Each snippet should reflect what we found and add a brief reaction or observation—like "Oh, you're in the car industry. That's a big market." Separate each snippet with a double paragraph break (two newlines). No section headers—just the snippet text.
+    const prompt = `You just analyzed ${analysisData.businessName} (${analysisData.businessType}). Think out loud as you process what you discovered. Write 8-12 short thoughts (1-2 sentences each) that show you're actively making sense of their business.
 
-Here's what we discovered:
+Each thought should:
+1. Start casually ("Ok, I see..." / "Hmm..." / "Interesting..." / "Wait...")
+2. Make an observation or connection
+3. Be 1-2 sentences maximum
+4. Feel like real-time discovery, not polished analysis
 
-**Business Basics:**
+**Business Context:**
 - Name: ${analysisData.businessName}
 - Type: ${analysisData.businessType}
 - Description: ${analysisData.description}
 - Business Model: ${analysisData.businessModel}
+- Website Goals: ${analysisData.websiteGoals}
 
 **Customer Intelligence:**
 - Decision Makers: ${analysisData.decisionMakers}
@@ -279,33 +284,47 @@ ${intelligenceData.customer_language_patterns ? `- Customer Language: ${JSON.str
 ${intelligenceData.customer_scenarios ? `- Customer Scenarios: ${JSON.stringify(intelligenceData.customer_scenarios)}` : ''}
 
 **Website & Conversion:**
-- Website Goals: ${analysisData.websiteGoals}
 - Blog Strategy: ${analysisData.blogStrategy}
 ${ctaData && ctaData.length > 0 ? `- CTAs Found: ${ctaData.map(c => c.cta_text ?? c.text ?? '').filter(Boolean).join(', ')}` : ''}
 
-**Strategic Insights:**
+**Strategic Findings:**
 ${intelligenceData.seo_opportunities ? `- SEO Opportunities: ${intelligenceData.seo_opportunities}` : ''}
 ${intelligenceData.content_strategy_recommendations ? `- Content Recommendations: ${intelligenceData.content_strategy_recommendations}` : ''}
 ${intelligenceData.business_value_assessment ? `- Value Assessment: ${intelligenceData.business_value_assessment}` : ''}
 
 OUTPUT FORMAT:
-- Write 4-6 short snippets. Each snippet echoes back something we found and adds a brief reaction (e.g. "So you're in [X]. That means [short observation]." or "Your customers are searching when [Y]. Good moment to reach them.").
-- Separate snippets with a double paragraph break (exactly \\n\\n between snippets). No bold headers—only the snippet content.
-- Tone: Active listener. Natural, warm, brief. Echo what we learned and react a little—not salesy, not stiff. Avoid long paragraphs.
-- No bullet lists inside snippets unless it's a single short list in one snippet.
+- Write 8-12 thoughts (1-2 sentences each, NOT 3+)
+- Start each with casual discovery markers ("Ok..." / "Hmm..." / "I see..." / "Interesting..." / "Wait...")
+- Separate with double paragraph break (\\n\\n)
+- No section headers, no bullet lists
+- Tone: Casual analyst thinking through discoveries in real-time
 
-Example shape (snippet text only, \\n\\n between):
-"Oh, you're in the car industry. That's a big market."
-\\n\\n
-"Your customers are searching when they're comparing options—good moment to show up."
-\\n\\n
-"You've got a few clear CTAs on the site. That helps."
-\\n\\n
-"Content around [topic] could connect well with how they're already searching."
+THINKING PATTERNS TO USE:
+- Initial recognition: "Ok, I see. This is a [type] business..."
+- Pattern spotting: "Hmm, their customers search when [moment]..."
+- Connecting dots: "Interesting—that timing combined with [X] means [Y]..."
+- Noticing gaps: "Wait, I'm seeing [pattern] but their content focuses on [different thing]..."
+- Industry context: "The [industry] space is [dynamic]. They're positioned in [niche]..."
+- Strategic observation: "[Specific finding] creates an opportunity for [action]..."
 
-Format your response as JSON:
+Example thoughts (\\n\\n between):
+"Ok, I see. This is an automotive dealership focusing on certified pre-owned vehicles."
+\\n\\n
+"Hmm, that's a less crowded space than new car sales. Most dealerships chase generic 'cars for sale' traffic."
+\\n\\n
+"Their customers search when they're actively comparing options across dealerships. High-intent moment."
+\\n\\n
+"Interesting—search behavior shows concerns about vehicle history and warranty coverage. That's the decision point."
+\\n\\n
+"Wait, three CTAs are below the fold. 60% of traffic is mobile searchers in shopping mode."
+\\n\\n
+"Their blog focuses on maintenance tips, but customers are stuck on financing concerns earlier in the journey."
+\\n\\n
+"I'm seeing a content gap around financial decision-making—before they even visit the lot."
+
+Format as JSON:
 {
-  "narrative": "Echo and react snippet one.\\n\\nSnippet two.\\n\\nSnippet three.\\n\\nSnippet four.",
+  "narrative": "Thought one.\\n\\nThought two.\\n\\nThought three...",
   "confidence": <0-1 score based on data quality>,
   "keyInsights": [
     "Insight 1 (one sentence)",
@@ -320,7 +339,7 @@ Format your response as JSON:
     console.log('📝 [NARRATIVE-GEN] First 300 chars of prompt:', prompt.substring(0, 300));
 
     try {
-      const systemMessage = 'You are an active listener. Echo back what you learned about the company in short snippets and add a brief, natural reaction (e.g. "Oh, you\'re in X. That\'s a big market."). Separate each snippet with a double paragraph break (\\n\\n). No section headers. Warm and concise.';
+      const systemMessage = 'You are an AI analyst thinking out loud as you process the business data. Start observations casually ("Ok, I see..." / "Hmm..." / "Interesting...") then layer in strategic insight. Keep each thought to 1-2 sentences maximum - it\'s better to have more frequent, smaller observations than long blocks. Show you\'re actively discovering patterns, not delivering polished conclusions.';
 
       console.log('📝 [NARRATIVE-GEN] System message:', systemMessage);
       console.log('📝 [NARRATIVE-GEN] Model: gpt-4o');
@@ -365,9 +384,9 @@ Format your response as JSON:
     } catch (error) {
       console.error('❌ Error generating narrative:', error);
 
-      // Fallback: active-listener snippets separated by double paragraph break
+      // Fallback: thinking-out-loud snippets separated by double paragraph break
       return {
-        narrative: `Oh, you're in ${analysisData.businessType}. ${analysisData.businessName} serves ${analysisData.endUsers}—${(analysisData.description || '').slice(0, 80)}.\n\nYour customers are searching when ${analysisData.searchBehavior}. Good moment to show up.\n\nContent around ${analysisData.contentFocus} could connect well with how they're already looking.`,
+        narrative: `Ok, I see. This is a ${analysisData.businessType} business.\n\nHmm, ${analysisData.businessName} serves ${analysisData.endUsers}.\n\nTheir customers search when ${analysisData.searchBehavior}.\n\nInteresting—content around ${analysisData.contentFocus} could connect with how they're looking.`,
         confidence: 0.5,
         keyInsights: [],
         isAIGenerated: false
