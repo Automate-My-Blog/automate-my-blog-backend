@@ -167,7 +167,7 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
     analysis_confidence_score: analysis?.analysisConfidenceScore ?? 0.75,
     data_sources: analysis?.dataSources ? JSON.stringify(analysis.dataSources) : JSON.stringify(['website_analysis']),
     ai_model_used: analysis?.aiModelUsed || 'gpt-4',
-    raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null,
+    raw_openai_response: analysis ? JSON.stringify(analysis) : null,
     is_current: true
   };
   const intelValues = intelKeys.map((k) => intelData[k]);
@@ -277,15 +277,163 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     return result.rows[0] || null;
   };
 
+  /**
+   * Backfill missing cache data by making necessary service calls.
+   * Extensible: add new backfill steps here when we add new fields.
+   */
+  const backfillMissingCacheData = async (result, { org, intelRow, storedCTAs, report, onPartialResult }) => {
+    let { analysis, scenarios } = result;
+    const orgId = result.organizationId;
+
+    // 1. Narrative backfill — generate and persist if missing
+    if (analysis && (analysis.narrative == null || analysis.narrative === '')) {
+      try {
+        const intelligenceData = {
+          customer_language_patterns: intelRow.customer_language_patterns,
+          customer_scenarios: intelRow.customer_scenarios,
+          search_behavior_insights: intelRow.search_behavior_insights,
+          seo_opportunities: intelRow.seo_opportunities,
+          content_strategy_recommendations: intelRow.content_strategy_recommendations,
+          business_value_assessment: intelRow.business_value_assessment
+        };
+        const ctaForNarrative = (storedCTAs || []).map((c) => ({ cta_text: c.text || c.cta_text }));
+        const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
+          {
+            businessName: analysis.businessName || analysis.companyName,
+            businessType: analysis.businessType,
+            description: analysis.description,
+            businessModel: analysis.businessModel,
+            decisionMakers: analysis.decisionMakers,
+            endUsers: analysis.endUsers,
+            searchBehavior: analysis.searchBehavior,
+            contentFocus: analysis.contentFocus,
+            websiteGoals: analysis.websiteGoals,
+            blogStrategy: analysis.blogStrategy
+          },
+          intelligenceData,
+          ctaForNarrative
+        );
+        await db.query(
+          `UPDATE organization_intelligence
+           SET narrative_analysis = $1, narrative_confidence = $2, key_insights = $3, updated_at = NOW()
+           WHERE organization_id = $4 AND is_current = TRUE`,
+          [
+            narrativeAnalysis.narrative,
+            narrativeAnalysis.confidence,
+            JSON.stringify(narrativeAnalysis.keyInsights || []),
+            orgId
+          ]
+        );
+        analysis = {
+          ...analysis,
+          narrative: narrativeAnalysis.narrative,
+          narrativeConfidence: narrativeAnalysis.confidence,
+          keyInsights: narrativeAnalysis.keyInsights || []
+        };
+        if (typeof report === 'function') report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6], detail: 'cached+narrative-backfill' });
+      } catch (e) {
+        console.warn('⚠️ Cache narrative backfill failed:', e.message);
+      }
+    }
+
+    // 2. Scenarios backfill — generate audiences/pitches/images if missing
+    if (scenarios.length === 0 && analysis) {
+      try {
+        const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
+        const queryParams = userId ? [userId] : [sessionId];
+        const existingRows = await db.query(
+          `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
+          queryParams
+        ).then((r) => r.rows).catch(() => []);
+        let newScenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingRows);
+        const businessContext = {
+          businessType: analysis.businessType,
+          businessName: analysis.businessName || analysis.companyName,
+          targetAudience: analysis.targetAudience
+        };
+        newScenarios = await openaiService.generatePitches(newScenarios, businessContext, {});
+        const brandContext = { brandVoice: analysis.brandVoice || 'Professional' };
+        newScenarios = await openaiService.generateAudienceImages(newScenarios, brandContext, {});
+        scenarios = newScenarios;
+        if (typeof onPartialResult === 'function' && scenarios.length > 0) {
+          onPartialResult('audiences', { scenarios: [...scenarios] });
+          onPartialResult('pitches', { scenarios: [...scenarios] });
+          onPartialResult('scenarios', { scenarios: [...scenarios] });
+        }
+        if (typeof report === 'function') report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6], detail: 'cached+scenarios-backfill' });
+        // Persist scenarios to audiences for future cache hits
+        const intelRes = await db.query(
+          'SELECT id FROM organization_intelligence WHERE organization_id = $1 AND is_current = TRUE LIMIT 1',
+          [orgId]
+        );
+        const orgIntelId = intelRes.rows[0]?.id ?? null;
+        if (orgIntelId && scenarios.length > 0) {
+          await db.query(
+            'UPDATE organization_intelligence SET customer_scenarios = $1, updated_at = NOW() WHERE organization_id = $2 AND is_current = TRUE',
+            [JSON.stringify(scenarios.map((s) => ({
+              customerProblem: s.customerProblem,
+              targetSegment: s.targetSegment,
+              businessValue: s.businessValue,
+              customerLanguage: s.customerLanguage,
+              conversionPath: s.conversionPath,
+              seoKeywords: s.seoKeywords,
+              contentIdeas: s.contentIdeas,
+              pitch: s.pitch
+            }))), orgId]
+          );
+          for (let i = 0; i < scenarios.length; i++) {
+            const s = scenarios[i];
+            const targetSegment = s.targetSegment || { demographics: '', psychographics: '', searchBehavior: '' };
+            const businessValue = s.businessValue || {};
+            await db.query(
+              `INSERT INTO audiences (
+                user_id, session_id, organization_intelligence_id,
+                target_segment, customer_problem, customer_language, conversion_path,
+                business_value, priority, pitch, image_url,
+                projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+              [
+                userId || null,
+                userId ? null : (sessionId || null),
+                orgIntelId,
+                JSON.stringify(targetSegment),
+                s.customerProblem || null,
+                s.customerLanguage ? JSON.stringify(s.customerLanguage) : null,
+                s.conversionPath || null,
+                JSON.stringify(businessValue),
+                (s.businessValue?.priority ?? i + 1),
+                s.pitch || null,
+                s.imageUrl || null,
+                s.projected_revenue_low ?? null,
+                s.projected_revenue_high ?? null,
+                s.projected_profit_low ?? null,
+                s.projected_profit_high ?? null
+              ]
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Cache scenarios backfill failed:', e.message);
+      }
+    }
+
+    return { ...result, analysis, scenarios };
+  };
+
   const maybeReturnCachedResult = async () => {
     const org = await findOrgForCache();
     if (!org?.id) return null;
     const intelResult = await db.query(
-      `SELECT raw_openai_response, created_at
-       FROM organization_intelligence
-       WHERE organization_id = $1 AND is_current = TRUE
-         AND created_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
-       ORDER BY created_at DESC
+      `SELECT oi.raw_openai_response, oi.created_at, oi.narrative_analysis, oi.narrative_confidence, oi.key_insights,
+              oi.customer_language_patterns, oi.customer_scenarios, oi.search_behavior_insights,
+              oi.seo_opportunities, oi.content_strategy_recommendations, oi.business_value_assessment,
+              o.name, o.description, o.business_type, o.industry_category, o.target_audience, o.brand_voice,
+              o.website_goals, o.company_size, o.business_model
+       FROM organization_intelligence oi
+       JOIN organizations o ON o.id = oi.organization_id
+       WHERE oi.organization_id = $1 AND oi.is_current = TRUE
+         AND oi.created_at > NOW() - INTERVAL '${CACHE_TTL_DAYS} days'
+       ORDER BY oi.created_at DESC
        LIMIT 1`,
       [org.id]
     );
@@ -324,24 +472,73 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       projectedProfitHigh: row.projected_profit_high
     }));
 
-    const analysis = {
-      ...(intelRow.raw_openai_response || {}),
-      organizationId: org.id
+    const rawAnalysis = intelRow.raw_openai_response;
+    const orgFallback = {
+      businessName: intelRow.name || org.website_url,
+      companyName: intelRow.name || org.website_url,
+      description: intelRow.description,
+      businessType: intelRow.business_type,
+      industryCategory: intelRow.industry_category,
+      targetAudience: intelRow.target_audience,
+      brandVoice: intelRow.brand_voice,
+      websiteGoals: intelRow.website_goals,
+      companySize: intelRow.company_size,
+      businessModel: intelRow.business_model
     };
-    const result = {
+    const analysis = {
+      ...orgFallback,
+      ...(rawAnalysis && typeof rawAnalysis === 'object' ? rawAnalysis : {}),
+      organizationId: org.id,
+      ...(intelRow.narrative_analysis != null && { narrative: intelRow.narrative_analysis }),
+      ...(intelRow.narrative_confidence != null && { narrativeConfidence: intelRow.narrative_confidence }),
+      ...(intelRow.key_insights != null && { keyInsights: intelRow.key_insights })
+    };
+
+    let metadata = { title: null, headings: [] };
+    try {
+      const pageResult = await db.query(
+        `SELECT title, headings FROM website_pages
+         WHERE organization_id = $1 AND (title IS NOT NULL OR headings IS NOT NULL)
+         ORDER BY CASE WHEN page_type = 'homepage' THEN 0 ELSE 1 END, scraped_at DESC NULLS LAST
+         LIMIT 1`,
+        [org.id]
+      );
+      if (pageResult.rows[0]) {
+        const r = pageResult.rows[0];
+        const rawHeadings = r.headings;
+        const headings = Array.isArray(rawHeadings)
+          ? rawHeadings
+          : (rawHeadings && typeof rawHeadings === 'object' && !Array.isArray(rawHeadings)
+            ? Object.values(rawHeadings)
+            : []);
+        metadata = { title: r.title, headings };
+      }
+    } catch (e) {
+      // Ignore - keep default metadata
+    }
+
+    let result = {
       success: true,
       fromCache: true,
       cacheTtlDays: CACHE_TTL_DAYS,
       url,
       scrapedAt: org.last_analyzed_at || intelRow.created_at,
       analysis,
-      metadata: { title: null, headings: [] },
+      metadata,
       scenarios,
       ctas: storedCTAs,
       ctaCount: storedCTAs.length,
       hasSufficientCTAs: storedCTAs.length >= 3,
       organizationId: org.id
     };
+
+    result = await backfillMissingCacheData(result, {
+      org,
+      intelRow,
+      storedCTAs,
+      report,
+      onPartialResult
+    });
 
     if (typeof onPartialResult === 'function') {
       onPartialResult('analysis', {
