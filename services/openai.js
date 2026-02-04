@@ -253,16 +253,16 @@ export class OpenAIService {
 
   /**
    * Generate narrative analysis from website analysis data
-   * Transforms field-by-field data into consultative narrative format
+   * Outputs short factual snippets about the company, separated by double paragraph breaks
    */
   async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
     console.log('📝 [NARRATIVE-GEN] Starting narrative generation');
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
 
-    const prompt = `You're a business consultant analyzing a client's website and market position. Write a consultative, narrative-driven analysis that helps them understand their business and opportunities.
+    const prompt = `You're analyzing a company's website and market position. Produce a set of short, factual snippets about the company. Each snippet is 1-3 sentences on one aspect. Separate each snippet with a double paragraph break (two newlines). No section headers, no conversational wrap—just the snippet text.
 
-Here's what we discovered about their business:
+Here's what we discovered:
 
 **Business Basics:**
 - Name: ${analysisData.businessName}
@@ -288,40 +288,24 @@ ${intelligenceData.seo_opportunities ? `- SEO Opportunities: ${intelligenceData.
 ${intelligenceData.content_strategy_recommendations ? `- Content Recommendations: ${intelligenceData.content_strategy_recommendations}` : ''}
 ${intelligenceData.business_value_assessment ? `- Value Assessment: ${intelligenceData.business_value_assessment}` : ''}
 
-Write a narrative analysis with this EXACT structure:
+OUTPUT FORMAT:
+- Write 4-6 short snippets. Each snippet = 1-3 factual sentences on one topic (what they do, who they serve, how customers search, what’s on the site, content opportunity).
+- Separate snippets with a double paragraph break (exactly \\n\\n between snippets). No bold headers, no "About Your Business" labels—only the snippet content.
+- Tone: Factual and direct. State what the data shows. Avoid conversational phrasing like "We found" or "Your customers are"; write as neutral facts (e.g. "Customers search for X when Y.").
+- No sales language. No bullet lists inside snippets unless it’s a single short list in one snippet.
 
-**About Your Business:**
-[2-3 sentences showing deep understanding of what they do, who they serve, and what problems they solve. Reference specific facts from above.]
-
-**Customer Search Patterns:**
-[1-2 sentences about when/how customers search, then a bulleted list of 3-5 specific phrases customers use. Add 1 sentence about search urgency/intent.]
-
-**What We Found on Your Site:**
-[2-3 sentences about their conversion goals, CTAs, and how their blog/content can support these goals. Be specific about what we saw.]
-
-**Strategic Opportunity:**
-[2-3 sentences connecting customer scenarios to content opportunities. Reference specific high-value topics or scenarios. Show the connection between search behavior and business value.]
-
-**The Question:**
-[One strategic question that makes them think about conversion math and ROI. Similar to: "If content could bring you [X] of these searching customers per month, how many would need to convert to make this approach valuable to your business?"]
-
-TONE REQUIREMENTS:
-- Consultative and analytical (like a business advisor presenting findings)
-- Data-driven (reference specific facts we found)
-- Forward-looking (focus on opportunities, not problems)
-- Use phrases like "We found", "Your customers are", "This positions you"
-- NO sales language like "unlock potential", "maximize ROI", "game-changing"
-- Sound like you're presenting research findings, not selling
-
-FORMATTING REQUIREMENTS:
-- Use **bold** for section headers
-- Use bullet points (•) for lists
-- Use line breaks between sections for readability
-- Keep sentences concise and impactful
+Example shape (snippet text only, \\n\\n between):
+[First snippet: what the business does and who it serves.]
+\\n\\n
+[Second snippet: how and when customers search.]
+\\n\\n
+[Third snippet: what’s on the site—goals, CTAs.]
+\\n\\n
+[Fourth snippet: content or strategic opportunity.]
 
 Format your response as JSON:
 {
-  "narrative": "The full narrative with all sections formatted as specified above",
+  "narrative": "Snippet one. Short and factual.\\n\\nSnippet two. Also direct.\\n\\nSnippet three.\\n\\nSnippet four.",
   "confidence": <0-1 score based on data quality>,
   "keyInsights": [
     "Insight 1 (one sentence)",
@@ -336,7 +320,7 @@ Format your response as JSON:
     console.log('📝 [NARRATIVE-GEN] First 300 chars of prompt:', prompt.substring(0, 300));
 
     try {
-      const systemMessage = 'You are a business consultant analyzing market data and presenting findings. You communicate in a data-driven, analytical style that builds trust through demonstrated understanding. You sound like you\'re presenting research findings, not selling.';
+      const systemMessage = 'You produce short, factual snippets about companies from analysis data. No conversational tone—write direct, neutral statements. Separate each snippet with a double paragraph break (\\n\\n). No section headers in the output.';
 
       console.log('📝 [NARRATIVE-GEN] System message:', systemMessage);
       console.log('📝 [NARRATIVE-GEN] Model: gpt-4o');
@@ -381,9 +365,9 @@ Format your response as JSON:
     } catch (error) {
       console.error('❌ Error generating narrative:', error);
 
-      // Fallback to basic narrative
+      // Fallback to basic narrative (snippets separated by double paragraph break)
       return {
-        narrative: `**About Your Business:**\n${analysisData.businessName} is a ${analysisData.businessType} serving ${analysisData.endUsers}. ${analysisData.description}\n\n**Customer Search Patterns:**\nYour customers search for solutions when ${analysisData.searchBehavior}.\n\n**Strategic Opportunity:**\nContent focused on ${analysisData.contentFocus} can help you reach customers at key decision moments.`,
+        narrative: `${analysisData.businessName} is a ${analysisData.businessType} serving ${analysisData.endUsers}. ${analysisData.description || ''}\n\nCustomers search for solutions when ${analysisData.searchBehavior}.\n\nContent focused on ${analysisData.contentFocus} can reach them at key decision moments.`,
         confidence: 0.5,
         keyInsights: [],
         isAIGenerated: false
@@ -449,22 +433,15 @@ Show genuine analysis, keep it conversational.`;
 
   /**
    * Generate full analysis narrative as plain text for word-by-word streaming (Moment 2).
-   * Conversational, consultative tone - "Here's what I discovered..."
+   * Short factual snippets about the company, separated by double paragraph breaks.
    * @param {object} data - Business analysis data
-   * @returns {Promise<string>} 4-6 paragraph narrative
+   * @returns {Promise<string>} Snippets separated by double paragraph breaks
    */
   async generateFullAnalysisNarrative(data) {
     const analysis = data.analysis || {};
     const prompt = `You just analyzed ${analysis.businessName || analysis.companyName || 'this business'} (${analysis.businessType || 'business'}).
 
-Write a comprehensive but conversational analysis (4-6 paragraphs) covering:
-1. What they do and their market position
-2. Who they serve and customer problems
-3. Their content opportunities and challenges
-4. Your recommendations for their blog strategy
-
-Tone: Expert consultant presenting findings. Show clarity, focus, and dedication to solving their problems.
-This will set up audience recommendations, so emphasize understanding their business deeply.
+Write 4-6 short factual snippets about the company. Each snippet is 1-3 sentences on one aspect (what they do, who they serve, content opportunities, blog strategy). Separate each snippet with a double paragraph break (two newlines). No section headers. Tone: factual and direct, not conversational. State what the data shows; avoid "We found" or "Your customers are."
 
 Business data:
 ${JSON.stringify(data, null, 2).slice(0, 3000)}`;
