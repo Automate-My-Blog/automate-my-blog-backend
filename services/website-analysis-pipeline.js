@@ -679,6 +679,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
     const intelligenceData = intelligenceResult.rows[0] || {};
 
+    // Normalize CTAs for narrative prompt (expects cta_text; DB returns .text)
+    const ctaForNarrative = (storedCTAs || []).map((c) => ({ cta_text: c.text ?? c.cta_text ?? '' }));
+
     // Generate narrative from all the data
     const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
       {
@@ -694,7 +697,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
         blogStrategy: analysis.blogStrategy
       },
       intelligenceData,
-      storedCTAs
+      ctaForNarrative
     );
 
     // Stream narrative word-by-word for typing effect (15ms per word)
@@ -728,7 +731,19 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     console.log('✅ Narrative analysis generated and stored successfully');
   } catch (error) {
     console.error('❌ Error generating narrative analysis:', error);
-    // Don't fail the whole pipeline if narrative generation fails
+    // Stream a fallback so the narrative stream is not empty
+    const fallback = `We've analyzed ${analysis?.businessName || analysis?.companyName || 'this business'}. Your customers are searching when ${analysis?.searchBehavior || 'they need solutions'}. Good moment to show up with content.`;
+    try {
+      await streamNarrative({ type: 'transition', content: '\n\n' });
+      const words = fallback.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      await streamNarrative({ type: 'narrative-complete', content: '' });
+    } catch (streamErr) {
+      console.warn('⚠️ Fallback narrative stream failed:', streamErr?.message || streamErr);
+    }
   }
 
   await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6] });
