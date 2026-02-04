@@ -26,6 +26,13 @@ vi.mock('../../services/openai.js', () => ({
       targetAudience: 'Everyone',
       brandVoice: 'Professional',
     }),
+    generateScrapingObservation: vi.fn().mockResolvedValue('Ok, B2B company...'),
+    generateCTAObservation: vi.fn().mockResolvedValue('Found 0 CTAs.'),
+    generateWebsiteAnalysisNarrative: vi.fn().mockResolvedValue({
+      narrative: '**About Your Business:**\nTest is a B2B company.',
+      confidence: 0.8,
+      keyInsights: [],
+    }),
     generateAudienceScenarios: vi.fn().mockResolvedValue([
       {
         targetSegment: { demographics: 'd', psychographics: 'p', searchBehavior: 's' },

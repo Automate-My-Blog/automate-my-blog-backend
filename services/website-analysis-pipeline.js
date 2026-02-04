@@ -215,14 +215,25 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
  * Run full website analysis pipeline.
  * @param {object} input - { url: string }
  * @param {object} context - { userId?, sessionId? }
- * @param {object} opts - { onProgress?(...), onPartialResult?(segment, data)?, isCancelled?: () => boolean | Promise<boolean> }
+ * @param {object} opts - { onProgress?(...), onPartialResult?(segment, data)?, onStreamNarrative?(event)?, isCancelled?: () => boolean | Promise<boolean> }
  *   onPartialResult(segment, data): segment is 'analysis' | 'audiences' | 'pitches' | 'scenarios'; data is the partial result for that segment.
+ *   onStreamNarrative(event): event is { type, content, progress? } for narrative stream (scraping-thought, transition, analysis-chunk, narrative-complete).
  * @returns {Promise<object>} Combined result matching current analyze-website + audiences + pitches + images API shape.
  */
 export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {}) {
   const { url } = input;
   const { userId, sessionId } = context;
-  const { onProgress, onPartialResult, isCancelled } = opts;
+  const { onProgress, onPartialResult, onStreamNarrative, isCancelled } = opts;
+
+  const streamNarrative = async (event) => {
+    if (typeof onStreamNarrative === 'function') {
+      try {
+        await onStreamNarrative(event);
+      } catch (e) {
+        console.warn('⚠️ onStreamNarrative error:', e?.message || e);
+      }
+    }
+  };
   const CACHE_TTL_DAYS = 30;
 
   if (!url) throw new Error('url is required');
@@ -595,6 +606,16 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       scrapedAt: scrapedContent.scrapedAt
     });
   }
+
+  // Narrative UX: fire scraping observation (async, non-blocking)
+  const domain = new URL(url).hostname;
+  openaiService.generateScrapingObservation({
+    domain,
+    initialContent: scrapedContent.title || scrapedContent.metaDescription || ''
+  }).then((obs) => {
+    if (obs) return streamNarrative({ type: 'scraping-thought', content: obs, progress: 10 });
+  }).catch((e) => console.warn('⚠️ Scraping observation failed:', e?.message || e));
+
   const fullContent = [
     `Title: ${scrapedContent.title}`,
     `Meta Description: ${scrapedContent.metaDescription}`,
@@ -617,12 +638,23 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   const { organizationId, storedCTAs } = await persistAnalysis(url, analysis, scrapedContent, { userId, sessionId });
   await report(0, PROGRESS_STEPS[0], 65, 45, { phase: PROGRESS_PHASES[0][5] });
 
+  // Narrative UX: CTA observation (async, non-blocking)
+  const ctaTypes = (storedCTAs || []).map((c) => c.type || c.cta_type || 'action').filter(Boolean);
+  openaiService.generateCTAObservation({
+    ctasFound: (storedCTAs || []).length,
+    ctaTypes: ctaTypes.length ? ctaTypes : ['general']
+  }).then((obs) => {
+    if (obs) return streamNarrative({ type: 'scraping-thought', content: obs, progress: 70 });
+  }).catch((e) => console.warn('⚠️ CTA observation failed:', e?.message || e));
+
   await report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][6] });
   if (await checkCancelled()) throw new Error('Cancelled');
 
   // Generate narrative analysis
   try {
     console.log('📝 Generating narrative analysis for organization:', organizationId);
+
+    await streamNarrative({ type: 'transition', content: '\n\n' });
 
     // Get the intelligence data we just stored
     const intelligenceResult = await db.query(
@@ -653,6 +685,18 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       intelligenceData,
       storedCTAs
     );
+
+    // Stream narrative word-by-word for typing effect (15ms per word)
+    const narrativeText = narrativeAnalysis?.narrative || '';
+    if (narrativeText) {
+      const words = narrativeText.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        if (await checkCancelled()) throw new Error('Cancelled');
+        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      await streamNarrative({ type: 'narrative-complete', content: '' });
+    }
 
     // Store narrative in database
     await db.query(
