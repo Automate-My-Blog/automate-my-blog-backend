@@ -15,4 +15,3 @@ export function getJobNarrativeChannel(jobId) {
 }
 
 export const JOB_EVENTS_PATTERN = 'jobs:*:events';
-export const JOB_NARRATIVE_PATTERN = 'jobs:*:narrative';

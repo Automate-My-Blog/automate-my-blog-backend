@@ -23,3 +23,8 @@ These scripts in the project root are typically run manually for debugging, migr
 **Setup/utilities:** `create-test-user.js`, `create-org-intelligence.js`
 
 If a script is no longer needed, consider moving it to `scripts/archive/` or removing it.
+
+## Module Surface Area Notes
+
+- **link-validator**, **content-validator**: Used in tests and root `test-cta-simple.js` only; not wired into production routes.
+- **checkStrategyAccess** (middleware): Not imported by any route; add to route if strategy access checks are needed.

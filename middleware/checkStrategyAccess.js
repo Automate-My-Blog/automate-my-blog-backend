@@ -3,6 +3,10 @@
  *
  * Checks if user has an active subscription to access a specific strategy
  * and enforces post quota limits.
+ *
+ * NOTE: This middleware is not currently wired into any route. To use it:
+ *   import { checkStrategyAccess } from '../middleware/checkStrategyAccess.js';
+ *   router.post('/generate', authMiddleware, checkStrategyAccess, handler)
  */
 
 import db from '../services/database.js';

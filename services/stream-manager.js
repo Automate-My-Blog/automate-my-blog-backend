@@ -326,4 +326,3 @@ class StreamManager extends EventEmitter {
 
 const streamManager = new StreamManager();
 export default streamManager;
-export { STREAM_CHANNEL_PREFIX, STREAM_CHANNEL_PATTERN };
