@@ -568,6 +568,19 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
         onPartialResult('scenarios', { scenarios: [...result.scenarios] });
       }
     }
+
+    // Stream narrative thoughts so frontend shows typing effect (same UX as fresh run)
+    const narrativeText = result.analysis?.narrative;
+    if (narrativeText) {
+      await streamNarrative({ type: 'scraping-thought', content: 'Loading analysis from cache...', progress: 5 });
+      const words = narrativeText.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      await streamNarrative({ type: 'narrative-complete', content: '' });
+    }
+
     await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6], detail: 'cached' });
     return result;
   };
