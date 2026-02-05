@@ -389,7 +389,7 @@ router.post('/:id/decrement',  async (req, res) => {
     }
 
     // Decrement posts in transaction
-    const client = await db.pool.getClient();
+    const client = await db.getClient();
     try {
       await client.query('BEGIN');
 
