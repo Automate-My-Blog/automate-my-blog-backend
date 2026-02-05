@@ -115,6 +115,23 @@ Shorter time to **complete**; the user still sees the post body as soon as **blo
 
 ---
 
+## 9. YouTube video search stream
+
+**What**  
+Streaming YouTube video search for a selected topic. Same pattern as tweet search.
+
+- **Start:** `POST /api/v1/youtube-videos/search-for-topic-stream` with `topic`, `businessInfo`, optionally `maxVideos` → returns `connectionId` and `streamUrl`.
+- **Listen:** `GET /api/v1/stream/:connectionId?token=...` or `?sessionId=...`.
+- **Events:** `queries-extracted`, `complete` (with `videos`), `error`.
+
+**Why it matters**  
+Enables content workflows to surface relevant YouTube videos alongside tweets. Requires `YOUTUBE_API_KEY`; if unset, returns empty results gracefully.
+
+**Docs**  
+- [youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md)
+
+---
+
 ## Quick reference
 
 | Addition            | Where it lives                          | When it runs / what it does                    |
@@ -125,3 +142,4 @@ Shorter time to **complete**; the user still sees the post body as soon as **blo
 | Quick wins / CI list| [github-actions-quick-wins.md](./github-actions-quick-wins.md) | Full list of workflows and how they work.      |
 | Vercel setup        | [vercel-preview-builds.md](./vercel-preview-builds.md) | Copy-paste command and one-time setup.         |
 | Job stream partials | [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md), [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) | SSE events and payloads for incremental UI.   |
+| YouTube video search | [youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md) | `POST /api/v1/youtube-videos/search-for-topic-stream` → SSE with `videos`. |

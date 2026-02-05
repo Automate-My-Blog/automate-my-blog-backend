@@ -3,6 +3,7 @@ import db from './database.js';
 import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
 import grokTweetSearch from './grok-tweet-search.js';
+import youtubeVideoSearch from './youtube-video-search.js';
 import emailService from './email.js';
 import crypto from 'crypto';
 import streamManager from './stream-manager.js';
@@ -800,6 +801,169 @@ Keep it simple, specific, and searchable.`;
       });
     } catch (error) {
       console.error('❌ [TWEET SEARCH STREAM] Error:', error.message);
+      streamManager.publish(connectionId, 'error', {
+        error: error.message,
+        errorCode: error.code ?? null
+      });
+    }
+  }
+
+  /**
+   * Extract YouTube search queries from topic/description (similar to tweets)
+   * @param {string} content - Topic description or content
+   * @param {Object} topic - Blog topic information
+   * @param {Object} businessInfo - Business information
+   * @returns {Array<string>} Array of search queries
+   */
+  async extractYouTubeSearchQueries(content, topic, businessInfo) {
+    console.log('🔍 [YOUTUBE] Analyzing to extract search queries...');
+
+    const prompt = `You are analyzing a blog topic to find YouTube videos that would support its narrative.
+
+TOPIC/CONTENT:
+${content.substring(0, 3000)}
+
+BLOG TOPIC: ${topic.title}
+BUSINESS: ${businessInfo.businessType}
+TARGET AUDIENCE: ${businessInfo.targetAudience}
+
+Extract THE SINGLE MOST SEARCHABLE query (2-4 words MAX) to find relevant, educational YouTube videos.
+
+CRITICAL RULES:
+1. MAXIMUM 4 words, preferably 2-3 words
+2. Use ONLY concrete, specific terms
+3. NO abstract concepts (avoid: impact, hidden, paradox, transformation, revolution, etc.)
+4. Focus on the core topic + tutorial/explainer style (what works well on YouTube)
+
+Return ONLY a JSON array with 1 query:
+["query"]
+
+GOOD examples:
+- "remote work productivity tips"
+- "cloud security best practices"
+- "customer retention strategies"
+- "sustainable manufacturing"
+
+BAD examples (TOO LONG/ABSTRACT):
+- "hidden impact of remote work transformation" ❌
+- "revolutionary approach to security" ❌`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You extract search queries for YouTube video discovery. Return only valid JSON arrays.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 200
+      });
+
+      const queriesText = response.choices[0].message.content;
+      const jsonMatch = queriesText.match(/\[[\s\S]*\]/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ Could not parse YouTube search queries, using fallback');
+        return [topic.title];
+      }
+
+      const queries = JSON.parse(jsonMatch[0]);
+      console.log(`✅ [YOUTUBE] Extracted ${queries.length} search queries:`, queries);
+      return queries;
+    } catch (error) {
+      console.error('❌ [YOUTUBE] Query extraction failed:', error.message);
+      return [topic.title];
+    }
+  }
+
+  /**
+   * Search YouTube with multiple queries and combine results
+   * @param {Array<string>} searchQueries - Array of search queries
+   * @param {{ maxVideos?: number }} options - Optional; maxVideos (default 5)
+   * @returns {Array<Object>} Array of unique video objects
+   */
+  async searchForVideosWithMultipleQueries(searchQueries, options = {}) {
+    const maxVideos = options.maxVideos ?? 5;
+    const limitedQueries = searchQueries.slice(0, 1);
+
+    if (searchQueries.length > 1) {
+      console.warn(`⚠️ [YOUTUBE] Limiting from ${searchQueries.length} to 1 query to avoid timeout`);
+    }
+
+    console.log(`🔍 [YOUTUBE] Searching with ${limitedQueries.length} query...`);
+
+    const allVideos = [];
+    const seenUrls = new Set();
+
+    for (const query of limitedQueries) {
+      try {
+        console.log(`🔍 [YOUTUBE] Searching: "${query}"`);
+
+        const videos = await youtubeVideoSearch.searchRelevantVideos({
+          topic: query,
+          businessType: 'General',
+          targetAudience: 'General',
+          maxVideos
+        });
+
+        for (const video of videos) {
+          if (!seenUrls.has(video.url)) {
+            seenUrls.add(video.url);
+            allVideos.push(video);
+          }
+        }
+
+        console.log(`✅ Found ${videos.length} videos (${allVideos.length} total unique)`);
+      } catch (error) {
+        console.warn(`⚠️ YouTube search failed for "${query}":`, error.message);
+      }
+    }
+
+    console.log(`📺 [YOUTUBE] Total unique videos found: ${allVideos.length}`);
+    return allVideos;
+  }
+
+  /**
+   * Streaming YouTube video search for a topic. Publishes events via streamManager.
+   * Events: queries-extracted, complete, error.
+   * @param {Object} topic - Topic object (title, subheader, trend, seoBenefit, etc.)
+   * @param {Object} businessInfo - { businessType, targetAudience }
+   * @param {number} maxVideos - Max videos to find (default 5)
+   * @param {string} connectionId - Stream connection ID for publishing events
+   */
+  async searchForTopicStreamYouTube(topic, businessInfo, maxVideos = 5, connectionId) {
+    try {
+      const topicDescription = `
+      Title: ${topic.title}
+      Subheader: ${topic.subheader || ''}
+      Focus: ${topic.trend || ''}
+      SEO: ${topic.seoBenefit || ''}
+    `.trim();
+
+      const searchQueries = await this.extractYouTubeSearchQueries(
+        topicDescription,
+        topic,
+        businessInfo
+      );
+      streamManager.publish(connectionId, 'queries-extracted', {
+        searchTermsUsed: searchQueries
+      });
+
+      const videos = await this.searchForVideosWithMultipleQueries(searchQueries, {
+        maxVideos
+      });
+      streamManager.publish(connectionId, 'complete', {
+        videos,
+        searchTermsUsed: searchQueries
+      });
+    } catch (error) {
+      console.error('❌ [YOUTUBE STREAM] Error:', error.message);
       streamManager.publish(connectionId, 'error', {
         error: error.message,
         errorCode: error.code ?? null
