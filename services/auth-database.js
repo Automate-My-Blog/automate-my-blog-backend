@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
 
 // JWT configuration
+// NOTE: In production, JWT_SECRET must be set. The fallback is for local dev only.
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-for-development';
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN && process.env.JWT_EXPIRES_IN.trim()) || '7d';
 
