@@ -92,9 +92,11 @@ GET /api/v1/audiences
       "created_at": "2026-01-04T10:00:00Z"
     }
   ],
+  "strategies": [...],
   "total": 1
 }
 ```
+Note: `strategies` is an alias of `audiences` (same array) for frontend "Choose Your SEO Strategy" / AudienceSegmentsTab compatibility.
 
 ### 3. Get Specific Audience
 ```http

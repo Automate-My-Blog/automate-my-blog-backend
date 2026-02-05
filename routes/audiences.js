@@ -797,6 +797,8 @@ router.get('/', async (req, res) => {
     const response = {
       success: true,
       audiences,
+      // Alias for frontend "Choose Your SEO Strategy" / AudienceSegmentsTab (expects strategies)
+      strategies: audiences,
       total: audiences.length
     };
 
