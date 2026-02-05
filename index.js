@@ -32,6 +32,7 @@ import blogRoutes from './routes/blog.js';
 import topicRoutes from './routes/topics.js';
 import tweetRoutes from './routes/tweets.js';
 import youtubeVideosRoutes from './routes/youtube-videos.js';
+import newsArticlesRoutes from './routes/news-articles.js';
 import organizationRoutes from './routes/organizations.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
@@ -162,6 +163,7 @@ app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes
 app.use('/api/v1/topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
 app.use('/api/v1/tweets', authService.optionalAuthMiddleware.bind(authService), tweetRoutes);
 app.use('/api/v1/youtube-videos', authService.optionalAuthMiddleware.bind(authService), youtubeVideosRoutes);
+app.use('/api/v1/news-articles', authService.optionalAuthMiddleware.bind(authService), newsArticlesRoutes);
 app.use('/api/v1/trending-topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
 app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
@@ -357,6 +359,7 @@ app.get('/api', (req, res) => {
       'POST /api/v1/topics/generate-stream': 'Stream topic generation (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/v1/tweets/search-for-topic-stream': 'Stream tweet search for a topic (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/v1/youtube-videos/search-for-topic-stream': 'Stream YouTube video search for a topic (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
+      'POST /api/v1/news-articles/search-for-topic-stream': 'Stream news article search for a topic (returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/v1/trending-topics/stream': 'Stream trending topics (same as topics/generate-stream; returns connectionId; stream via GET /api/v1/stream/:connectionId)',
       'POST /api/generate-content': 'Generate complete blog post content',
       'POST /api/analyze-changes': 'Analyze conceptual changes between content versions',

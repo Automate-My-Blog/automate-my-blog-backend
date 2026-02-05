@@ -4,6 +4,7 @@ import visualContentService from './visual-content-generation.js';
 import { OpenAIService } from './openai.js';
 import grokTweetSearch from './grok-tweet-search.js';
 import youtubeVideoSearch from './youtube-video-search.js';
+import newsArticleSearch from './news-article-search.js';
 import emailService from './email.js';
 import crypto from 'crypto';
 import streamManager from './stream-manager.js';
@@ -964,6 +965,169 @@ BAD examples (TOO LONG/ABSTRACT):
       });
     } catch (error) {
       console.error('❌ [YOUTUBE STREAM] Error:', error.message);
+      streamManager.publish(connectionId, 'error', {
+        error: error.message,
+        errorCode: error.code ?? null
+      });
+    }
+  }
+
+  /**
+   * Extract news search queries from topic/description (similar to tweets/YouTube)
+   * @param {string} content - Topic description or content
+   * @param {Object} topic - Blog topic information
+   * @param {Object} businessInfo - Business information
+   * @returns {Array<string>} Array of search queries
+   */
+  async extractNewsSearchQueries(content, topic, businessInfo) {
+    console.log('🔍 [NEWS] Analyzing to extract search queries...');
+
+    const prompt = `You are analyzing a blog topic to find news articles that would support its narrative.
+
+TOPIC/CONTENT:
+${content.substring(0, 3000)}
+
+BLOG TOPIC: ${topic.title}
+BUSINESS: ${businessInfo.businessType}
+TARGET AUDIENCE: ${businessInfo.targetAudience}
+
+Extract THE SINGLE MOST SEARCHABLE query (2-4 words MAX) to find relevant news coverage.
+
+CRITICAL RULES:
+1. MAXIMUM 4 words, preferably 2-3 words
+2. Use ONLY concrete, specific terms
+3. NO abstract concepts (avoid: impact, hidden, paradox, transformation, revolution, etc.)
+4. Focus on what journalists and publishers would use as headlines
+
+Return ONLY a JSON array with 1 query:
+["query"]
+
+GOOD examples:
+- "remote work productivity"
+- "cloud security breach"
+- "customer retention data"
+- "sustainable manufacturing trends"
+
+BAD examples (TOO LONG/ABSTRACT):
+- "hidden impact of remote work transformation" ❌
+- "revolutionary approach to security" ❌`;
+
+    try {
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You extract search queries for news article discovery. Return only valid JSON arrays.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 200
+      });
+
+      const queriesText = response.choices[0].message.content;
+      const jsonMatch = queriesText.match(/\[[\s\S]*\]/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ Could not parse news search queries, using fallback');
+        return [topic.title];
+      }
+
+      const queries = JSON.parse(jsonMatch[0]);
+      console.log(`✅ [NEWS] Extracted ${queries.length} search queries:`, queries);
+      return queries;
+    } catch (error) {
+      console.error('❌ [NEWS] Query extraction failed:', error.message);
+      return [topic.title];
+    }
+  }
+
+  /**
+   * Search news with multiple queries and combine results
+   * @param {Array<string>} searchQueries - Array of search queries
+   * @param {{ maxArticles?: number }} options - Optional; maxArticles (default 5)
+   * @returns {Array<Object>} Array of unique article objects
+   */
+  async searchForArticlesWithMultipleQueries(searchQueries, options = {}) {
+    const maxArticles = options.maxArticles ?? 5;
+    const limitedQueries = searchQueries.slice(0, 1);
+
+    if (searchQueries.length > 1) {
+      console.warn(`⚠️ [NEWS] Limiting from ${searchQueries.length} to 1 query to avoid timeout`);
+    }
+
+    console.log(`🔍 [NEWS] Searching with ${limitedQueries.length} query...`);
+
+    const allArticles = [];
+    const seenUrls = new Set();
+
+    for (const query of limitedQueries) {
+      try {
+        console.log(`🔍 [NEWS] Searching: "${query}"`);
+
+        const articles = await newsArticleSearch.searchRelevantArticles({
+          topic: query,
+          businessType: 'General',
+          targetAudience: 'General',
+          maxArticles
+        });
+
+        for (const article of articles) {
+          if (!seenUrls.has(article.url)) {
+            seenUrls.add(article.url);
+            allArticles.push(article);
+          }
+        }
+
+        console.log(`✅ Found ${articles.length} articles (${allArticles.length} total unique)`);
+      } catch (error) {
+        console.warn(`⚠️ News search failed for "${query}":`, error.message);
+      }
+    }
+
+    console.log(`📰 [NEWS] Total unique articles found: ${allArticles.length}`);
+    return allArticles;
+  }
+
+  /**
+   * Streaming news article search for a topic. Publishes events via streamManager.
+   * Events: queries-extracted, complete, error.
+   * @param {Object} topic - Topic object (title, subheader, trend, seoBenefit, etc.)
+   * @param {Object} businessInfo - { businessType, targetAudience }
+   * @param {number} maxArticles - Max articles to find (default 5)
+   * @param {string} connectionId - Stream connection ID for publishing events
+   */
+  async searchForTopicStreamNews(topic, businessInfo, maxArticles = 5, connectionId) {
+    try {
+      const topicDescription = `
+      Title: ${topic.title}
+      Subheader: ${topic.subheader || ''}
+      Focus: ${topic.trend || ''}
+      SEO: ${topic.seoBenefit || ''}
+    `.trim();
+
+      const searchQueries = await this.extractNewsSearchQueries(
+        topicDescription,
+        topic,
+        businessInfo
+      );
+      streamManager.publish(connectionId, 'queries-extracted', {
+        searchTermsUsed: searchQueries
+      });
+
+      const articles = await this.searchForArticlesWithMultipleQueries(searchQueries, {
+        maxArticles
+      });
+      streamManager.publish(connectionId, 'complete', {
+        articles,
+        searchTermsUsed: searchQueries
+      });
+    } catch (error) {
+      console.error('❌ [NEWS STREAM] Error:', error.message);
       streamManager.publish(connectionId, 'error', {
         error: error.message,
         errorCode: error.code ?? null

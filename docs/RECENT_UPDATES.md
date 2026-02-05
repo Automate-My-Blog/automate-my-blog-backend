@@ -132,6 +132,23 @@ Enables content workflows to surface relevant YouTube videos alongside tweets. R
 
 ---
 
+## 10. News article search stream
+
+**What**  
+Streaming news article search for a selected topic. Same pattern as tweet and YouTube search.
+
+- **Start:** `POST /api/v1/news-articles/search-for-topic-stream` with `topic`, `businessInfo`, optionally `maxArticles` → returns `connectionId` and `streamUrl`.
+- **Listen:** `GET /api/v1/stream/:connectionId?token=...` or `?sessionId=...`.
+- **Events:** `queries-extracted`, `complete` (with `articles`), `error`.
+
+**Why it matters**  
+Enables content workflows to surface relevant news coverage ("as seen in", "recent coverage"). Requires `NEWS_API_KEY`; if unset, returns empty results gracefully.
+
+**Docs**  
+- [news-articles-search-stream-frontend-handoff.md](./news-articles-search-stream-frontend-handoff.md)
+
+---
+
 ## Quick reference
 
 | Addition            | Where it lives                          | When it runs / what it does                    |
@@ -143,3 +160,4 @@ Enables content workflows to surface relevant YouTube videos alongside tweets. R
 | Vercel setup        | [vercel-preview-builds.md](./vercel-preview-builds.md) | Copy-paste command and one-time setup.         |
 | Job stream partials | [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md), [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) | SSE events and payloads for incremental UI.   |
 | YouTube video search | [youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md) | `POST /api/v1/youtube-videos/search-for-topic-stream` → SSE with `videos`. |
+| News article search | [news-articles-search-stream-frontend-handoff.md](./news-articles-search-stream-frontend-handoff.md) | `POST /api/v1/news-articles/search-for-topic-stream` → SSE with `articles`. |
