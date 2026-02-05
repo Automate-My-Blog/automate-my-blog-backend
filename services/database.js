@@ -392,9 +392,9 @@ class DatabaseService {
 // Create singleton instance
 const db = new DatabaseService();
 
-// Export both the instance and the raw pool
+// Export the db instance only. Use db.getClient() for transaction support.
+// NOTE: pool is intentionally not exported; use db.query() or db.getClient().
 export default db;
-export { pool };
 
 // Test connection on startup (only in development)
 if (process.env.NODE_ENV !== 'production') {

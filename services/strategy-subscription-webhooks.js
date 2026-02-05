@@ -42,7 +42,7 @@ async function handleBundleSubscriptionCreated(session) {
   const metadata = session.metadata;
   const userId = metadata.user_id;
 
-  const client = await db.pool.getClient();
+  const client = await db.getClient();
   try {
     await client.query('BEGIN');
 
@@ -239,7 +239,7 @@ export async function handleStrategySubscriptionDeleted(subscription) {
   try {
     console.log(`🗑️ Cancelling subscriptions for Stripe subscription ${subscription.id}`);
 
-    const client = await db.pool.getClient();
+    const client = await db.getClient();
     try {
       await client.query('BEGIN');
 
