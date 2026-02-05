@@ -16,8 +16,6 @@
     "setup-test-db": "bash scripts/setup-test-db.sh",
     "verify-db": "node verify-connection.js",
     "setup-db": "node setup-database.js",
-    "test-db": "node test-db-connection.js",
-    "test-auth": "node test-auth-service.js",
     "worker": "node jobs/job-worker.js"
   },
   "keywords": [

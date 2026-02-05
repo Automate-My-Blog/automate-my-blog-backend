@@ -62,3 +62,8 @@ Thumbs.db
 
 # Vercel environment file (contains secrets)
 .env.vercel
+
+# Local debug/test artifacts (may contain tokens)
+access_token.txt
+login_test.json
+test_login.json

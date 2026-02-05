@@ -65,6 +65,7 @@ app.set('trust proxy', 1);
 // Rate limiting with Vercel-compatible configuration
 // Higher limits for development, stricter for production
 const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+const isDev = process.env.NODE_ENV === 'development';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: isDevelopment ? 1000 : 100, // Higher limit for dev (1000), stricter for production (100)
@@ -105,6 +106,13 @@ function corsOrigin(origin, callback) {
   if (allAllowedOrigins.includes(origin)) return callback(null, true);
   // Vercel preview deployments (*.vercel.app)
   if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return callback(null, true);
+  // Dev mode: allow any localhost / 127.0.0.1 (any port) so local frontends always work
+  if (process.env.NODE_ENV === 'development') {
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return callback(null, true);
+    } catch (_) { /* ignore */ }
+  }
   callback(null, false);
 }
 
@@ -206,33 +214,21 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Debug endpoint to check what headers are actually received
-app.get('/api/v1/debug/headers', (req, res) => {
-  res.json({
-    success: true,
-    headers: req.headers,
-    hasAuth: !!req.headers.authorization,
-    hasSessionId: !!req.headers['x-session-id'],
-    authHeader: req.headers.authorization ? 'Bearer ***' : null,
-    sessionId: req.headers['x-session-id'] || null,
-    timestamp: new Date().toISOString()
+// Debug/diagnostic endpoints - only available in development
+if (isDev) {
+  app.get('/api/v1/debug/headers', (req, res) => {
+    res.json({
+      success: true,
+      headers: req.headers,
+      hasAuth: !!req.headers.authorization,
+      hasSessionId: !!req.headers['x-session-id'],
+      authHeader: req.headers.authorization ? 'Bearer ***' : null,
+      sessionId: req.headers['x-session-id'] || null,
+      timestamp: new Date().toISOString()
+    });
   });
-});
 
-// Test direct audiences endpoint without router (for comparison)
-app.get('/api/v1/audiences-direct', authService.optionalAuthMiddleware.bind(authService), async (req, res) => {
-  console.log('🧪 DIRECT AUDIENCES ENDPOINT - Header comparison test');
-  res.json({
-    success: true,
-    message: 'Direct audiences endpoint for header testing',
-    hasAuth: !!req.user,
-    userId: req.user?.userId || null,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Production Environment Validation Endpoint
-app.get('/api/v1/debug/production-env', async (req, res) => {
+  app.get('/api/v1/debug/production-env', async (req, res) => {
   const debugId = `env_debug_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
   console.log(`🔍 [${debugId}] Production environment validation requested`);
   
@@ -334,6 +330,7 @@ app.get('/api/v1/debug/production-env', async (req, res) => {
     });
   }
 });
+}
 
 // API routes index
 app.get('/api', (req, res) => {
@@ -495,24 +492,7 @@ app.post('/api/v1/auth/login', async (req, res) => {
 app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const user = await authService.getUserById(req.user.userId);
-    
-    // Debug logging to verify role data is being returned
-    console.log('🔍 /me endpoint returning user data:', {
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-      permissions: user.permissions,
-      hierarchyLevel: user.hierarchyLevel
-    });
-    
-    // CRITICAL DEBUG: Check if this user exists in database for audience queries
-    const userExistsCheck = await db.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
-    console.log('🔍 /me endpoint - User exists in database check:', {
-      requestUserId: req.user.userId,
-      userFoundInDb: userExistsCheck.rows.length > 0,
-      dbUserData: userExistsCheck.rows[0] || 'NOT_FOUND'
-    });
-    
+
     res.json({
       success: true,
       user
@@ -1549,9 +1529,10 @@ app.post('/api/tweets/search-for-topic', async (req, res) => {
 });
 
 /**
- * TEST ENDPOINT: Direct Grok search without OpenAI preprocessing
+ * TEST ENDPOINT: Direct Grok search without OpenAI preprocessing (dev only)
  * Use this to diagnose Grok performance issues
  */
+if (isDev) {
 app.post('/api/test/grok-direct', async (req, res) => {
   try {
     const { query = 'postpartum depression support', maxTweets = 3 } = req.body;
@@ -1599,6 +1580,7 @@ app.post('/api/test/grok-direct', async (req, res) => {
     });
   }
 });
+}
 
 /**
  * Generate images for a saved blog post
@@ -2251,7 +2233,8 @@ app.post('/api/export', async (req, res) => {
   }
 });
 
-// Test endpoint for OpenAI without web scraping
+// Test endpoint for OpenAI without web scraping (dev only)
+if (isDev) {
 app.post('/api/test-openai', async (req, res) => {
   try {
     console.log('Testing OpenAI directly...');
@@ -2298,6 +2281,7 @@ app.post('/api/test-openai', async (req, res) => {
     });
   }
 });
+}
 
 // Impersonation middleware to check super admin permissions
 const requireSuperAdmin = (req, res, next) => {
@@ -3119,7 +3103,8 @@ app.post('/api/v1/referrals/process-signup', authService.authMiddleware.bind(aut
   }
 });
 
-// Debug endpoint to check referral codes in database
+// Debug endpoint to check referral codes in database (dev only)
+if (isDev) {
 app.get('/api/v1/debug/referral-codes', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     // Get all users with their referral codes for debugging
@@ -3145,6 +3130,7 @@ app.get('/api/v1/debug/referral-codes', authService.authMiddleware.bind(authServ
     });
   }
 });
+}
 
 // Change user password
 app.post('/api/v1/user/change-password', authService.authMiddleware.bind(authService), async (req, res) => {
@@ -3258,38 +3244,6 @@ app.post('/api/v1/user/request-plan-change', authService.authMiddleware.bind(aut
   }
 });
 
-// Get billing history
-app.get('/api/v1/user/billing-history', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { limit = 50 } = req.query;
-
-    // For now, return mock data since billing isn't integrated yet
-    const mockBilling = [
-      {
-        id: '1',
-        date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-        description: 'Monthly usage - November 2024',
-        amount: 45,
-        status: 'paid',
-        invoiceUrl: '#'
-      }
-    ];
-
-    res.json({
-      success: true,
-      data: mockBilling.slice(0, parseInt(limit))
-    });
-
-  } catch (error) {
-    console.error('Get billing history error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve billing history',
-      message: error.message
-    });
-  }
-});
-
 // Update billing information
 app.put('/api/v1/user/billing-info', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
@@ -3313,78 +3267,6 @@ app.put('/api/v1/user/billing-info', authService.authMiddleware.bind(authService
     console.error('Update billing info error:', error);
     res.status(500).json({
       error: 'Failed to update billing information',
-      message: error.message
-    });
-  }
-});
-
-// =============================================================================
-// REFERRAL SYSTEM API ENDPOINTS
-// =============================================================================
-
-// Generate personal referral link
-app.get('/api/v1/referrals/link', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const result = await referralService.generateReferralLink(req.user.userId);
-    
-    res.json({
-      success: true,
-      data: result
-    });
-  } catch (error) {
-    console.error('Generate referral link error:', error);
-    res.status(500).json({
-      error: 'Failed to generate referral link',
-      message: error.message
-    });
-  }
-});
-
-// Send referral invitation (for customer acquisition)
-app.post('/api/v1/referrals/invite', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const { email, personalMessage } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        error: 'Missing required field',
-        message: 'Email is required'
-      });
-    }
-
-    const result = await referralService.sendReferralInvite(
-      req.user.userId, 
-      email, 
-      personalMessage
-    );
-    
-    res.json({
-      success: true,
-      message: 'Referral invitation sent successfully',
-      data: result
-    });
-  } catch (error) {
-    console.error('Send referral invite error:', error);
-    res.status(400).json({
-      error: 'Failed to send referral invitation',
-      message: error.message
-    });
-  }
-});
-
-// Get referral statistics
-app.get('/api/v1/referrals/stats', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const stats = await referralService.getReferralStats(req.user.userId);
-    
-    res.json({
-      success: true,
-      data: stats
-    });
-  } catch (error) {
-    console.error('Get referral stats error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve referral statistics',
       message: error.message
     });
   }
@@ -3466,33 +3348,6 @@ app.delete('/api/v1/organization/members/:memberId', authService.authMiddleware.
     console.error('Remove organization member error:', error);
     res.status(400).json({
       error: 'Failed to remove organization member',
-      message: error.message
-    });
-  }
-});
-
-// Process referral signup (called during registration)
-app.post('/api/v1/referrals/process-signup', async (req, res) => {
-  try {
-    const { userId, inviteCode } = req.body;
-
-    if (!userId || !inviteCode) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'userId and inviteCode are required'
-      });
-    }
-
-    const result = await referralService.processReferralSignup(userId, inviteCode);
-    
-    res.json({
-      success: true,
-      data: result
-    });
-  } catch (error) {
-    console.error('Process referral signup error:', error);
-    res.status(400).json({
-      error: 'Failed to process referral signup',
       message: error.message
     });
   }
