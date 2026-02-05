@@ -60,14 +60,20 @@ AI-powered blog content generation API for the AutoBlog platform.
 
 ## Environment Variables
 
-```env
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-4
-PORT=3001
-NODE_ENV=production
-USER_AGENT="AutoBlog Bot 1.0"
-ANALYSIS_TIMEOUT=10000
-```
+Copy `.env.example` to `.env` and fill in values. Key variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | Secret for JWT signing (use a strong random value in production) |
+| `JWT_REFRESH_SECRET` | Yes | Secret for refresh tokens |
+| `PORT` | No | Server port (default: 3001) |
+| `REDIS_URL` | For jobs | Redis URL for BullMQ (job queue) |
+| `STRIPE_SECRET_KEY` | For billing | Stripe API key |
+| `STRIPE_WEBHOOK_SECRET` | For webhooks | Stripe webhook signing secret |
+
+See `.env.example` for the full list.
 
 ## Installation
 
@@ -80,6 +86,25 @@ npm install
 ```bash
 npm run dev
 ```
+
+## Testing
+
+```bash
+# Unit and integration tests
+npm test
+
+# Integration tests only
+npm run test:integration
+
+# With coverage
+npm run test:coverage
+```
+
+## Database
+
+- Migrations live in `database/` and `database/migrations/`
+- Run migrations via `scripts/run_migrations.sh` or your deployment pipeline
+- Setup from scratch: `npm run setup-db`
 
 ## Deployment
 
