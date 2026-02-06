@@ -2511,7 +2511,12 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         options.additionalInstructions || ''
       );
       if (typeof onPartialResult === 'function') {
-        onPartialResult('blog-result', { ...blogData });
+        onPartialResult('blog-result', {
+          ...blogData,
+          preloadedTweets: topic.preloadedTweets || [],
+          preloadedArticles: topic.preloadedArticles || [],
+          preloadedVideos: topic.preloadedVideos || []
+        });
       }
 
       // Run visual suggestions and SEO analysis in parallel (both only need blogData)
@@ -2558,9 +2563,12 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         }
       }
 
-      // Combine everything into complete response
+      // Combine everything into complete response (include embed data so frontend can replace [TWEET:0], [ARTICLE:0], [VIDEO:0])
       const completeResponse = {
         ...blogData,
+        preloadedTweets: topic.preloadedTweets || [],
+        preloadedArticles: topic.preloadedArticles || [],
+        preloadedVideos: topic.preloadedVideos || [],
         visualContentSuggestions: visualSuggestions,
         enhancedGeneration: true,
         seoAnalysis: seoAnalysis, // Add detailed SEO analysis for user transparency
