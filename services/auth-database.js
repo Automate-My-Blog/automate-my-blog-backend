@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import { UnauthorizedError, ConflictError } from '../lib/errors.js';
 
 // JWT configuration
 // NOTE: In production, JWT_SECRET must be set. The fallback is for local dev only.
@@ -146,7 +147,7 @@ class DatabaseAuthService {
 
       if (existingUser.rows.length > 0) {
         console.warn(`⚠️  [${dbRegId}] User already exists with email: ${email}`);
-        throw new Error('User already exists with this email');
+        throw new ConflictError('User already exists with this email');
       }
       
       console.log(`✅ [${dbRegId}] Email ${email} is available for registration`);
@@ -425,7 +426,7 @@ class DatabaseAuthService {
     // Check if user already exists
     const existingUser = Array.from(fallbackUsers.values()).find(user => user.email === email);
     if (existingUser) {
-      throw new Error('User already exists with this email');
+      throw new ConflictError('User already exists with this email');
     }
 
     // Hash password
@@ -506,7 +507,7 @@ class DatabaseAuthService {
     `, [email.toLowerCase()]);
 
     if (userResult.rows.length === 0) {
-      throw new Error('Invalid email or password');
+      throw new UnauthorizedError('Invalid email or password');
     }
 
     const user = userResult.rows[0];
@@ -514,7 +515,7 @@ class DatabaseAuthService {
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
     if (!isPasswordValid) {
-      throw new Error('Invalid email or password');
+      throw new UnauthorizedError('Invalid email or password');
     }
 
     // Auto-promote super admin emails from environment variable
@@ -644,13 +645,13 @@ class DatabaseAuthService {
     // Find user by email
     const user = Array.from(fallbackUsers.values()).find(u => u.email === email.toLowerCase());
     if (!user) {
-      throw new Error('Invalid email or password');
+      throw new UnauthorizedError('Invalid email or password');
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.hashedPassword);
     if (!isPasswordValid) {
-      throw new Error('Invalid email or password');
+      throw new UnauthorizedError('Invalid email or password');
     }
 
     // Update last login
@@ -810,7 +811,7 @@ class DatabaseAuthService {
       const decoded = jwt.verify(token, JWT_SECRET);
       return decoded;
     } catch (error) {
-      throw new Error('Invalid or expired token');
+      throw new UnauthorizedError('Invalid or expired token');
     }
   }
 
@@ -823,12 +824,12 @@ class DatabaseAuthService {
       const user = await this.getUserById(decoded.userId);
 
       if (!user) {
-        throw new Error('User not found');
+        throw new UnauthorizedError('User not found');
       }
 
       return this.generateTokens(user);
     } catch (error) {
-      throw new Error('Invalid refresh token');
+      throw new UnauthorizedError('Invalid refresh token');
     }
   }
 

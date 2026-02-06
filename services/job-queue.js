@@ -11,6 +11,14 @@ import db from './database.js';
 const QUEUE_NAME = 'amb-jobs';
 const JOB_TYPES = ['website_analysis', 'content_generation'];
 
+/** Allowed job status values (matches DB constraint). */
+export const JOB_STATUSES = Object.freeze(['queued', 'running', 'succeeded', 'failed']);
+
+/** Only failed jobs can be retried. */
+const RETRIABLE_STATUS = 'failed';
+/** Only queued or running jobs can be cancelled (worker checks cancelled_at). */
+const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
+
 let _connection = null;
 let _queue = null;
 
@@ -177,7 +185,7 @@ export async function retryJob(jobId, context) {
   ensureRedis();
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
-  if (row.status !== 'failed') {
+  if (row.status !== RETRIABLE_STATUS) {
     const err = new Error('Job is not in failed state');
     err.statusCode = 400;
     throw err;
@@ -203,7 +211,7 @@ export async function retryJob(jobId, context) {
 export async function cancelJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
-  if (row.status !== 'queued' && row.status !== 'running') {
+  if (!CANCELLABLE_STATUSES.includes(row.status)) {
     const err = new Error('Job is not cancellable');
     err.statusCode = 400;
     throw err;

@@ -43,6 +43,37 @@ function requireUserOrSession(req, res, next) {
   next();
 }
 
+/** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
+function sendJobError(res, e, defaultMessage = 'Internal error') {
+  if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized',
+      message: 'User not found; token may be for a deleted or invalid user'
+    });
+  }
+  if (e.message?.includes('REDIS_URL')) {
+    return res.status(503).json({
+      success: false,
+      error: 'Service unavailable',
+      message: e.message || 'Job queue is not configured (REDIS_URL required)'
+    });
+  }
+  if (e.statusCode === 400) {
+    return res.status(400).json({
+      success: false,
+      error: 'Bad request',
+      message: e.message || 'Bad request'
+    });
+  }
+  console.error('Job route error:', e);
+  return res.status(500).json({
+    success: false,
+    error: 'Failed to process request',
+    message: e.message || defaultMessage
+  });
+}
+
 /**
  * POST /api/v1/jobs/website-analysis
  * Body: { url: string, sessionId?: string }
@@ -76,33 +107,7 @@ router.post('/website-analysis', requireUserOrSession, async (req, res) => {
     );
     return res.status(201).json({ jobId });
   } catch (e) {
-    if (e.name === 'UserNotFoundError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'User not found; token may be for a deleted or invalid user'
-      });
-    }
-    if (e.code === '23503' && e.constraint === 'jobs_user_id_fkey') {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'User not found; token may be for a deleted or invalid user'
-      });
-    }
-    if (e.message?.includes('REDIS_URL')) {
-      return res.status(503).json({
-        success: false,
-        error: 'Service unavailable',
-        message: e.message || 'Job queue is not configured (REDIS_URL required)'
-      });
-    }
-    console.error('POST /jobs/website-analysis error:', e);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to create job',
-      message: e.message || 'Internal error'
-    });
+    return sendJobError(res, e, 'Failed to create job');
   }
 });
 
@@ -146,33 +151,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
     });
     return res.status(201).json({ jobId });
   } catch (e) {
-    if (e.name === 'UserNotFoundError') {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'User not found; token may be for a deleted or invalid user'
-      });
-    }
-    if (e.code === '23503' && e.constraint === 'jobs_user_id_fkey') {
-      return res.status(401).json({
-        success: false,
-        error: 'Unauthorized',
-        message: 'User not found; token may be for a deleted or invalid user'
-      });
-    }
-    if (e.message?.includes('REDIS_URL')) {
-      return res.status(503).json({
-        success: false,
-        error: 'Service unavailable',
-        message: e.message || 'Job queue is not configured (REDIS_URL required)'
-      });
-    }
-    console.error('POST /jobs/content-generation error:', e);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to create job',
-      message: e.message || 'Internal error'
-    });
+    return sendJobError(res, e, 'Failed to create job');
   }
 });
 
@@ -264,14 +243,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
       if (!res.writableEnded) res.end();
     });
   } catch (e) {
-    console.error('GET /jobs/:jobId/narrative-stream error:', e);
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to open narrative stream',
-        message: e.message || 'Internal error'
-      });
-    }
+    if (!res.headersSent) sendJobError(res, e, 'Failed to open narrative stream');
   }
 });
 
@@ -327,14 +299,7 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     }, timeoutWarningMs);
     res.on('close', () => clearTimeout(warningTimer));
   } catch (e) {
-    console.error('GET /jobs/:jobId/stream error:', e);
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to open stream',
-        message: e.message || 'Internal error'
-      });
-    }
+    if (!res.headersSent) sendJobError(res, e, 'Failed to open stream');
   }
 });
 
@@ -356,12 +321,7 @@ router.get('/:jobId/status', requireUserOrSession, async (req, res) => {
     }
     return res.json(status);
   } catch (e) {
-    console.error('GET /jobs/:jobId/status error:', e);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to get status',
-      message: e.message || 'Internal error'
-    });
+    return sendJobError(res, e, 'Failed to get status');
   }
 });
 
@@ -383,26 +343,7 @@ router.post('/:jobId/retry', requireUserOrSession, async (req, res) => {
     }
     return res.json(out);
   } catch (e) {
-    if (e.statusCode === 400) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad request',
-        message: e.message || 'Job is not in failed state'
-      });
-    }
-    if (e.message?.includes('REDIS_URL')) {
-      return res.status(503).json({
-        success: false,
-        error: 'Service unavailable',
-        message: e.message || 'Job queue is not configured (REDIS_URL required)'
-      });
-    }
-    console.error('POST /jobs/:jobId/retry error:', e);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to retry',
-      message: e.message || 'Internal error'
-    });
+    return sendJobError(res, e, 'Failed to retry');
   }
 });
 
@@ -424,19 +365,7 @@ router.post('/:jobId/cancel', requireUserOrSession, async (req, res) => {
     }
     return res.json(out);
   } catch (e) {
-    if (e.statusCode === 400) {
-      return res.status(400).json({
-        success: false,
-        error: 'Bad request',
-        message: e.message || 'Job is not cancellable'
-      });
-    }
-    console.error('POST /jobs/:jobId/cancel error:', e);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to cancel',
-      message: e.message || 'Internal error'
-    });
+    return sendJobError(res, e, 'Failed to cancel');
   }
 });
 

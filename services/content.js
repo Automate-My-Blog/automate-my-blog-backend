@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import { NotFoundError } from '../lib/errors.js';
 
 /**
  * Content Management Service
@@ -291,7 +292,7 @@ class ContentService {
         `, [postId, userId]);
 
         if (result.rows.length === 0) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
 
         const post = result.rows[0];
@@ -310,19 +311,17 @@ class ContentService {
       } else {
         const post = this.fallbackPosts.get(postId);
         if (!post || post.userId !== userId) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
         return post;
       }
     } catch (error) {
-      if (error.message === 'Blog post not found') {
-        throw error;
-      }
-      
+      if (error instanceof NotFoundError) throw error;
+
       // Fallback to memory
       const post = this.fallbackPosts.get(postId);
       if (!post || post.userId !== userId) {
-        throw new Error('Blog post not found');
+        throw new NotFoundError('Blog post not found', 'blog_post');
       }
       return post;
     }
@@ -345,14 +344,14 @@ class ContentService {
         `, [updates.title, updates.content, updates.status, postId, userId]);
 
         if (result.rows.length === 0) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
 
         return result.rows[0];
       } else {
         const post = this.fallbackPosts.get(postId);
         if (!post || post.userId !== userId) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
 
         // Update post
@@ -371,14 +370,12 @@ class ContentService {
         };
       }
     } catch (error) {
-      if (error.message === 'Blog post not found') {
-        throw error;
-      }
-      
+      if (error instanceof NotFoundError) throw error;
+
       // Try fallback
       const post = this.fallbackPosts.get(postId);
       if (!post || post.userId !== userId) {
-        throw new Error('Blog post not found');
+        throw new NotFoundError('Blog post not found', 'blog_post');
       }
 
       if (updates.title) post.title = updates.title;
@@ -409,28 +406,26 @@ class ContentService {
         `, [postId, userId]);
 
         if (result.rows.length === 0) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
 
         return { success: true };
       } else {
         const post = this.fallbackPosts.get(postId);
         if (!post || post.userId !== userId) {
-          throw new Error('Blog post not found');
+          throw new NotFoundError('Blog post not found', 'blog_post');
         }
 
         this.fallbackPosts.delete(postId);
         return { success: true };
       }
     } catch (error) {
-      if (error.message === 'Blog post not found') {
-        throw error;
-      }
-      
+      if (error instanceof NotFoundError) throw error;
+
       // Try fallback
       const post = this.fallbackPosts.get(postId);
       if (!post || post.userId !== userId) {
-        throw new Error('Blog post not found');
+        throw new NotFoundError('Blog post not found', 'blog_post');
       }
 
       this.fallbackPosts.delete(postId);

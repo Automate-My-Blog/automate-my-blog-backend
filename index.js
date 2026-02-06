@@ -47,6 +47,8 @@ import jobsRoutes from './routes/jobs.js';
 import { registerStreamRoute } from './routes/stream.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
+import { toHttpResponse } from './lib/errors.js';
+import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
 
 // Load environment variables
 dotenv.config();
@@ -400,41 +402,16 @@ app.get('/api', (req, res) => {
 
 // Authentication Routes
 // Register endpoint
-app.post('/api/v1/auth/register', async (req, res) => {
+app.post('/api/v1/auth/register', async (req, res, next) => {
   try {
-    const { email, password, firstName, lastName, organizationName } = req.body;
-
-    // Validate required fields
-    if (!email || !password || !firstName || !lastName || !organizationName) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'email, password, firstName, lastName, and organizationName are required'
-      });
-    }
-
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({
-        error: 'Invalid email format',
-        message: 'Please provide a valid email address'
-      });
-    }
-
-    // Password validation
-    if (password.length < 8) {
-      return res.status(400).json({
-        error: 'Invalid password',
-        message: 'Password must be at least 8 characters long'
-      });
-    }
+    const parsed = validateRegistrationInput(req.body);
 
     const result = await authService.register({
-      email: email.toLowerCase().trim(),
-      password,
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      organizationName: organizationName.trim()
+      email: parsed.email,
+      password: parsed.password,
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
+      organizationName: parsed.organizationName
     });
 
     // Send welcome and admin alert emails (async, don't block response)
@@ -452,29 +429,18 @@ app.post('/api/v1/auth/register', async (req, res) => {
       refreshToken: result.refreshToken,
       expiresIn: result.expiresIn
     });
-
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(400).json({
-      error: 'Registration failed',
-      message: error.message
-    });
+    next(error);
   }
 });
 
 // Login endpoint
-app.post('/api/v1/auth/login', async (req, res) => {
+app.post('/api/v1/auth/login', async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = validateLoginInput(req.body);
 
-    if (!email || !password) {
-      return res.status(400).json({
-        error: 'Missing credentials',
-        message: 'Email and password are required'
-      });
-    }
-
-    const result = await authService.login(email.toLowerCase().trim(), password);
+    const result = await authService.login(email, password);
 
     res.json({
       success: true,
@@ -484,13 +450,9 @@ app.post('/api/v1/auth/login', async (req, res) => {
       refreshToken: result.refreshToken,
       expiresIn: result.expiresIn
     });
-
   } catch (error) {
     console.error('Login error:', error);
-    res.status(401).json({
-      error: 'Login failed',
-      message: error.message
-    });
+    next(error);
   }
 });
 
@@ -517,16 +479,9 @@ app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (
 });
 
 // Refresh token endpoint
-app.post('/api/v1/auth/refresh', async (req, res) => {
+app.post('/api/v1/auth/refresh', async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
-
-    if (!refreshToken) {
-      return res.status(400).json({
-        error: 'Missing refresh token',
-        message: 'Refresh token is required'
-      });
-    }
+    const { refreshToken } = validateRefreshInput(req.body);
 
     const tokens = await authService.refreshTokens(refreshToken);
 
@@ -535,13 +490,9 @@ app.post('/api/v1/auth/refresh', async (req, res) => {
       message: 'Tokens refreshed successfully',
       ...tokens
     });
-
   } catch (error) {
     console.error('Token refresh error:', error);
-    res.status(401).json({
-      error: 'Token refresh failed',
-      message: error.message
-    });
+    next(error);
   }
 });
 
@@ -2005,7 +1956,7 @@ app.post('/api/analyze-changes', async (req, res) => {
 // Blog Posts CRUD Endpoints
 
 // Get user's blog posts
-app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res) => {
+app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const {
       limit = 25,
@@ -2039,18 +1990,14 @@ app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), asyn
         }
       }
     });
-
   } catch (error) {
     console.error('Get blog posts error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve blog posts',
-      message: error.message
-    });
+    next(error);
   }
 });
 
 // Create new blog post
-app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res) => {
+app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { title, content, topic, businessInfo, status = 'draft' } = req.body;
 
@@ -2074,18 +2021,14 @@ app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), asy
       post: savedPost,
       message: 'Blog post created successfully'
     });
-
   } catch (error) {
     console.error('Create blog post error:', error);
-    res.status(500).json({
-      error: 'Failed to create blog post',
-      message: error.message
-    });
+    next(error);
   }
 });
 
 // Get specific blog post
-app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
     const post = await contentService.getBlogPost(id, req.user.userId);
@@ -2094,26 +2037,14 @@ app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), 
       success: true,
       post
     });
-
   } catch (error) {
     console.error('Get blog post error:', error);
-    
-    if (error.message === 'Blog post not found') {
-      res.status(404).json({
-        error: 'Blog post not found',
-        message: 'The requested blog post does not exist or you do not have access to it'
-      });
-    } else {
-      res.status(500).json({
-        error: 'Failed to retrieve blog post',
-        message: error.message
-      });
-    }
+    next(error);
   }
 });
 
 // Update blog post
-app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { title, content, status } = req.body;
@@ -2137,26 +2068,14 @@ app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), 
       post: updatedPost,
       message: 'Blog post updated successfully'
     });
-
   } catch (error) {
     console.error('Update blog post error:', error);
-    
-    if (error.message === 'Blog post not found') {
-      res.status(404).json({
-        error: 'Blog post not found',
-        message: 'The requested blog post does not exist or you do not have access to it'
-      });
-    } else {
-      res.status(500).json({
-        error: 'Failed to update blog post',
-        message: error.message
-      });
-    }
+    next(error);
   }
 });
 
 // Delete blog post
-app.delete('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res) => {
+app.delete('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
     await contentService.deleteBlogPost(id, req.user.userId);
@@ -2165,21 +2084,9 @@ app.delete('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService
       success: true,
       message: 'Blog post deleted successfully'
     });
-
   } catch (error) {
     console.error('Delete blog post error:', error);
-    
-    if (error.message === 'Blog post not found') {
-      res.status(404).json({
-        error: 'Blog post not found',
-        message: 'The requested blog post does not exist or you do not have access to it'
-      });
-    } else {
-      res.status(500).json({
-        error: 'Failed to delete blog post',
-        message: error.message
-      });
-    }
+    next(error);
   }
 });
 
@@ -3359,13 +3266,14 @@ app.delete('/api/v1/organization/members/:memberId', authService.authMiddleware.
   }
 });
 
-// Error handling middleware
+// Error handling middleware: map domain errors to HTTP status; preserve production message hiding for 500
 app.use((error, req, res, next) => {
   console.error('Error:', error);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
-  });
+  const { statusCode, body } = toHttpResponse(error);
+  if (statusCode === 500 && process.env.NODE_ENV !== 'development') {
+    body.message = 'Something went wrong';
+  }
+  res.status(statusCode).json(body);
 });
 
 // 404 handler
