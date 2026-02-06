@@ -2336,15 +2336,18 @@ CRITICAL REQUIREMENTS:
    */
   _streamNewlineChunkIfNeeded(alreadyEmitted, newContent) {
     if (!newContent || newContent.length === 0) return '';
-    const needsNewlineBefore = !/[\n\r]$/.test(alreadyEmitted);
-    if (!needsNewlineBefore) return '';
-    // After main title: last line is "# Title" and next doesn't start with newline
+    if (/[\n\r]$/.test(alreadyEmitted)) return '';
     const lines = alreadyEmitted.split(/\n/);
     const lastLine = lines[lines.length - 1] || '';
+    const newTrimmed = newContent.trimStart();
+    // Do not inject when next chunk continues the same line (e.g. " Title" or " and" after "# How to")
+    const first = newContent.charAt(0);
+    if (lastLine.trim().match(/^# .+$/) && (first === ' ' || (first >= 'a' && first <= 'z'))) return '';
+    // After main title: inject before new block (##, ###, or new sentence)
     if (lastLine.trim().match(/^# .+$/) && !/^[\n\r]/.test(newContent)) return '\n\n';
-    // Before ## / ###: next starts with heading and we're not already on a new line
-    if (/^#{1,3}\s/.test(newContent.trim())) return '\n\n';
-    // After paragraph (sentence end) so next paragraph/heading gets a break
+    // Before ## / ###: next starts with heading
+    if (/^#{1,3}\s/.test(newTrimmed)) return '\n\n';
+    // After paragraph (sentence end)
     if (/[.:?]\s*$/.test(alreadyEmitted.trim()) && !/^[\n\r#]/.test(newContent)) return '\n\n';
     return '';
   }
@@ -2400,12 +2403,7 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
           fullContent += delta;
           const contentSoFar = this._extractContentValueFromStreamBuffer(fullContent);
           if (contentSoFar.length > lastEmittedContentLength) {
-            const alreadyEmitted = contentSoFar.slice(0, lastEmittedContentLength);
             const newContent = contentSoFar.slice(lastEmittedContentLength);
-            const newlineChunk = this._streamNewlineChunkIfNeeded(alreadyEmitted, newContent);
-            if (newlineChunk) {
-              streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newlineChunk });
-            }
             streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newContent });
             lastEmittedContentLength = contentSoFar.length;
           }

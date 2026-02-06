@@ -105,9 +105,15 @@ describe('blog content stream', () => {
       expect(service._streamNewlineChunkIfNeeded('Para.\n\n', '## Section')).toBe('');
     });
 
-    it('returns \\n\\n after main title when next does not start with newline', () => {
-      expect(service._streamNewlineChunkIfNeeded('# How to Test APIs', ' In today')).toBe('\n\n');
-      expect(service._streamNewlineChunkIfNeeded('# One Line Title', 'More text')).toBe('\n\n');
+    it('returns \\n\\n after main title when next is start of new block (not mid-title)', () => {
+      expect(service._streamNewlineChunkIfNeeded('# How to Test APIs', ' In today')).toBe(''); // continuation of title, no inject
+      expect(service._streamNewlineChunkIfNeeded('# Title', '## Section')).toBe('\n\n'); // new heading after title
+      expect(service._streamNewlineChunkIfNeeded('# Title', 'First paragraph.')).toBe('\n\n'); // new paragraph after title
+    });
+
+    it('does not inject in middle of title (next chunk continues same line)', () => {
+      expect(service._streamNewlineChunkIfNeeded('# How to', ' Test')).toBe('');
+      expect(service._streamNewlineChunkIfNeeded('# Align', ' and Flow')).toBe('');
     });
 
     it('returns \\n\\n before ## / ### when previous does not end with newline', () => {
