@@ -1774,11 +1774,12 @@ TWEET EMBED RULES (CRITICAL - REQUIRED):
 - NEVER place tweets in the conclusion section or after the last CTA
 - All tweets must appear BEFORE the final call-to-action
 - Copy the EXACT placeholder format provided above (including all the data encoding)
+- **In the post body also use the index form [TWEET:0], [TWEET:1], etc.** so the frontend can replace them with the actual tweets. Insert e.g. [TWEET:0] after the first paragraph, [TWEET:1] mid-post where it fits.
 
 **Example Format:**
 Leading experts in reproductive psychiatry emphasize the importance of evidence-based interventions. Dr. Smith's research focuses on personalized treatment approaches that combine therapeutic and pharmacological strategies.
 
-${realTweetUrls[0]}
+[TWEET:0]
 
 This evidence-based approach aligns with current best practices in maternal mental health care.`
   : `TWEET EMBED RULES:
@@ -1786,6 +1787,23 @@ This evidence-based approach aligns with current best practices in maternal ment
 - Do NOT create fake tweet placeholders or URLs
 - Skip tweets entirely for this post
 - Use other forms of social proof (statistics, studies, quotes from publications)`}`;
+
+    // Embeddable content: index-based placeholders [TWEET:0], [ARTICLE:0], [VIDEO:0] for frontend replacement
+    const preloadedArticles = topic.preloadedArticles || [];
+    const preloadedVideos = topic.preloadedVideos || [];
+    const tweetCount = realTweetUrls.length;
+    const articleCount = preloadedArticles.length;
+    const videoCount = preloadedVideos.length;
+    let embedPlaceholdersSection = '';
+    if (tweetCount > 0 || articleCount > 0 || videoCount > 0) {
+      embedPlaceholdersSection = `
+**EMBEDDABLE CONTENT — use these exact placeholders in the post body** (the frontend will replace them):
+${tweetCount > 0 ? `- Tweets: [TWEET:0]${tweetCount > 1 ? `, [TWEET:1]${tweetCount > 2 ? ', ...' : ''}` : ''} — insert where you want tweet embeds (e.g. after first paragraph, mid-post for expert validation).` : ''}
+${articleCount > 0 ? `- Articles: [ARTICLE:0]${articleCount > 1 ? `, [ARTICLE:1]${articleCount > 2 ? ', ...' : ''}` : ''} — use for sources/citations (e.g. after a statistic or claim). Index list: ${preloadedArticles.map((a, i) => `[ARTICLE:${i}] ${String(a?.title || a?.url || '').slice(0, 50)}`).join('; ')}.` : ''}
+${videoCount > 0 ? `- Videos: [VIDEO:0]${videoCount > 1 ? `, [VIDEO:1]${videoCount > 2 ? ', ...' : ''}` : ''} — use for demo or explanation (e.g. [VIDEO:0] in a relevant section). Index list: ${preloadedVideos.map((v, i) => `[VIDEO:${i}] ${String(v?.title || v?.url || '').slice(0, 50)}`).join('; ')}.` : ''}
+
+**Rule:** The post body must contain these literal placeholders (e.g. [TWEET:0], [ARTICLE:0], [VIDEO:0]) where you want embeds. Do not substitute or omit them.`;
+    }
 
     console.log('✅ [CTA DEBUG] Prompt Building: Complete prompt built:', {
       promptLength: contextSections.length,
@@ -1811,6 +1829,7 @@ ${seoInstructions}
 ${imageInstructions}
 
 ${highlightBoxInstructions}
+${embedPlaceholdersSection}
 
 CONTENT REQUIREMENTS:
 1. STRATEGIC VALUE: Provide actionable insights that demonstrate expertise
@@ -2362,6 +2381,11 @@ CRITICAL REQUIREMENTS:
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
     const additionalInstructions = options.additionalInstructions ?? '';
     try {
+      // Attach preloaded tweets, articles, videos from options so prompt can use [TWEET:0], [ARTICLE:0], [VIDEO:0]
+      if (options.preloadedTweets?.length) topic = { ...topic, preloadedTweets: options.preloadedTweets };
+      if (options.preloadedArticles?.length) topic = { ...topic, preloadedArticles: options.preloadedArticles };
+      if (options.preloadedVideos?.length) topic = { ...topic, preloadedVideos: options.preloadedVideos };
+
       const organizationContext = await this.getOrganizationContext(organizationId);
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       const tweetPlaceholders = (topic.preloadedTweets || []).map((tweet) => {
@@ -2447,13 +2471,18 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         });
       }
 
-      // If tweets were provided in options, attach them to topic for downstream use
+      // Attach preloaded tweets, articles, and videos to topic for prompt (embed placeholders [TWEET:0], [ARTICLE:0], [VIDEO:0])
       if (options.preloadedTweets && options.preloadedTweets.length > 0) {
-        topic = {
-          ...topic,
-          preloadedTweets: options.preloadedTweets
-        };
+        topic = { ...topic, preloadedTweets: options.preloadedTweets };
         console.log(`🐦 [TWEET] Attached ${options.preloadedTweets.length} pre-fetched tweets to topic`);
+      }
+      if (options.preloadedArticles && options.preloadedArticles.length > 0) {
+        topic = { ...topic, preloadedArticles: options.preloadedArticles };
+        console.log(`📰 [ARTICLE] Attached ${options.preloadedArticles.length} pre-fetched articles to topic`);
+      }
+      if (options.preloadedVideos && options.preloadedVideos.length > 0) {
+        topic = { ...topic, preloadedVideos: options.preloadedVideos };
+        console.log(`📺 [VIDEO] Attached ${options.preloadedVideos.length} pre-fetched videos to topic`);
       }
 
       // Generate the blog post content

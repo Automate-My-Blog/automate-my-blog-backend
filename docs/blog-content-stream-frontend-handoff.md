@@ -105,9 +105,17 @@ Send the full result. The frontend uses **`result.content`** as the final body (
 
 - **Newlines:** Use normal JSON escaping. So `"\n"` in JSON becomes a real newline in the string. Do not double-escape (e.g. avoid sending `"\\n"` in the JSON string so the frontend sees literal `\n`).
 
-### 4. Tweet placeholders in body
+### 4. Embed placeholders in body ([TWEET:0], [ARTICLE:0], [VIDEO:0])
 
-The backend may emit `[TWEET:0]`, `[TWEET:1]`, … inside the streamed body. The frontend replaces these with tweet content when the tweet stream completes. No change needed for this handoff beyond keeping placeholders in the body and sending tweets on the tweet stream.
+The blog body (streamed and in `result.content`) can contain index-based placeholders so the frontend can replace them with embeds:
+
+- **Tweets:** `[TWEET:0]`, `[TWEET:1]`, … — replace with tweet content when the tweet stream completes.
+- **Articles:** `[ARTICLE:0]`, `[ARTICLE:1]`, … — replace with article/source content when the news-articles stream completes.
+- **Videos:** `[VIDEO:0]`, `[VIDEO:1]`, … — replace with video embed when the YouTube stream completes.
+
+The backend prompt instructs the model to insert these placeholders where appropriate (e.g. [TWEET:0] after the first paragraph, [ARTICLE:0] for a source, [VIDEO:0] for a demo). When starting generation, pass `preloadedTweets`, `preloadedArticles`, and/or `preloadedVideos` (e.g. from the respective search streams) so the prompt includes them.
+
+**Stream payload keys:** Tweet, news-articles, and YouTube search streams send a **complete** SSE event with `tweets`, `articles`, or `videos` respectively (plus `searchTermsUsed`). Use `data.tweets`, `data.articles`, or `data.videos` on the frontend; no mapping needed.
 
 ---
 
@@ -128,7 +136,7 @@ Once the backend follows this contract, the frontend can rely on it and simplify
 
 - **Stream:** `POST /api/v1/enhanced-blog-generation/generate-stream` (client opens `GET /api/v1/stream?token=...` first, then POSTs with `connectionId`).
 - **Prompt:** The backend asks the model to put the `"content"` key **first** in the JSON and to write the content value as **raw markdown with line breaks** (`\n` in JSON after the # title, after each ##/### heading, and between paragraphs). The streaming system message reinforces that only the content field is streamed and must be formatted for preview.
-- **Logic:** `services/enhanced-blog-generation.js` — `generateBlogPostStream()` accumulates the raw OpenAI stream, extracts only the `"content"` field value from the partial JSON via `_extractContentValueFromStreamBuffer()` (unescaping `\n` to real newlines), and emits `content-chunk` with `field: "content"` for that body text only. Optional `_streamNewlineChunkIfNeeded()` injects `\n\n` chunks where the model didn’t add a break. On completion, parses full JSON and sends `complete` with `result` (including `result.content` with normal newlines).
+- **Logic:** `services/enhanced-blog-generation.js` — `generateBlogPostStream()` accumulates the raw OpenAI stream, extracts only the `"content"` field value via `_extractContentValueFromStreamBuffer()` (unescaping `\n` to real newlines), and emits `content-chunk` with `field: "content"` for that body text only. On completion, parses full JSON and sends `complete` with `result` (including `result.content` with normal newlines). When `topic.preloadedArticles` or `topic.preloadedVideos` are present (or passed in options), the prompt instructs the model to use [ARTICLE:0], [VIDEO:0], etc. in the body.
 
 ---
 
