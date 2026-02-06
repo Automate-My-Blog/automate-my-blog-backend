@@ -294,6 +294,40 @@ router.post('/generate-stream', async (req, res) => {
 });
 
 /**
+ * POST /api/v1/enhanced-blog-generation/related-content
+ * Fetch related tweets and videos for a topic in one request (runs both pipelines in parallel).
+ * Body: { topic, businessInfo, maxTweets?, maxVideos? }
+ * Returns 200 { tweets, videos, searchTermsUsed: { tweets: string[], videos: string[] } }
+ */
+router.post('/related-content', async (req, res) => {
+  try {
+    const { topic, businessInfo, maxTweets, maxVideos } = req.body;
+    if (!topic || !businessInfo || !topic.title) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields',
+        message: 'topic (with title) and businessInfo are required'
+      });
+    }
+    const result = await enhancedBlogGenerationService.searchRelatedTweetsAndVideos(topic, businessInfo, {
+      maxTweets: maxTweets ?? 3,
+      maxVideos: maxVideos ?? 5
+    });
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    console.error('related-content endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch related content',
+      message: error.message
+    });
+  }
+});
+
+/**
  * POST /api/v1/enhanced-blog-generation/analyze-and-improve
  * Generate blog and automatically analyze with SEO analysis
  */

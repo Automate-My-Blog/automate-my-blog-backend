@@ -659,7 +659,7 @@ export class EnhancedBlogGenerationService extends OpenAIService {
     const prompt = `You are analyzing a blog post to find tweets that would support its narrative.
 
 BLOG POST CONTENT:
-${content.substring(0, 3000)}
+${content.substring(0, 1500)}
 
 BLOG TOPIC: ${topic.title}
 BUSINESS: ${businessInfo.businessType}
@@ -822,7 +822,7 @@ Keep it simple, specific, and searchable.`;
     const prompt = `You are analyzing a blog topic to find YouTube videos that would support its narrative.
 
 TOPIC/CONTENT:
-${content.substring(0, 3000)}
+${content.substring(0, 1500)}
 
 BLOG TOPIC: ${topic.title}
 BUSINESS: ${businessInfo.businessType}
@@ -973,6 +973,43 @@ BAD examples (TOO LONG/ABSTRACT):
   }
 
   /**
+   * Fetch related tweets and videos for a topic in parallel (one round-trip, faster when both are needed).
+   * Runs query extraction for both in parallel, then both searches in parallel.
+   * @param {Object} topic - Topic object (title, subheader, trend, seoBenefit, etc.)
+   * @param {Object} businessInfo - { businessType, targetAudience }
+   * @param {{ maxTweets?: number, maxVideos?: number }} [options] - maxTweets (default 3), maxVideos (default 5)
+   * @returns {Promise<{ tweets: Array, videos: Array, searchTermsUsed: { tweets: string[], videos: string[] } }>}
+   */
+  async searchRelatedTweetsAndVideos(topic, businessInfo, options = {}) {
+    const maxTweets = options.maxTweets ?? 3;
+    const maxVideos = options.maxVideos ?? 5;
+    const topicDescription = `
+      Title: ${topic.title}
+      Subheader: ${topic.subheader || ''}
+      Focus: ${topic.trend || ''}
+      SEO: ${topic.seoBenefit || ''}
+    `.trim();
+
+    // Run both query extractions in parallel
+    const [tweetQueries, videoQueries] = await Promise.all([
+      this.extractTweetSearchQueries(topicDescription, topic, businessInfo),
+      this.extractYouTubeSearchQueries(topicDescription, topic, businessInfo)
+    ]);
+
+    // Run both searches in parallel
+    const [tweets, videos] = await Promise.all([
+      this.searchForTweetsWithMultipleQueries(tweetQueries, { maxTweets }),
+      this.searchForVideosWithMultipleQueries(videoQueries, { maxVideos })
+    ]);
+
+    return {
+      tweets,
+      videos,
+      searchTermsUsed: { tweets: tweetQueries, videos: videoQueries }
+    };
+  }
+
+  /**
    * Extract news search queries from topic/description (similar to tweets/YouTube)
    * @param {string} content - Topic description or content
    * @param {Object} topic - Blog topic information
@@ -985,7 +1022,7 @@ BAD examples (TOO LONG/ABSTRACT):
     const prompt = `You are analyzing a blog topic to find news articles that would support its narrative.
 
 TOPIC/CONTENT:
-${content.substring(0, 3000)}
+${content.substring(0, 1500)}
 
 BLOG TOPIC: ${topic.title}
 BUSINESS: ${businessInfo.businessType}
