@@ -2281,7 +2281,51 @@ CRITICAL REQUIREMENTS:
   }
 
   /**
-   * Stream blog post content via SSE (Phase 2). Emits content-chunk then complete or error.
+   * Extract the "content" field value from partial JSON buffer (streaming).
+   * Only the post body is returned; title/meta/wrapper keys are ignored.
+   * Handles escaped quotes and backslashes; returns unescaped string so far.
+   * @param {string} buffer - Accumulated raw stream (may be incomplete JSON)
+   * @returns {string} Unescaped content value so far, or '' if not yet in content or not found
+   */
+  _extractContentValueFromStreamBuffer(buffer) {
+    const contentKeyPattern = /"content"\s*:\s*"/;
+    const match = buffer.match(contentKeyPattern);
+    if (!match) return '';
+    const valueStart = match.index + match[0].length;
+    let out = '';
+    let i = valueStart;
+    while (i < buffer.length) {
+      const c = buffer[i];
+      if (c === '\\') {
+        if (i + 1 >= buffer.length) break;
+        const next = buffer[i + 1];
+        if (next === 'n') { out += '\n'; i += 2; continue; }
+        if (next === 'r') { out += '\r'; i += 2; continue; }
+        if (next === 't') { out += '\t'; i += 2; continue; }
+        if (next === '"') { out += '"'; i += 2; continue; }
+        if (next === '\\') { out += '\\'; i += 2; continue; }
+        if (next === 'u' && i + 5 < buffer.length) {
+          const hex = buffer.slice(i + 2, i + 6);
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            out += String.fromCharCode(parseInt(hex, 16));
+            i += 6;
+            continue;
+          }
+        }
+        out += next;
+        i += 2;
+        continue;
+      }
+      if (c === '"') break;
+      out += c;
+      i += 1;
+    }
+    return out;
+  }
+
+  /**
+   * Stream blog post content via SSE (Phase 2). Emits content-chunk (body only) then complete or error.
+   * content-chunk sends only the post body markdown; title/meta/wrapper JSON are not streamed as content.
    * Client must open GET /api/v1/stream?token= first to get connectionId, then POST here with connectionId.
    */
   async generateBlogPostStream(topic, businessInfo, organizationId, connectionId, options = {}) {
@@ -2320,11 +2364,17 @@ CRITICAL REQUIREMENTS:
       });
 
       let fullContent = '';
+      let lastEmittedContentLength = 0;
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content ?? '';
         if (delta) {
           fullContent += delta;
-          streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: delta });
+          const contentSoFar = this._extractContentValueFromStreamBuffer(fullContent);
+          if (contentSoFar.length > lastEmittedContentLength) {
+            const newContent = contentSoFar.slice(lastEmittedContentLength);
+            lastEmittedContentLength = contentSoFar.length;
+            streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newContent });
+          }
         }
       }
 

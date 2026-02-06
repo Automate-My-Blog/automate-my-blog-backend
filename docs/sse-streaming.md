@@ -43,6 +43,10 @@ The app CORS config allows the same origins as the rest of the API (production, 
 - **Connections clean up on client disconnect** — `res.on('close')` and `res.on('error')` call `removeConnection(connectionId)`; keepalive timer cleared; connection removed from map.
 - **Stream manager can create connections and emit events via Redis** — `createConnection()` registers a connection; `publish(connectionId, event, data)` sends in-process or via Redis channel `stream:{connectionId}`; subscriber `PSUBSCRIBE stream:*` forwards to the right connection.
 
+## Blog content stream contract
+
+For the blog content stream (e.g. `POST /api/v1/enhanced-blog-generation/generate-stream`), the backend sends **only post-body markdown** in `content-chunk` events (no title/meta/wrapper JSON). See [blog-content-stream-frontend-handoff.md](./blog-content-stream-frontend-handoff.md) for the full contract and frontend reference.
+
 ## Files
 
 - `utils/streaming-helpers.js` — `formatSSE`, `writeSSE`, `sendKeepalive`
