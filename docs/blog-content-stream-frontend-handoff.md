@@ -39,11 +39,16 @@ These workarounds are fragile. **Changing the backend contract is the preferred 
   - Meta description
   - Wrapper keys/values (e.g. `ctaSuggestions`, `seoOptimizationScore`, tags, etc.)
 
-**Example (good):** Stream body fragments only.
+**Newline chunks:** The backend sends explicit newline chunks where the final post has line breaks so the preview renders correctly (e.g. `# Title`, `## Section`, `<p>` blocks). After the main title, after paragraphs, and before `##` / `###` headings it may send `{ "field": "content", "content": "\n\n" }`. List numbers (e.g. `"1"`, `"2"`) are still sent as separate chunks; the frontend appends them so you get `### 1.`, `### 2.`, etc.
+
+**Example (good):** Stream body fragments and newline chunks.
 
 ```json
-{ "field": "content", "content": "# How to Test the Streaming API\n\n" }
+{ "field": "content", "content": "# How to Test the Streaming API" }
+{ "field": "content", "content": "\n\n" }
 { "field": "content", "content": "In today's digital landscape, streaming APIs play a pivotal role." }
+{ "field": "content", "content": "\n\n" }
+{ "field": "content", "content": "## Why streaming matters" }
 ```
 
 **Example (avoid):** Do not send title/meta/wrapper as content-chunk.

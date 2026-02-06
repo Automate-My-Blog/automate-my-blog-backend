@@ -2326,8 +2326,31 @@ CRITICAL REQUIREMENTS:
   }
 
   /**
+   * Returns a newline chunk to send before the next content chunk so the streamed preview has proper
+   * line breaks (after main title, after paragraphs, before ## / ###). Returns '' if no inject needed.
+   * @param {string} alreadyEmitted - Content we've already sent in content-chunk events
+   * @param {string} newContent - Next slice we're about to send
+   * @returns {string} '' or '\n\n'
+   */
+  _streamNewlineChunkIfNeeded(alreadyEmitted, newContent) {
+    if (!newContent || newContent.length === 0) return '';
+    const needsNewlineBefore = !/[\n\r]$/.test(alreadyEmitted);
+    if (!needsNewlineBefore) return '';
+    // After main title: last line is "# Title" and next doesn't start with newline
+    const lines = alreadyEmitted.split(/\n/);
+    const lastLine = lines[lines.length - 1] || '';
+    if (lastLine.trim().match(/^# .+$/) && !/^[\n\r]/.test(newContent)) return '\n\n';
+    // Before ## / ###: next starts with heading and we're not already on a new line
+    if (/^#{1,3}\s/.test(newContent.trim())) return '\n\n';
+    // After paragraph (sentence end) so next paragraph/heading gets a break
+    if (/[.:?]\s*$/.test(alreadyEmitted.trim()) && !/^[\n\r#]/.test(newContent)) return '\n\n';
+    return '';
+  }
+
+  /**
    * Stream blog post content via SSE (Phase 2). Emits content-chunk (body only) then complete or error.
-   * content-chunk sends only the post body markdown; title/meta/wrapper JSON are not streamed as content.
+   * content-chunk sends only the post body markdown; sends explicit "\n\n" chunks after title, after
+   * paragraphs, and before ##/### so the preview gets proper line breaks. Title/meta/wrapper are not streamed.
    * Client must open GET /api/v1/stream?token= first to get connectionId, then POST here with connectionId.
    */
   async generateBlogPostStream(topic, businessInfo, organizationId, connectionId, options = {}) {
@@ -2373,9 +2396,14 @@ CRITICAL REQUIREMENTS:
           fullContent += delta;
           const contentSoFar = this._extractContentValueFromStreamBuffer(fullContent);
           if (contentSoFar.length > lastEmittedContentLength) {
+            const alreadyEmitted = contentSoFar.slice(0, lastEmittedContentLength);
             const newContent = contentSoFar.slice(lastEmittedContentLength);
-            lastEmittedContentLength = contentSoFar.length;
+            const newlineChunk = this._streamNewlineChunkIfNeeded(alreadyEmitted, newContent);
+            if (newlineChunk) {
+              streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newlineChunk });
+            }
             streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newContent });
+            lastEmittedContentLength = contentSoFar.length;
           }
         }
       }
