@@ -90,6 +90,13 @@ describe('blog content stream', () => {
       const buffer = '"content" : "value"';
       expect(service._extractContentValueFromStreamBuffer(buffer)).toBe('value');
     });
+
+    it('extracts content when content key is first (streaming prompt order)', () => {
+      const buffer = '{"content":"# Title\\n\\nFirst para.\\n\\n## Section\\n\\nBody.","title":"Title","tags":[]}';
+      expect(service._extractContentValueFromStreamBuffer(buffer)).toBe(
+        '# Title\n\nFirst para.\n\n## Section\n\nBody.'
+      );
+    });
   });
 
   describe('_streamNewlineChunkIfNeeded', () => {
