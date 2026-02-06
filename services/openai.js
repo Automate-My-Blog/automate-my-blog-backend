@@ -548,16 +548,14 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
       const response = completion.choices[0].message.content;
       const topics = this.parseOpenAIResponse(response);
 
-      // Generate DALL-E images for all topics (now only 2)
+      // Generate DALL-E images in parallel (same as stream path)
       console.log('Generating DALL-E images for all topics');
-      const dalleLimit = topics.length;
-      
-      for (let i = 0; i < dalleLimit; i++) {
-        console.log(`Generating DALL-E image ${i + 1}/${dalleLimit} for topic: ${topics[i].title}`);
-        topics[i].image = await this.generateTopicImage(topics[i]);
-      }
-      
-      // All topics now have DALL-E images
+      const imageResults = await Promise.all(
+        topics.map((topic, index) =>
+          this.generateTopicImage(topic).then((image) => ({ index, topic: { ...topic, image } }))
+        )
+      );
+      imageResults.forEach(({ index, topic }) => { topics[index] = topic; });
 
       return topics;
     } catch (error) {

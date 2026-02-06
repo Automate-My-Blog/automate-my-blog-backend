@@ -46,14 +46,12 @@ class BlogAnalyzerService {
         console.log(`  - CTAs: ${post?.ctas?.length || 0}`);
       });
 
-      // Step 3: Extract CTAs from main pages AND blog posts
-      const ctaAnalysis = await this.analyzeCTAs(organizationId, websiteUrl, detailedPosts);
-
-      // Step 4: Analyze internal linking patterns
-      const linkingAnalysis = await this.analyzeInternalLinking(organizationId, websiteUrl);
-
-      // Step 5: Use AI to analyze tone and style patterns
-      const contentAnalysis = await this.analyzeContentPatterns(detailedPosts);
+      // Steps 3–5: run in parallel (independent after detailedPosts)
+      const [ctaAnalysis, linkingAnalysis, contentAnalysis] = await Promise.all([
+        this.analyzeCTAs(organizationId, websiteUrl, detailedPosts),
+        this.analyzeInternalLinking(organizationId, websiteUrl),
+        this.analyzeContentPatterns(detailedPosts)
+      ]);
 
       // Step 6: Store results in database
       await this.storeAnalysisResults(organizationId, {
