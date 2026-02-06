@@ -1865,7 +1865,9 @@ Return JSON format:
     }
   ],
   "seoOptimizationScore": "predicted score based on SEO best practices"
-}`;
+}
+
+CONTENT NEWLINES (for streamed preview): In the "content" value use newlines (\\n in JSON): put a newline after the main # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders correct # Title, ## Section, and <p> blocks.`;
   }
 
   /**
