@@ -27,9 +27,18 @@ Streaming blog generation so the UI can show **partial results as each stage fin
   "businessInfo": { "businessType": "...", "targetAudience": "...", "userId": "...", ... },
   "organizationId": "uuid",
   "additionalInstructions": "...",
-  "options": { "includeVisuals": true, "autoSave": true, "status": "draft" }
+  "options": {
+    "includeVisuals": true,
+    "autoSave": true,
+    "status": "draft",
+    "preloadedTweets": [],
+    "preloadedArticles": [],
+    "preloadedVideos": []
+  }
 }
 ```
+
+**Embed content:** To get `[TWEET:0]`, `[ARTICLE:0]`, and `[VIDEO:0]` placeholders in the post body, pass the data from your tweet/news/video search streams in `options.preloadedTweets`, `options.preloadedArticles`, and `options.preloadedVideos`. The backend includes these same arrays in **blog-result** and **complete** so the frontend can replace placeholders with embeds.
 
 **Response**
 
@@ -101,12 +110,12 @@ Emitted after organization context is loaded (before blog generation).
 
 ### 3.2 `blog-result`
 
-Emitted when the main blog post content is ready (before visual suggestions and SEO analysis). Use it to **render the post body** so the user can read while the rest runs.
+Emitted when the main blog post content is ready (before visual suggestions and SEO analysis). Use it to **render the post body** so the user can read while the rest runs. Replace `[TWEET:0]`, `[ARTICLE:0]`, `[VIDEO:0]` in `content` using the `preloadedTweets`, `preloadedArticles`, and `preloadedVideos` arrays (same order as indices).
 
 ```ts
 {
   title: string;
-  content: string;        // Markdown
+  content: string;        // Markdown; may contain [TWEET:0], [ARTICLE:0], [VIDEO:0]
   metaDescription?: string;
   tags?: string[];
   seoKeywords?: string[];
@@ -116,6 +125,9 @@ Emitted when the main blog post content is ready (before visual suggestions and 
   seoOptimizationScore?: string | number;
   organizationContext?: { ... };
   generationMetadata?: { duration?: number; tokensUsed?: number };
+  preloadedTweets?: Array<{ url: string; text?: string; author_name?: string; ... }>;   // for [TWEET:0], [TWEET:1], ...
+  preloadedArticles?: Array<{ title?: string; url?: string; ... }>;                       // for [ARTICLE:0], ...
+  preloadedVideos?: Array<{ title?: string; url?: string; ... }>;                       // for [VIDEO:0], ...
   // ... other fields from generateEnhancedBlogPost
 }
 ```
@@ -153,7 +165,7 @@ Emitted when SEO analysis is complete (if not skipped).
 
 ### 3.5 `complete`
 
-Same as today: `data.result` is the full content-generation result (blog + visuals + SEO + metadata + savedPost + imageGeneration, etc.). Use it as the single source of truth once the job is done.
+Same as today: `data.result` is the full content-generation result (blog + visuals + SEO + metadata + savedPost + imageGeneration, etc.). Use it as the single source of truth once the job is done. `data.result` also includes `preloadedTweets`, `preloadedArticles`, and `preloadedVideos` when provided at job create, so you can replace `[TWEET:0]`, `[ARTICLE:0]`, `[VIDEO:0]` in `result.content` with embeds.
 
 ---
 
@@ -164,7 +176,7 @@ Same as today: `data.result` is the full content-generation result (blog + visua
 3. Open `EventSource(\`${API_BASE}/api/v1/jobs/${jobId}/stream?token=...\`)`.
 4. On **progress-update**: update progress bar / “Writing...” step.
 5. On **context-result**: optional — show “Context loaded” or completeness indicator.
-6. On **blog-result**: **show the post** (title, content, metaDescription, tags, etc.) so the user can read while visuals/SEO run.
+6. On **blog-result**: **show the post** (title, content, metaDescription, tags, etc.) so the user can read while visuals/SEO run. Replace `[TWEET:0]`, `[ARTICLE:0]`, `[VIDEO:0]` in content using `data.preloadedTweets`, `data.preloadedArticles`, `data.preloadedVideos`.
 7. On **visuals-result**: optional — show image suggestions or “Visuals ready”.
 8. On **seo-result**: optional — show SEO score and improvements.
 9. On **complete**: set final state from `data.result` (includes savedPost, metadata, imageGeneration), close EventSource, show “Done”.

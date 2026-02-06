@@ -109,13 +109,13 @@ Send the full result. The frontend uses **`result.content`** as the final body (
 
 The blog body (streamed and in `result.content`) can contain index-based placeholders so the frontend can replace them with embeds:
 
-- **Tweets:** `[TWEET:0]`, `[TWEET:1]`, … — replace with tweet content when the tweet stream completes.
-- **Articles:** `[ARTICLE:0]`, `[ARTICLE:1]`, … — replace with article/source content when the news-articles stream completes.
-- **Videos:** `[VIDEO:0]`, `[VIDEO:1]`, … — replace with video embed when the YouTube stream completes.
+- **Tweets:** `[TWEET:0]`, `[TWEET:1]`, … — replace with tweet content using `preloadedTweets[0]`, `preloadedTweets[1]`, etc.
+- **Articles:** `[ARTICLE:0]`, `[ARTICLE:1]`, … — replace with article/source content using `preloadedArticles[0]`, etc.
+- **Videos:** `[VIDEO:0]`, `[VIDEO:1]`, … — replace with video embed using `preloadedVideos[0]`, etc.
 
-The backend prompt instructs the model to insert these placeholders where appropriate (e.g. [TWEET:0] after the first paragraph, [ARTICLE:0] for a source, [VIDEO:0] for a demo). When starting generation, pass `preloadedTweets`, `preloadedArticles`, and/or `preloadedVideos` (e.g. from the respective search streams) so the prompt includes them.
+**Backend:** When starting generation (job or sync), pass `options.preloadedTweets`, `options.preloadedArticles`, and `options.preloadedVideos` so the prompt includes the embed section and the model outputs placeholders. The backend includes these same arrays in **blog-result** and **complete** (and sync `data`) so the frontend can resolve indices without storing search results separately.
 
-**Stream payload keys:** Tweet, news-articles, and YouTube search streams send a **complete** SSE event with `tweets`, `articles`, or `videos` respectively (plus `searchTermsUsed`). Use `data.tweets`, `data.articles`, or `data.videos` on the frontend; no mapping needed.
+**Frontend:** On **blog-result** or **complete**, replace `[TWEET:0]` with the embed for `data.preloadedTweets[0]`, `[ARTICLE:0]` with `data.preloadedArticles[0]`, and `[VIDEO:0]` with `data.preloadedVideos[0]` in the preview (e.g. in HTMLPreview or equivalent). If you don’t pass preloaded* when creating the job, the prompt won’t mention embeds and the model won’t insert placeholders; and if you don’t replace them in the UI, the user will see literal `[TWEET:0]` text.
 
 ---
 
