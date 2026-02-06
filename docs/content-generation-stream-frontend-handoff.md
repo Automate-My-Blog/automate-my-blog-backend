@@ -172,6 +172,12 @@ Same as today: `data.result` is the full content-generation result (blog + visua
 
 **Minimal (backward compatible):** Only handle **progress-update** and **complete**; ignore **context-result**, **blog-result**, **visuals-result**, **seo-result** — same as before.
 
+### 4.1 Post creation (avoid "Title and content are required")
+
+- **When `options.autoSave` is `true` (default):** The backend creates the post when the job completes. Use **`complete.result.savedPost`** as the created post. Do **not** call `POST /api/v1/blog-posts` (create post) for this flow — the post is already saved.
+- **When `options.autoSave` is `false`:** The frontend must create the post itself. Call `POST /api/v1/blog-posts` only **after** you have received **blog-result** or **complete**, and send the **title** and **content** (and optional metaDescription, topic_data, generation_metadata, etc.) from that payload. Never call create post before title and content are available (e.g. do not call create post on button click if the stream has not yet emitted blog-result).
+- **If you get `API Error: Title and content are required`:** Usually create post was called with empty title/content. Ensure you pass the title and content from **blog-result** or **complete.result**, and only call create post after at least **blog-result** has been received. The API returns `code: 'TITLE_AND_CONTENT_REQUIRED'` and a `hint` for this case.
+
 ---
 
 ## 5. Example: listening for partial results

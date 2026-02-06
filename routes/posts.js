@@ -98,7 +98,9 @@ router.post('/', async (req, res) => {
     if (!title || !content) {
       return res.status(400).json({
         success: false,
-        error: 'Title and content are required'
+        error: 'Title and content are required',
+        code: 'TITLE_AND_CONTENT_REQUIRED',
+        hint: 'When using content-generation stream, only call create post after receiving blog-result or complete, and pass the title and content from that payload. If autoSave is true, the backend creates the post and returns it in complete.result.savedPost.'
       });
     }
     

@@ -1421,6 +1421,17 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
+   * Ensure IMAGE placeholders use Markdown image syntax ![IMAGE:...] so the frontend regex matches.
+   * Converts [IMAGE:type:description] to ![IMAGE:type:description] when the leading ! is missing.
+   */
+  normalizeImagePlaceholders(content) {
+    if (!content || typeof content !== 'string') {
+      return content;
+    }
+    return content.replace(/(?<!!)\[IMAGE:(\w+):(.*?)\]/g, '![IMAGE:$1:$2]');
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    */
   buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = []) {
@@ -2006,6 +2017,10 @@ CRITICAL REQUIREMENTS:
       const response = completion.choices[0].message.content;
       const blogData = this.parseOpenAIResponse(response);
 
+      if (blogData.content) {
+        blogData.content = this.normalizeImagePlaceholders(blogData.content);
+      }
+
       console.log('✅ [CTA DEBUG] Generation: OpenAI response received:', {
         organizationId,
         contentLength: blogData.content?.length || 0,
@@ -2435,6 +2450,9 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
       }
 
       const blogData = this.parseOpenAIResponse(fullContent);
+      if (blogData.content) {
+        blogData.content = this.normalizeImagePlaceholders(blogData.content);
+      }
       if (blogData.content && blogData.content.includes('![TWEET:')) {
         blogData.content = await this.processTweetPlaceholders(blogData.content);
       }
