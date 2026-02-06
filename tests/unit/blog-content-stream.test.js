@@ -91,4 +91,35 @@ describe('blog content stream', () => {
       expect(service._extractContentValueFromStreamBuffer(buffer)).toBe('value');
     });
   });
+
+  describe('_streamNewlineChunkIfNeeded', () => {
+    it('returns empty when alreadyEmitted ends with newline', () => {
+      expect(service._streamNewlineChunkIfNeeded('# Title\n\n', 'Next para')).toBe('');
+      expect(service._streamNewlineChunkIfNeeded('Para.\n\n', '## Section')).toBe('');
+    });
+
+    it('returns \\n\\n after main title when next does not start with newline', () => {
+      expect(service._streamNewlineChunkIfNeeded('# How to Test APIs', ' In today')).toBe('\n\n');
+      expect(service._streamNewlineChunkIfNeeded('# One Line Title', 'More text')).toBe('\n\n');
+    });
+
+    it('returns \\n\\n before ## / ### when previous does not end with newline', () => {
+      expect(service._streamNewlineChunkIfNeeded('Some text', '## Section')).toBe('\n\n');
+      expect(service._streamNewlineChunkIfNeeded('Some text', '### Subsection')).toBe('\n\n');
+      expect(service._streamNewlineChunkIfNeeded('Paragraph.', '### Sub')).toBe('\n\n');
+    });
+
+    it('returns \\n\\n after paragraph end when next does not start with newline or #', () => {
+      expect(service._streamNewlineChunkIfNeeded('First sentence.', ' Second para')).toBe('\n\n');
+      expect(service._streamNewlineChunkIfNeeded('Really? ', 'Yes.')).toBe('\n\n');
+    });
+
+    it('returns empty when newContent is empty', () => {
+      expect(service._streamNewlineChunkIfNeeded('# Title', '')).toBe('');
+    });
+
+    it('returns empty when next starts with newline (no double break)', () => {
+      expect(service._streamNewlineChunkIfNeeded('# Title', '\n\nNext')).toBe('');
+    });
+  });
 });
