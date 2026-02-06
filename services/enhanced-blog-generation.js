@@ -1840,12 +1840,16 @@ RULE: If you want to include an anecdote, expert story, or testimonial → Use a
 
 ADDITIONAL INSTRUCTIONS: ${additionalInstructions}
 
-Return JSON format:
+Return JSON with the "content" key FIRST so the post body streams as raw markdown. The content value must be raw markdown with real line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs. Example content shape:
+
+"content": "# Your Title Here\\n\\nFirst paragraph.\\n\\n## First Section\\n\\nSection body.\\n\\n## Second Section\\n\\nMore body."
+
+Then add the other keys. Full format:
 {
+  "content": "Full blog post in markdown: # Title\\n\\n intro paragraph\\n\\n## Section\\n\\n body... (use \\n\\n after title, after each ##/###, between paragraphs)",
   "title": "SEO-optimized title (50-60 chars)",
-  "subtitle": "Compelling subtitle", 
+  "subtitle": "Compelling subtitle",
   "metaDescription": "Action-oriented meta description (150-160 chars)",
-  "content": "Full blog post content in markdown with proper headings",
   "tags": ["relevant", "tags"],
   "estimatedReadTime": "X min read",
   "seoKeywords": ["primary", "secondary", "semantic", "keywords"],
@@ -1865,9 +1869,7 @@ Return JSON format:
     }
   ],
   "seoOptimizationScore": "predicted score based on SEO best practices"
-}
-
-CONTENT NEWLINES (for streamed preview): In the "content" value use newlines (\\n in JSON): put a newline after the main # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders correct # Title, ## Section, and <p> blocks.`;
+}`;
   }
 
   /**
@@ -2379,7 +2381,9 @@ CRITICAL REQUIREMENTS:
 4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
 5. MOBILE-FIRST: Structure content for mobile readability and engagement
 6. FACTUAL ACCURACY: No fabricated statistics or false claims
-7. GENUINE VALUE: Every section must provide actionable insights`
+7. GENUINE VALUE: Every section must provide actionable insights
+
+STREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`
           },
           { role: 'user', content: enhancedPrompt }
         ],
