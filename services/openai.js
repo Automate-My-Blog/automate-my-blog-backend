@@ -675,11 +675,19 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
         }
       }
 
-      // Generate DALL-E images for each topic
-      for (let i = 0; i < allTopics.length; i++) {
-        streamManager.publish(connectionId, 'topic-image-start', { index: i, total: allTopics.length, topic: allTopics[i] });
-        allTopics[i].image = await this.generateTopicImage(allTopics[i]);
-        streamManager.publish(connectionId, 'topic-image-complete', { index: i, topic: allTopics[i] });
+      // Generate DALL-E images in parallel so total wait is ~one image, not N
+      const total = allTopics.length;
+      for (let i = 0; i < total; i++) {
+        streamManager.publish(connectionId, 'topic-image-start', { index: i, total, topic: allTopics[i] });
+      }
+      const imageResults = await Promise.all(
+        allTopics.map((topic, index) =>
+          this.generateTopicImage(topic).then((image) => ({ index, topic: { ...topic, image } }))
+        )
+      );
+      for (const { index, topic } of imageResults) {
+        allTopics[index] = topic;
+        streamManager.publish(connectionId, 'topic-image-complete', { index, topic });
       }
 
       streamManager.publish(connectionId, 'complete', { topics: allTopics });
