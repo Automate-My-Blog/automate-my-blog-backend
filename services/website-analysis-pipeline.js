@@ -8,6 +8,7 @@ import db from './database.js';
 import webScraperService from './webscraper.js';
 import openaiService from './openai.js';
 import { normalizeCTA } from '../utils/cta-normalizer.js';
+import { getAnalysisIconUrls } from '../utils/analysis-icons.js';
 import { v4 as uuidv4 } from 'uuid';
 
 const PROGRESS_STEPS = [
@@ -217,7 +218,7 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
  * @param {object} context - { userId?, sessionId? }
  * @param {object} opts - { onProgress?(...), onPartialResult?(segment, data)?, onStreamNarrative?(event)?, isCancelled?: () => boolean | Promise<boolean> }
  *   onPartialResult(segment, data): segment is 'analysis' | 'audiences' | 'pitches' | 'scenarios'; data is the partial result for that segment.
- *   onStreamNarrative(event): event is { type, content, progress? } for narrative stream (scraping-thought, transition, analysis-chunk, narrative-complete).
+ *   onStreamNarrative(event): event is { type, content, progress? } for narrative stream (analysis-status-update, transition, analysis-chunk, narrative-complete).
  * @returns {Promise<object>} Combined result matching current analyze-website + audiences + pitches + images API shape.
  */
 export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {}) {
@@ -502,7 +503,8 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       organizationId: org.id,
       ...(intelRow.narrative_analysis != null && { narrative: intelRow.narrative_analysis }),
       ...(intelRow.narrative_confidence != null && { narrativeConfidence: intelRow.narrative_confidence }),
-      ...(intelRow.key_insights != null && { keyInsights: intelRow.key_insights })
+      ...(intelRow.key_insights != null && { keyInsights: intelRow.key_insights }),
+      iconUrls: getAnalysisIconUrls(orgFallback)
     };
 
     let metadata = { title: null, headings: [] };
@@ -572,7 +574,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // Stream narrative thoughts so frontend shows typing effect (same UX as fresh run)
     const narrativeText = result.analysis?.narrative;
     if (narrativeText) {
-      await streamNarrative({ type: 'scraping-thought', content: 'Loading analysis from cache...', progress: 5 });
+      await streamNarrative({ type: 'analysis-status-update', content: 'Loading analysis from cache...', progress: 5 });
       const words = narrativeText.split(/(\s+)/);
       for (let i = 0; i < words.length; i++) {
         await streamNarrative({ type: 'analysis-chunk', content: words[i] });
@@ -626,7 +628,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     domain,
     initialContent: scrapedContent.title || scrapedContent.metaDescription || ''
   }).then((obs) => {
-    if (obs) return streamNarrative({ type: 'scraping-thought', content: obs, progress: 10 });
+    if (obs) return streamNarrative({ type: 'analysis-status-update', content: obs, progress: 10 });
   }).catch((e) => console.warn('⚠️ Scraping observation failed:', e?.message || e));
 
   // Normalize headings to strings (Cheerio returns { text, level, id }; Puppeteer/Playwright return strings)
@@ -668,7 +670,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     ctasFound: (storedCTAs || []).length,
     ctaTypes: ctaTypes.length ? ctaTypes : ['general']
   }).then((obs) => {
-    if (obs) return streamNarrative({ type: 'scraping-thought', content: obs, progress: 70 });
+    if (obs) return streamNarrative({ type: 'analysis-status-update', content: obs, progress: 70 });
   }).catch((e) => console.warn('⚠️ CTA observation failed:', e?.message || e));
 
   await report(0, PROGRESS_STEPS[0], 75, 30, { phase: PROGRESS_PHASES[0][6] });
@@ -761,10 +763,15 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
   await report(0, PROGRESS_STEPS[0], 100, 0, { phase: PROGRESS_PHASES[0][6] });
   if (typeof onPartialResult === 'function') {
+    const analysisWithIcons = {
+      ...analysis,
+      organizationId,
+      iconUrls: getAnalysisIconUrls(analysis)
+    };
     onPartialResult('analysis', {
       url,
       scrapedAt: scrapedContent.scrapedAt,
-      analysis: { ...analysis, organizationId },
+      analysis: analysisWithIcons,
       metadata: { title: scrapedContent.title, headings: scrapedContent.headings || [] },
       ctas: storedCTAs,
       ctaCount: storedCTAs.length,
@@ -902,7 +909,11 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     success: true,
     url,
     scrapedAt: scrapedContent.scrapedAt,
-    analysis: { ...analysis, organizationId },
+    analysis: {
+      ...analysis,
+      organizationId,
+      iconUrls: getAnalysisIconUrls(analysis)
+    },
     metadata: { title: scrapedContent.title, headings: scrapedContent.headings || [] },
     scenarios,
     ctas: storedCTAs,

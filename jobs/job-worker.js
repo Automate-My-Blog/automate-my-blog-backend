@@ -52,7 +52,7 @@ function publishJobStreamEvent(connection, jobId, event, data) {
 
 /**
  * Stream a narrative event: store in DB for replay, then publish to Redis.
- * Used for website_analysis narrative UX (scraping-thought, transition, analysis-chunk, complete).
+ * Used for website_analysis narrative UX (analysis-status-update, transition, analysis-chunk, complete).
  * @param {import('ioredis').Redis} connection - Redis connection
  * @param {string} jobId
  * @param {{ type: string, content: string, progress?: number }} event
@@ -284,6 +284,14 @@ const processor = async (bullJob) => {
       });
       publishJobStreamEvent(connection, jobId, 'failed', { error: 'Cancelled', errorCode: null });
       return;
+    }
+
+    // For website_analysis, ensure result.analysis.scenarios exists so frontend mapWebsiteAnalysisResult can use it
+    if (row.type === 'website_analysis' && result?.scenarios != null && result.analysis) {
+      result = {
+        ...result,
+        analysis: { ...result.analysis, scenarios: result.scenarios }
+      };
     }
 
     await updateJobProgress(jobId, {

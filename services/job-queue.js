@@ -279,7 +279,7 @@ export async function getJobRow(jobId) {
 
 /**
  * Append a narrative event to jobs.narrative_stream for replay on reconnect.
- * Used by job worker when streaming narrative (scraping-thought, analysis-chunk, etc.).
+ * Used by job worker when streaming narrative (analysis-status-update, analysis-chunk, etc.).
  * @param {string} jobId
  * @param {{ type: string, content: string, progress?: number, timestamp?: number }} event
  */

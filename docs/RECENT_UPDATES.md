@@ -98,7 +98,7 @@ Predictable event pacing avoids UI jank. Strict ownership (user must exist for J
 **What**  
 - **Faster research:** Website analysis uses a single batched research call (brand, competitors, keywords) instead of multiple sequential calls; progress phases are more granular so the UI can show “Researching business”, “Researching keywords & SEO”, etc.  
 - **Caching:** Website analysis results are cached by URL for up to 30 days. Cache key is URL-only (no user/session) so repeat analyses of the same site are fast.  
-- **Scraping “thoughts”:** The **scrape-phase** SSE event streams sub-steps (validating URL, launching browser, navigating, extracting, etc.) so the frontend can show a step-by-step log during “Fetching page content”.
+- **Analysis status updates:** The **scrape-phase** SSE event streams sub-steps (validating URL, launching browser, navigating, extracting, etc.) so the frontend can show a step-by-step log during “Fetching page content”. Narrative stream uses **analysis-status-update** (renamed from scraping-thought) for status copy.
 
 **Why it matters**  
 Faster analysis and cache reuse improve perceived speed; granular phases and scrape-phase events improve the “thinking” UX without changing the final result shape.

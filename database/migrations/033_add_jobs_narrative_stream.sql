@@ -1,5 +1,5 @@
 -- Migration 033: Add narrative_stream column to jobs table
--- Purpose: Store narrative events (scraping-thought, analysis-chunk, etc.) for replay on reconnect
+-- Purpose: Store narrative events (analysis-status-update, analysis-chunk, etc.) for replay on reconnect
 -- Date: February 2026
 -- Related: GitHub issue #157 - Website Analysis: Narrative-Driven Streaming Experience
 
