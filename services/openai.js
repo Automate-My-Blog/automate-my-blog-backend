@@ -451,6 +451,119 @@ Show genuine analysis, keep it conversational.`;
   }
 
   /**
+   * Generate a cleaned/suggested version of user-edited analysis fields (Issue #261).
+   * Used for "Apply suggestion" in the guided funnel Edit flow.
+   * @param {{ [key: string]: string }} editedFields - User-edited fields, e.g. { businessName, targetAudience, contentFocus }
+   * @returns {Promise<{ [key: string]: string }>} LLM-cleaned suggested values for the same keys
+   */
+  async generateCleanedEdit(editedFields) {
+    if (!editedFields || typeof editedFields !== 'object') {
+      return {};
+    }
+    const entries = Object.entries(editedFields).filter(([, v]) => v != null && String(v).trim() !== '');
+    if (entries.length === 0) return {};
+
+    const prompt = `The user edited their website analysis. Clean and polish these values for professional use. Keep the same meaning and intent; fix typos, capitalization, and wording. Return ONLY a JSON object with the same keys and cleaned string values. No explanation.
+
+User edits:
+${JSON.stringify(Object.fromEntries(entries), null, 2)}
+
+Respond with only valid JSON, e.g. {"businessName": "Acme Corp", "targetAudience": "Marketing directors at mid-size B2B companies"}`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You return only valid JSON with the same keys as the user input and cleaned string values.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 500,
+      temperature: 0.3
+    });
+
+    const text = (response.choices[0]?.message?.content || '').trim();
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed !== 'object' || parsed === null) return {};
+      const result = {};
+      for (const key of Object.keys(editedFields)) {
+        if (parsed[key] != null && typeof parsed[key] === 'string') {
+          result[key] = parsed[key].trim();
+        }
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Generate first-person audience-step narration for the guided funnel (Issue #261).
+   * @param {{ businessName?: string, targetAudience?: string, scenariosCount?: number }} context
+   * @returns {Promise<string>} Short first-person paragraph
+   */
+  async generateAudienceNarration(context = {}) {
+    const name = context.businessName || 'your business';
+    const audience = context.targetAudience || 'your ideal customers';
+    const count = context.scenariosCount ?? 0;
+    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant) speaking to the user. Say that we've identified audience segments for ${name} and that we're about to show them (${count} segments). Be warm and concise. No markdown.`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 150,
+      temperature: 0.6
+    });
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
+   * Generate first-person topic-step narration for the guided funnel (Issue #261).
+   * @param {{ businessName?: string, selectedAudience?: string, topicCount?: number }} context
+   * @returns {Promise<string>} Short first-person paragraph
+   */
+  async generateTopicNarration(context = {}) {
+    const name = context.businessName || 'your business';
+    const segment = context.selectedAudience || 'this audience';
+    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant). Say we're now picking content topics that fit ${name} and ${segment}. Be warm and concise. No markdown.`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 150,
+      temperature: 0.6
+    });
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
+   * Generate first-person content-generation-step narration for the guided funnel (Issue #261).
+   * @param {{ businessName?: string, selectedTopic?: string }} context
+   * @returns {Promise<string>} Short first-person paragraph
+   */
+  async generateContentGenerationNarration(context = {}) {
+    const name = context.businessName || 'your business';
+    const topic = context.selectedTopic || 'this topic';
+    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant). Say we're about to generate a blog post for ${name} on "${topic}". Be warm and concise. No markdown.`;
+
+    const response = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o',
+      messages: [
+        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 150,
+      temperature: 0.6
+    });
+    return (response.choices[0]?.message?.content || '').trim();
+  }
+
+  /**
    * Generate full analysis narrative as plain text for word-by-word streaming (Moment 2).
    * Active-listener snippets (echo back + brief reaction), separated by double paragraph breaks.
    * @param {object} data - Business analysis data

@@ -26,7 +26,7 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 | Event type         | When                          | Use in UI |
 |--------------------|-------------------------------|-----------|
 | `connected`        | Right after opening           | Confirm connection; `data.jobId`. |
-| `scraping-thought` | Scraping observation          | Append to Moment 1 text; show typing cursor. |
+| `analysis-status-update` | Analysis status / scraping observation | Append to Moment 1 text; show typing cursor. |
 | `transition`       | Move to analysis phase        | Fade scraping, show divider, prepare for Moment 2. |
 | `analysis-chunk`   | Word/phrase of analysis       | Append to Moment 2 text; typing effect. |
 | `narrative-complete` | Full analysis narrative done | Transition to Moment 3 (audiences from main stream). |
@@ -34,7 +34,7 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 
 ### Payload shapes
 
-**scraping-thought**
+**analysis-status-update**
 ```ts
 { content: string; progress?: number }
 ```
@@ -63,7 +63,7 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 
 ## 3. Three moments flow
 
-1. **Moment 1 — Scraping narrative:** Receive `scraping-thought` events. Append to a single "thinking" block with typing cursor.
+1. **Moment 1 — Analysis status:** Receive `analysis-status-update` events. Append to a single "thinking" block with typing cursor.
 2. **Moment 2 — Analysis narrative:** On `transition`, switch to analysis view. Append `analysis-chunk` events word-by-word.
 3. **Moment 3 — Audiences:** On `narrative-complete`, transition to audience cards. Audiences come from the **main stream** (`GET /jobs/:jobId/stream`) — `audience-complete`, `audiences-result`, etc.
 
@@ -91,7 +91,7 @@ es.addEventListener('connected', (e) => {
   setJobId(data.jobId);
 });
 
-es.addEventListener('scraping-thought', (e) => {
+es.addEventListener('analysis-status-update', (e) => {
   const data = JSON.parse(e.data);
   setScrapingNarrative((prev) => prev + (data.content || '') + ' ');
   setCurrentMoment('scraping');

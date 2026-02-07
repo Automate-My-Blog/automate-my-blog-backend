@@ -157,7 +157,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
 
 /**
  * GET /api/v1/jobs/:jobId/narrative-stream?token=JWT (or sessionId)
- * SSE stream for narrative UX (Issue #157): scraping-thought, transition, analysis-chunk, narrative-complete, complete.
+ * SSE stream for narrative UX (Issue #157): analysis-status-update, transition, analysis-chunk, narrative-complete, complete.
  * Used for website_analysis jobs. Replays stored narrative on reconnect.
  * Returns 404 if job not found, not website_analysis, or narrative stream unavailable.
  */
