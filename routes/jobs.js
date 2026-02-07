@@ -197,6 +197,8 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
+    res.write(': ok\n\n');
+    if (typeof res.flush === 'function') res.flush();
     if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
 
     writeSSE(res, 'connected', { jobId });
@@ -236,12 +238,14 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
       }
     }, 2000);
 
-    req.on('close', () => {
+    const onClose = () => {
       clearInterval(checkInterval);
       subscriber.unsubscribe(channel).catch(() => {});
       subscriber.disconnect();
       if (!res.writableEnded) res.end();
-    });
+    };
+    req.on('close', onClose);
+    res.on('close', onClose);
   } catch (e) {
     if (!res.headersSent) sendJobError(res, e, 'Failed to open narrative stream');
   }
@@ -271,7 +275,11 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-    // Send each SSE write immediately instead of buffering (helps progress updates stream in real time)
+    // Send a leading comment so proxies/clients see data immediately (reduces intermittent connection issues)
+    if (!res.writableEnded) {
+      res.write(': ok\n\n');
+      if (typeof res.flush === 'function') res.flush();
+    }
     if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
 
     const connectionId = streamManager.createConnection(res, {
@@ -280,6 +288,10 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     }, { keepalive: true, maxAgeMs: JOB_STREAM_MAX_AGE_MS });
 
     streamManager.subscribeToJob(jobId, connectionId);
+    // Wait for Redis job-events subscription so we don't miss early worker events (fixes intermittent missed events)
+    await streamManager.whenJobPatternReady();
+
+    if (res.writableEnded) return;
     writeSSE(res, 'connected', {
       connectionId,
       jobId,
@@ -297,7 +309,13 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
         });
       }
     }, timeoutWarningMs);
-    res.on('close', () => clearTimeout(warningTimer));
+
+    const cleanup = () => {
+      clearTimeout(warningTimer);
+      streamManager.unsubscribeFromJob(jobId, connectionId);
+    };
+    res.on('close', cleanup);
+    req.on('close', cleanup);
   } catch (e) {
     if (!res.headersSent) sendJobError(res, e, 'Failed to open stream');
   }
