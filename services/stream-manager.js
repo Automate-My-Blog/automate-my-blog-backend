@@ -35,6 +35,8 @@ class StreamManager extends EventEmitter {
     this._subscriber = null;
     this._redisSubscribed = false;
     this._redisJobPatternSubscribed = false;
+    /** @type {Promise<void> | null} Resolves when job-events pattern is subscribed; reused to avoid double psubscribe. */
+    this._jobPatternSubscribePromise = null;
     this._keepaliveMs = DEFAULT_KEEPALIVE_MS;
     /** @type {{ connectionIds: string[], event: string, data: object }[]} Queue so job events are sent one per tick (avoids frontend bursts). */
     this._jobEventQueue = [];
@@ -304,16 +306,35 @@ class StreamManager extends EventEmitter {
 
   /**
    * Subscribe to Redis jobs:*:events for job stream (Phase 5).
+   * Returns a Promise that resolves when the pattern is subscribed (so route can await before sending 'connected').
+   * Reuses the same promise if subscription is already in progress to avoid duplicate psubscribe.
    */
   ensureRedisJobPatternSubscriber() {
-    if (!this._subscriber || this._redisJobPatternSubscribed) return;
-    this._subscriber.psubscribe(JOB_EVENTS_PATTERN, (err) => {
-      if (err) {
-        console.error('[stream-manager] Redis psubscribe jobs:*:events error:', err?.message || err);
-        return;
-      }
-      this._redisJobPatternSubscribed = true;
+    if (!this._subscriber) return Promise.resolve();
+    if (this._redisJobPatternSubscribed) return Promise.resolve();
+    if (this._jobPatternSubscribePromise) return this._jobPatternSubscribePromise;
+    this._jobPatternSubscribePromise = new Promise((resolve, reject) => {
+      this._subscriber.psubscribe(JOB_EVENTS_PATTERN, (err) => {
+        if (err) {
+          console.error('[stream-manager] Redis psubscribe jobs:*:events error:', err?.message || err);
+          this._jobPatternSubscribePromise = null;
+          reject(err);
+          return;
+        }
+        this._redisJobPatternSubscribed = true;
+        resolve();
+      });
     });
+    return this._jobPatternSubscribePromise;
+  }
+
+  /**
+   * Wait until the job-events Redis pattern is subscribed. Call before sending 'connected' on the job stream
+   * so early worker events are not missed (fixes intermittent missed events on fast jobs).
+   */
+  async whenJobPatternReady() {
+    this.ensureRedisSubscriber();
+    return this.ensureRedisJobPatternSubscriber();
   }
 
   /**
