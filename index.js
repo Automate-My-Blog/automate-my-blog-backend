@@ -404,7 +404,8 @@ app.post('/api/v1/auth/register', async (req, res, next) => {
       password: parsed.password,
       firstName: parsed.firstName,
       lastName: parsed.lastName,
-      organizationName: parsed.organizationName
+      organizationName: parsed.organizationName,
+      websiteUrl: parsed.websiteUrl || null
     });
 
     // Send welcome and admin alert emails (async, don't block response)
