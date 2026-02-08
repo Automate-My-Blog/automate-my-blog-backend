@@ -41,6 +41,8 @@ class StreamManager extends EventEmitter {
     /** @type {{ connectionIds: string[], event: string, data: object }[]} Queue so job events are sent one per tick (avoids frontend bursts). */
     this._jobEventQueue = [];
     this._jobEventDrainScheduled = false;
+    /** @type {Map<string, () => void | Promise<void>>} Run when a connection is first established (e.g. start topic generation so events are not lost). */
+    this._pendingOnConnect = new Map();
   }
 
   /**
@@ -111,8 +113,28 @@ class StreamManager extends EventEmitter {
 
     this.connections.set(connectionId, record);
     this.ensureRedisSubscriber();
+    const pending = this._pendingOnConnect.get(connectionId);
+    if (pending) {
+      this._pendingOnConnect.delete(connectionId);
+      try {
+        const out = pending();
+        if (out && typeof out.then === 'function') out.catch((err) => console.error('[stream-manager] pendingOnConnect error:', err?.message || err));
+      } catch (err) {
+        console.error('[stream-manager] pendingOnConnect error:', err?.message || err);
+      }
+    }
     this.emit('connection', { connectionId, ...context });
     return connectionId;
+  }
+
+  /**
+   * Register a callback to run when a client connects with this connectionId (GET /stream/:connectionId).
+   * Use for topic/audience streams so generation starts after the connection exists and events are not lost.
+   * @param {string} connectionId
+   * @param {() => void | Promise<void>} callback
+   */
+  registerPendingOnConnect(connectionId, callback) {
+    if (connectionId && typeof callback === 'function') this._pendingOnConnect.set(connectionId, callback);
   }
 
   /**
