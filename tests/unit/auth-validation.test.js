@@ -52,6 +52,42 @@ describe('lib/auth-validation', () => {
         })
       ).toThrow(ValidationError);
     });
+
+    it('accepts optional websiteUrl and returns it when valid', () => {
+      const out = validateRegistrationInput({
+        email: 'u@v.com',
+        password: 'password123',
+        firstName: 'A',
+        lastName: 'B',
+        organizationName: 'C',
+        websiteUrl: 'https://example.com'
+      });
+      expect(out.websiteUrl).toBe('https://example.com');
+    });
+
+    it('returns null websiteUrl when omitted', () => {
+      const out = validateRegistrationInput({
+        email: 'u@v.com',
+        password: 'password123',
+        firstName: 'A',
+        lastName: 'B',
+        organizationName: 'C'
+      });
+      expect(out.websiteUrl).toBeNull();
+    });
+
+    it('throws ValidationError for invalid websiteUrl when provided', () => {
+      expect(() =>
+        validateRegistrationInput({
+          email: 'a@b.com',
+          password: 'password123',
+          firstName: 'A',
+          lastName: 'B',
+          organizationName: 'C',
+          websiteUrl: 'not-a-url'
+        })
+      ).toThrow(ValidationError);
+    });
   });
 
   describe('validateLoginInput', () => {

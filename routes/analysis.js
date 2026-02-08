@@ -497,13 +497,11 @@ router.put('/update', async (req, res) => {
  * Guided funnel (Issue #261): Record analysis confirmation and optional edit metadata.
  * Body: { organizationId: string, analysisConfirmed?: boolean, analysisEdited?: boolean, editedFields?: string[] }
  * Also accepts analysis field updates (businessName, targetAudience, contentFocus, etc.) to persist in one call.
+ * Allowed for anonymous users: org resolved by session or by organizationId when no auth/session.
  */
 router.post('/confirm', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    const validationError = validateUserContext(userContext);
-    if (validationError) return res.status(401).json(validationError);
-
     const {
       organizationId,
       analysisConfirmed = true,
@@ -513,6 +511,8 @@ router.post('/confirm', async (req, res) => {
     } = req.body;
 
     if (!organizationId) {
+      const validationError = validateUserContext(userContext);
+      if (validationError) return res.status(401).json(validationError);
       return res.status(400).json({
         success: false,
         error: 'organizationId is required',
@@ -532,7 +532,7 @@ router.post('/confirm', async (req, res) => {
         [organizationId, userContext.sessionId]
       );
     } else {
-      orgCheck = { rows: [] };
+      orgCheck = await db.query('SELECT id FROM organizations WHERE id = $1', [organizationId]);
     }
 
     if (orgCheck.rows.length === 0) {
@@ -611,13 +611,10 @@ router.post('/confirm', async (req, res) => {
  * Guided funnel (Issue #261): Return LLM-cleaned suggestion for user-edited analysis fields ("Apply suggestion").
  * Body: { editedFields: { businessName?: string, targetAudience?: string, contentFocus?: string, ... } }
  * Returns: { suggested: { businessName?: string, ... } }
+ * Allowed for anonymous users (no auth/session required).
  */
 router.post('/cleaned-edit', async (req, res) => {
   try {
-    const userContext = extractUserContext(req);
-    const validationError = validateUserContext(userContext);
-    if (validationError) return res.status(401).json(validationError);
-
     const { editedFields } = req.body;
     if (!editedFields || typeof editedFields !== 'object') {
       return res.status(400).json({
