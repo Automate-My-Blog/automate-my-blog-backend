@@ -5,11 +5,14 @@
  * Body: { businessType, targetAudience, contentFocus }
  * Returns 200 { connectionId, streamUrl }. Stream via GET /api/v1/stream/:connectionId?token=
  * Events: topic-complete, topic-image-start, topic-image-complete, complete, error.
+ *
+ * Topic generation starts when the client opens the stream (not before), so events are not lost.
  */
 
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import openaiService from '../services/openai.js';
+import streamManager from '../services/stream-manager.js';
 
 const router = express.Router();
 
@@ -45,7 +48,8 @@ async function handleGenerateStream(req, res) {
         ? `${baseUrl}/api/v1/stream/${connectionId}?sessionId=${encodeURIComponent(userContext.sessionId)}`
         : `${baseUrl}/api/v1/stream/${connectionId}`;
 
-    setImmediate(() => {
+    // Start topic generation only when client opens GET /stream/:connectionId (avoids losing events)
+    streamManager.registerPendingOnConnect(connectionId, () => {
       openaiService.generateTrendingTopicsStream(
         businessType,
         targetAudience,
