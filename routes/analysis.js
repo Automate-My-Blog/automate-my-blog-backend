@@ -692,9 +692,7 @@ router.get('/narration/audience', async (req, res) => {
     }
 
     let org = await getOrganizationForContext(organizationId, userContext);
-    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
-      org = await getOrganizationById(organizationId);
-    }
+    if (!org) org = await getOrganizationById(organizationId);
     if (!org) {
       return res.status(404).json({
         success: false,
@@ -763,9 +761,7 @@ router.get('/narration/topic', async (req, res) => {
     }
 
     let org = await getOrganizationForContext(organizationId, userContext);
-    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
-      org = await getOrganizationById(organizationId);
-    }
+    if (!org) org = await getOrganizationById(organizationId);
     if (!org) {
       return res.status(404).json({
         success: false,
@@ -825,9 +821,7 @@ router.get('/narration/content', async (req, res) => {
     }
 
     let org = await getOrganizationForContext(organizationId, userContext);
-    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
-      org = await getOrganizationById(organizationId);
-    }
+    if (!org) org = await getOrganizationById(organizationId);
     if (!org) {
       return res.status(404).json({
         success: false,
