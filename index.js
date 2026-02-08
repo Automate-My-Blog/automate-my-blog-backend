@@ -66,28 +66,8 @@ const PORT = process.env.PORT || 3001;
 // Configure Express to trust Vercel proxy for accurate IP detection
 app.set('trust proxy', 1);
 
-// Rate limiting with Vercel-compatible configuration
-// Higher limits for development, stricter for production
-const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
-const isDev = process.env.NODE_ENV === 'development';
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDevelopment ? 1000 : 100, // Higher limit for dev (1000), stricter for production (100)
-  message: {
-    error: 'Too many requests from this IP, please try again later.'
-  },
-  // Use default key generator which properly handles IPv6
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting for health checks
-    return req.path === '/health';
-  }
-});
-
-// Middleware
-app.use(limiter);
-// CORS configuration - allow frontend origins (production, Vercel previews, local dev)
+// CORS must run before rate limiter so every response (including 429) has CORS headers;
+// otherwise the browser blocks with "No 'Access-Control-Allow-Origin' header" on errors.
 const allowedOriginList = [
   'https://automatemyblog.com',
   'https://www.automatemyblog.com',
@@ -105,12 +85,9 @@ const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim
 const allAllowedOrigins = [...allowedOriginList, ...extraOrigins];
 
 function corsOrigin(origin, callback) {
-  // Same-origin or non-browser (no Origin header) - allow
   if (!origin) return callback(null, true);
   if (allAllowedOrigins.includes(origin)) return callback(null, true);
-  // Vercel preview deployments (*.vercel.app)
   if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return callback(null, true);
-  // Dev mode: allow any localhost / 127.0.0.1 (any port) so local frontends always work
   if (process.env.NODE_ENV === 'development') {
     try {
       const u = new URL(origin);
@@ -127,6 +104,22 @@ app.use(cors({
   credentials: true,
   optionsSuccessStatus: 204
 }));
+
+// Rate limiting (after CORS so error responses still have CORS headers)
+const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
+const isDev = process.env.NODE_ENV === 'development';
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: isDevelopment ? 1000 : 100,
+  message: {
+    error: 'Too many requests from this IP, please try again later.'
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/health'
+});
+
+app.use(limiter);
 
 // Body parsing - raw for webhook, JSON for everything else
 app.use((req, res, next) => {
