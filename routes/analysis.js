@@ -18,7 +18,8 @@ const safeParse = (jsonString, fieldName, recordId) => {
 };
 
 const extractUserContext = (req) => {
-  const sessionId = req.headers['x-session-id'] || req.body?.session_id;
+  // Session: header (POST/any), body (POST), or query (GET — e.g. EventSource can't send headers)
+  const sessionId = req.headers['x-session-id'] || req.body?.session_id || req.query?.sessionId || null;
   
   // Enhanced debugging for authentication issues
   console.log('🔍 extractUserContext debug (analysis):', {
@@ -49,13 +50,13 @@ const extractUserContext = (req) => {
 
 const validateUserContext = (context) => {
   if (!context.isAuthenticated && !context.sessionId) {
-    throw new Error('Either authentication or session ID is required');
+    return {
+      success: false,
+      error: 'Authentication or session required',
+      message: 'Either sign in or provide x-session-id so the organization can be resolved.'
+    };
   }
-  console.log('✅ validateUserContext passed:', {
-    isAuthenticated: context.isAuthenticated,
-    hasSessionId: !!context.sessionId,
-    userId: context.userId
-  });
+  return null;
 };
 
 /**
@@ -191,8 +192,9 @@ router.post('/adopt-session', async (req, res) => {
 router.get('/recent', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
-    
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
+
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
         success: false,
@@ -664,6 +666,16 @@ async function getOrganizationForContext(organizationId, userContext) {
   return null;
 }
 
+/** Helper: get org by id only (for anonymous narration — no ownership check). */
+async function getOrganizationById(organizationId) {
+  if (!organizationId) return null;
+  const r = await db.query(
+    'SELECT id, name, target_audience FROM organizations WHERE id = $1',
+    [organizationId]
+  );
+  return r.rows[0] || null;
+}
+
 /**
  * GET /api/v1/analysis/narration/audience?organizationId=xxx
  * SSE stream: audience-narration-chunk (payload { text }), audience-narration-complete (payload { text? }).
@@ -671,11 +683,10 @@ async function getOrganizationForContext(organizationId, userContext) {
 router.get('/narration/audience', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    const validationError = validateUserContext(userContext);
-    if (validationError) return res.status(401).json(validationError);
-
     const organizationId = req.query.organizationId;
     if (!organizationId) {
+      const validationError = validateUserContext(userContext);
+      if (validationError) return res.status(401).json(validationError);
       return res.status(400).json({
         success: false,
         error: 'organizationId is required',
@@ -683,7 +694,10 @@ router.get('/narration/audience', async (req, res) => {
       });
     }
 
-    const org = await getOrganizationForContext(organizationId, userContext);
+    let org = await getOrganizationForContext(organizationId, userContext);
+    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
+      org = await getOrganizationById(organizationId);
+    }
     if (!org) {
       return res.status(404).json({
         success: false,
@@ -740,11 +754,10 @@ router.get('/narration/audience', async (req, res) => {
 router.get('/narration/topic', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    const validationError = validateUserContext(userContext);
-    if (validationError) return res.status(401).json(validationError);
-
     const { organizationId, selectedAudience } = req.query;
     if (!organizationId) {
+      const validationError = validateUserContext(userContext);
+      if (validationError) return res.status(401).json(validationError);
       return res.status(400).json({
         success: false,
         error: 'organizationId is required',
@@ -752,7 +765,10 @@ router.get('/narration/topic', async (req, res) => {
       });
     }
 
-    const org = await getOrganizationForContext(organizationId, userContext);
+    let org = await getOrganizationForContext(organizationId, userContext);
+    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
+      org = await getOrganizationById(organizationId);
+    }
     if (!org) {
       return res.status(404).json({
         success: false,
@@ -800,11 +816,10 @@ router.get('/narration/topic', async (req, res) => {
 router.get('/narration/content', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    const validationError = validateUserContext(userContext);
-    if (validationError) return res.status(401).json(validationError);
-
     const { organizationId, selectedTopic } = req.query;
     if (!organizationId) {
+      const validationError = validateUserContext(userContext);
+      if (validationError) return res.status(401).json(validationError);
       return res.status(400).json({
         success: false,
         error: 'organizationId is required',
@@ -812,7 +827,10 @@ router.get('/narration/content', async (req, res) => {
       });
     }
 
-    const org = await getOrganizationForContext(organizationId, userContext);
+    let org = await getOrganizationForContext(organizationId, userContext);
+    if (!org && !userContext.isAuthenticated && !userContext.sessionId) {
+      org = await getOrganizationById(organizationId);
+    }
     if (!org) {
       return res.status(404).json({
         success: false,
@@ -868,7 +886,8 @@ router.post('/discover-content', async (req, res) => {
     });
 
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
 
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
@@ -986,7 +1005,8 @@ router.post('/discover-content', async (req, res) => {
 router.get('/blog-content/:orgId', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
 
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
@@ -1106,7 +1126,8 @@ router.get('/blog-content/:orgId', async (req, res) => {
 router.get('/cta-analysis/:orgId', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
 
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
@@ -1187,7 +1208,8 @@ router.get('/cta-analysis/:orgId', async (req, res) => {
 router.get('/internal-links/:orgId', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
 
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
@@ -1298,7 +1320,8 @@ router.get('/internal-links/:orgId', async (req, res) => {
 router.get('/comprehensive-summary/:orgId', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
-    validateUserContext(userContext);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(401).json(validationError);
 
     if (!userContext.isAuthenticated) {
       return res.status(401).json({
