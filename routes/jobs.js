@@ -17,6 +17,21 @@ const authService = new DatabaseAuthService();
 /** Job stream connection timeout. Vercel serverless limit is 300s; use 250s to close gracefully before timeout. */
 const JOB_STREAM_MAX_AGE_MS = 250 * 1000;
 
+/** Retry getJobStatus when null (avoids 404 on create→stream race / read-after-write). */
+const JOB_STATUS_RETRIES = 4;
+const JOB_STATUS_RETRY_DELAY_MS = 80;
+
+async function getJobStatusWithRetry(jobId, ctx) {
+  for (let attempt = 0; attempt < JOB_STATUS_RETRIES; attempt++) {
+    const status = await jobQueue.getJobStatus(jobId, ctx);
+    if (status) return status;
+    if (attempt < JOB_STATUS_RETRIES - 1) {
+      await new Promise((r) => setTimeout(r, JOB_STATUS_RETRY_DELAY_MS * (attempt + 1)));
+    }
+  }
+  return null;
+}
+
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
   const sessionId = req.headers['x-session-id'] || req.body?.sessionId || req.query?.sessionId || null;
@@ -261,7 +276,8 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
   try {
     const { jobId } = req.params;
     const ctx = getJobContext(req);
-    const status = await jobQueue.getJobStatus(jobId, ctx);
+    // Retry when null to avoid 404 on create→stream race (read-after-write / replica lag)
+    const status = await getJobStatusWithRetry(jobId, ctx);
     if (!status) {
       return res.status(404).json({
         success: false,
@@ -298,6 +314,30 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
       maxAgeSeconds: Math.floor(JOB_STREAM_MAX_AGE_MS / 1000),
       hint: 'If stream closes before job completes, poll GET /jobs/:jobId/status'
     });
+
+    // Catch-up: send current job state so frontend is never stuck (handles missed events during subscription or fast job completion)
+    if (!res.writableEnded) {
+      const current = await jobQueue.getJobStatus(jobId, ctx);
+      if (current) {
+        if (current.status === 'succeeded') {
+          writeSSE(res, 'complete', { result: current.result ?? null });
+          streamManager.unsubscribeFromJob(jobId, connectionId);
+          res.end();
+          return;
+        }
+        if (current.status === 'failed') {
+          writeSSE(res, 'failed', { error: current.error ?? 'Job failed', errorCode: current.errorCode ?? null });
+          streamManager.unsubscribeFromJob(jobId, connectionId);
+          res.end();
+          return;
+        }
+        writeSSE(res, 'progress-update', {
+          progress: current.progress ?? 0,
+          currentStep: current.currentStep ?? null,
+          estimatedTimeRemaining: current.estimatedTimeRemaining ?? null
+        });
+      }
+    }
 
     // Send stream-timeout event 10s before closing so frontend can fall back to polling
     const timeoutWarningMs = JOB_STREAM_MAX_AGE_MS - 10 * 1000;
