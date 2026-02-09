@@ -9,11 +9,11 @@ on:
       - 'database/**/*.sql'
     types: [opened, synchronize, reopened]
   push:
-    branches: [main]
+    branches: [main, staging]
     paths:
       - 'database/**/*.sql'
   merge_group:
-    branches: [main]
+    branches: [main, staging]
 
 jobs:
   validate-migrations:

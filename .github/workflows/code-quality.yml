@@ -2,11 +2,11 @@ name: Code Quality Checks
 
 on:
   pull_request:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
   push:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
   merge_group:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
 
 jobs:
   code-quality:
