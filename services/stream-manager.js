@@ -9,13 +9,18 @@ import { v4 as uuidv4 } from 'uuid';
 import { getConnection } from './job-queue.js';
 import { writeSSE, sendKeepalive, DEFAULT_KEEPALIVE_MS } from '../utils/streaming-helpers.js';
 
-import { getJobEventsChannel as getJobEventsChannelUtil, JOB_EVENTS_PATTERN } from '../utils/job-stream-channels.js';
+import {
+  getJobEventsChannel as getJobEventsChannelUtil,
+  JOB_EVENTS_PATTERN,
+  JOB_NARRATIVE_PATTERN
+} from '../utils/job-stream-channels.js';
 
 const STREAM_CHANNEL_PREFIX = 'stream:';
 const STREAM_CHANNEL_PATTERN = 'stream:*';
 /** Redis channel for job progress events: jobs:{jobId}:events (Phase 5) */
 export const JOB_EVENTS_CHANNEL_PREFIX = 'jobs:';
 const JOB_EVENTS_CHANNEL_SUFFIX = ':events';
+const JOB_NARRATIVE_SUFFIX = ':narrative';
 
 /**
  * Single SSE connection record.
@@ -31,12 +36,17 @@ class StreamManager extends EventEmitter {
     this.connections = new Map();
     /** @type {Map<string, Set<string>>} jobId -> Set<connectionId> (Phase 5) */
     this.jobSubscriptions = new Map();
+    /** @type {Map<string, Set<import('express').Response>>} jobId -> Set<res> for narrative stream (shared subscriber). */
+    this.narrativeStreams = new Map();
     /** @type {import('ioredis').Redis | null} */
     this._subscriber = null;
     this._redisSubscribed = false;
     this._redisJobPatternSubscribed = false;
+    this._redisNarrativePatternSubscribed = false;
     /** @type {Promise<void> | null} Resolves when job-events pattern is subscribed; reused to avoid double psubscribe. */
     this._jobPatternSubscribePromise = null;
+    /** @type {Promise<void> | null} Resolves when narrative pattern is subscribed. */
+    this._narrativePatternSubscribePromise = null;
     this._keepaliveMs = DEFAULT_KEEPALIVE_MS;
     /** @type {{ connectionIds: string[], event: string, data: object }[]} Queue so job events are sent one per tick (avoids frontend bursts). */
     this._jobEventQueue = [];
@@ -302,6 +312,26 @@ class StreamManager extends EventEmitter {
           }
           return;
         }
+        if (channel.startsWith(JOB_EVENTS_CHANNEL_PREFIX) && channel.endsWith(JOB_NARRATIVE_SUFFIX)) {
+          const jobId = channel.slice(JOB_EVENTS_CHANNEL_PREFIX.length, channel.length - JOB_NARRATIVE_SUFFIX.length);
+          const set = this.narrativeStreams.get(jobId);
+          if (!set || set.size === 0) return;
+          try {
+            const item = JSON.parse(message);
+            const payload = { content: item.content ?? '', ...(item.progress != null && { progress: item.progress }) };
+            for (const res of set) {
+              if (res.writableEnded) {
+                set.delete(res);
+                continue;
+              }
+              writeSSE(res, item.type, payload);
+            }
+            if (set.size === 0) this.narrativeStreams.delete(jobId);
+          } catch (e) {
+            console.error('[stream-manager] Invalid Redis narrative message:', e?.message || e);
+          }
+          return;
+        }
         if (channel.startsWith(JOB_EVENTS_CHANNEL_PREFIX) && channel.endsWith(JOB_EVENTS_CHANNEL_SUFFIX)) {
           const jobId = channel.slice(JOB_EVENTS_CHANNEL_PREFIX.length, channel.length - JOB_EVENTS_CHANNEL_SUFFIX.length);
           const set = this.jobSubscriptions.get(jobId);
@@ -357,6 +387,61 @@ class StreamManager extends EventEmitter {
   async whenJobPatternReady() {
     this.ensureRedisSubscriber();
     return this.ensureRedisJobPatternSubscriber();
+  }
+
+  /**
+   * Wait until the narrative Redis pattern is subscribed. Call before registering a narrative stream so early events are not missed.
+   */
+  async whenNarrativePatternReady() {
+    this.ensureRedisSubscriber();
+    return this.ensureRedisNarrativePatternSubscriber();
+  }
+
+  /**
+   * Subscribe to Redis jobs:*:narrative (one shared subscriber for all narrative streams; reduces Redis connections).
+   */
+  ensureRedisNarrativePatternSubscriber() {
+    if (!this._subscriber) return Promise.resolve();
+    if (this._redisNarrativePatternSubscribed) return Promise.resolve();
+    if (this._narrativePatternSubscribePromise) return this._narrativePatternSubscribePromise;
+    this._narrativePatternSubscribePromise = new Promise((resolve, reject) => {
+      this._subscriber.psubscribe(JOB_NARRATIVE_PATTERN, (err) => {
+        if (err) {
+          console.error('[stream-manager] Redis psubscribe jobs:*:narrative error:', err?.message || err);
+          this._narrativePatternSubscribePromise = null;
+          reject(err);
+          return;
+        }
+        this._redisNarrativePatternSubscribed = true;
+        resolve();
+      });
+    });
+    return this._narrativePatternSubscribePromise;
+  }
+
+  /**
+   * Register a response for narrative stream (shared Redis subscriber). Call unregister on close/complete.
+   * @param {string} jobId
+   * @param {import('express').Response} res
+   */
+  registerNarrativeStream(jobId, res) {
+    if (!this.narrativeStreams.has(jobId)) this.narrativeStreams.set(jobId, new Set());
+    this.narrativeStreams.get(jobId).add(res);
+    this.ensureRedisSubscriber();
+    this.ensureRedisNarrativePatternSubscriber();
+  }
+
+  /**
+   * Unregister a response from narrative stream (e.g. on client disconnect or stream complete).
+   * @param {string} jobId
+   * @param {import('express').Response} res
+   */
+  unregisterNarrativeStream(jobId, res) {
+    const set = this.narrativeStreams.get(jobId);
+    if (set) {
+      set.delete(res);
+      if (set.size === 0) this.narrativeStreams.delete(jobId);
+    }
   }
 
   /**

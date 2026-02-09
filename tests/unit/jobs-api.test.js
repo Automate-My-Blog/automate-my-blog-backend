@@ -2,7 +2,7 @@
  * Unit tests: Jobs API routes (create, status, retry, cancel).
  * Uses minimal Express app with mocked job-queue and mock auth.
  */
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach, afterAll } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -10,12 +10,34 @@ const mockCreateJob = vi.fn();
 const mockGetJobStatus = vi.fn();
 const mockRetryJob = vi.fn();
 const mockCancelJob = vi.fn();
+const mockGetJobRow = vi.fn();
+const mockGetNarrativeStream = vi.fn();
+const mockGetConnection = vi.fn();
 
 vi.mock('../../services/job-queue.js', () => ({
   createJob: (...args) => mockCreateJob(...args),
   getJobStatus: (...args) => mockGetJobStatus(...args),
   retryJob: (...args) => mockRetryJob(...args),
   cancelJob: (...args) => mockCancelJob(...args),
+  getJobRow: (...args) => mockGetJobRow(...args),
+  getNarrativeStream: (...args) => mockGetNarrativeStream(...args),
+  getConnection: () => mockGetConnection(),
+}));
+
+const mockWhenNarrativePatternReady = vi.fn().mockResolvedValue(undefined);
+const mockRegisterNarrativeStream = vi.fn();
+const mockUnregisterNarrativeStream = vi.fn();
+
+vi.mock('../../services/stream-manager.js', () => ({
+  default: {
+    whenNarrativePatternReady: () => mockWhenNarrativePatternReady(),
+    registerNarrativeStream: (...args) => mockRegisterNarrativeStream(...args),
+    unregisterNarrativeStream: (...args) => mockUnregisterNarrativeStream(...args),
+    createConnection: vi.fn(),
+    subscribeToJob: vi.fn(),
+    unsubscribeFromJob: vi.fn(),
+    whenJobPatternReady: vi.fn().mockResolvedValue(undefined),
+  },
 }));
 
 /** Mock auth: set req.user when x-test-user-id present; x-session-id passed through. */
@@ -42,6 +64,12 @@ describe('jobs api', () => {
     mockGetJobStatus.mockReset();
     mockRetryJob.mockReset();
     mockCancelJob.mockReset();
+    mockGetJobRow.mockReset();
+    mockGetNarrativeStream.mockReset();
+    mockGetConnection.mockReset();
+    mockWhenNarrativePatternReady.mockReset();
+    mockRegisterNarrativeStream.mockReset();
+    mockUnregisterNarrativeStream.mockReset();
   });
 
   describe('POST /api/v1/jobs/website-analysis', () => {
@@ -229,5 +257,67 @@ describe('jobs api', () => {
         .expect(200);
       expect(res.body.cancelled).toBe(true);
     });
+  });
+
+  describe('GET /api/v1/jobs/:jobId/narrative-stream', () => {
+    it('returns 401 without auth or session', async () => {
+      await request(app).get('/api/v1/jobs/j1/narrative-stream').expect(401);
+      expect(mockGetJobStatus).not.toHaveBeenCalled();
+    });
+
+    it('returns 404 when job not found', async () => {
+      mockGetJobStatus.mockResolvedValue(null);
+      await request(app)
+        .get('/api/v1/jobs/j1/narrative-stream')
+        .set('x-test-user-id', 'u1')
+        .expect(404);
+      expect(mockGetJobStatus).toHaveBeenCalledWith('j1', { userId: 'u1', sessionId: null });
+    });
+
+    it('returns 404 when job type is not website_analysis', async () => {
+      mockGetJobStatus.mockResolvedValue({ jobId: 'j1', status: 'succeeded' });
+      mockGetJobRow.mockResolvedValue({ id: 'j1', type: 'content_generation' });
+      await request(app)
+        .get('/api/v1/jobs/j1/narrative-stream')
+        .set('x-test-user-id', 'u1')
+        .expect(404);
+      expect(mockGetJobRow).toHaveBeenCalledWith('j1');
+    });
+
+    it('returns 503 when Redis is not configured', async () => {
+      mockGetJobStatus.mockResolvedValue({ jobId: 'j1', status: 'running' });
+      mockGetJobRow.mockResolvedValue({ id: 'j1', type: 'website_analysis' });
+      mockGetConnection.mockReturnValue(null);
+      await request(app)
+        .get('/api/v1/jobs/j1/narrative-stream')
+        .set('x-test-user-id', 'u1')
+        .expect(503);
+    });
+
+    it('returns 200 with SSE, replays stored narrative, and uses shared stream-manager', async () => {
+      mockGetJobStatus.mockResolvedValue({ jobId: 'j1', status: 'succeeded' });
+      mockGetJobRow.mockResolvedValue({ id: 'j1', type: 'website_analysis' });
+      mockGetConnection.mockReturnValue({});
+      mockGetNarrativeStream.mockResolvedValue([
+        { type: 'analysis-status-update', content: 'Starting...', progress: 10 },
+      ]);
+      mockWhenNarrativePatternReady.mockResolvedValue(undefined);
+
+      // Stream ends when the 2s poll sees job succeeded (~2s)
+      const res = await request(app)
+        .get('/api/v1/jobs/j1/narrative-stream')
+        .set('x-test-user-id', 'u1')
+        .expect(200)
+        .expect('Content-Type', /text\/event-stream/)
+        .timeout(5000);
+
+      expect(res.text).toMatch(/event: connected/);
+      expect(res.text).toMatch(/event: analysis-status-update/);
+      expect(res.text).toMatch(/Starting\.\.\./);
+      expect(mockGetNarrativeStream).toHaveBeenCalledWith('j1');
+      expect(mockWhenNarrativePatternReady).toHaveBeenCalled();
+      expect(mockRegisterNarrativeStream).toHaveBeenCalledWith('j1', expect.any(Object));
+      expect(mockUnregisterNarrativeStream).toHaveBeenCalledWith('j1', expect.any(Object));
+    }, 6000);
   });
 });
