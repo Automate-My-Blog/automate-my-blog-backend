@@ -3,11 +3,11 @@ name: Smoke Test
 
 on:
   push:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
   pull_request:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
   merge_group:
-    branches: [main, test/unit-tests]
+    branches: [main, staging, test/unit-tests]
 
 jobs:
   smoke:
