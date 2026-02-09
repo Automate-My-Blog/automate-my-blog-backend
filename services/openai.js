@@ -181,8 +181,9 @@ export class OpenAIService {
       report('Analyzing business from content');
       const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
       console.log('Using OpenAI model for final analysis:', model);
-      
-      const completion = await openai.chat.completions.create({
+
+      const analyzeCompletionTimeoutMs = Math.max(15000, parseInt(process.env.OPENAI_ANALYZE_WEBSITE_TIMEOUT_MS || '90000', 10));
+      const completionPromise = openai.chat.completions.create({
         model: model,
         messages: [
           { role: 'system', content: getWebsiteAnalysisSystemMessage() },
@@ -191,6 +192,15 @@ export class OpenAIService {
         temperature: 0.3,
         max_tokens: 2000  // Basic business analysis only (scenarios generated separately)
       });
+      const completion = await Promise.race([
+        completionPromise,
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`OpenAI website analysis timed out after ${analyzeCompletionTimeoutMs}ms`)),
+            analyzeCompletionTimeoutMs
+          )
+        )
+      ]);
 
       console.log('OpenAI request completed successfully');
       console.log('Response choices:', completion.choices?.length || 0);
