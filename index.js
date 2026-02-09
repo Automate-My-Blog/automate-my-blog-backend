@@ -98,6 +98,34 @@ function corsOrigin(origin, callback) {
   callback(null, false);
 }
 
+function isOriginAllowed(origin) {
+  if (!origin) return false;
+  if (allAllowedOrigins.includes(origin)) return true;
+  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return true;
+  if (process.env.NODE_ENV === 'development') {
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+    } catch (_) { /* ignore */ }
+  }
+  return false;
+}
+
+// Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
+// The browser sends OPTIONS first; without these headers the actual request is blocked.
+app.use((req, res, next) => {
+  if (req.method !== 'OPTIONS') return next();
+  const origin = req.headers.origin;
+  if (isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  res.status(204).end();
+});
+
 app.use(cors({
   origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

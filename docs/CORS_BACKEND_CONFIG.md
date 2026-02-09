@@ -64,6 +64,12 @@ For staging, the backend must send `Access-Control-Allow-Origin: https://staging
 
 **Preflight:** If the backend receives `OPTIONS` requests, respond with `204` and the same CORS headers so the browser can complete the actual request.
 
+### Vercel: Deployment Protection and OPTIONS
+
+If the backend code allows the origin and handles OPTIONS but you still see "No 'Access-Control-Allow-Origin' header" on preflight:
+
+- **Deployment Protection** can answer OPTIONS before the request reaches your serverless function, and that response may not include CORS headers. In **Vercel** → Project → **Settings** → **Deployment Protection**, check **OPTIONS Allowlist** and add paths (e.g. `/api/*`) so OPTIONS requests are forwarded to your app, which then responds with CORS headers.
+
 ---
 
 The frontend cannot fix CORS; the server must send the `Access-Control-Allow-Origin` header (or allow the origin in its CORS config).
