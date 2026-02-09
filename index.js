@@ -533,13 +533,25 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
   }
 });
 
-// Analyze website endpoint
+// Analyze website endpoint — request timeout so we never hang indefinitely
+const ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS = Math.max(60000, parseInt(process.env.ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS || '120000', 10));
+
 app.post('/api/analyze-website', async (req, res) => {
   console.log('=== Website Analysis Request ===');
   console.log('Request body:', req.body);
   console.log('Headers:', req.headers);
   console.log('User-Agent:', req.headers['user-agent']);
-  
+
+  req.setTimeout(ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS, function () {
+    if (!res.headersSent) {
+      console.warn('⚠️ /api/analyze-website request timeout after', ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS, 'ms');
+      res.status(504).json({
+        error: 'Gateway Timeout',
+        message: 'Website analysis took too long. Try the async job (POST /api/v1/jobs/website-analysis) for long-running analysis.'
+      });
+    }
+  });
+
   try {
     const { url } = req.body;
 
@@ -1160,7 +1172,7 @@ app.post('/api/analyze-website', async (req, res) => {
       keyInsightsCount: response.analysis.keyInsights?.length || 0
     });
     console.log('Sending successful response');
-    res.json(response);
+    if (!res.headersSent) res.json(response);
 
   } catch (error) {
     console.error('=== Website Analysis Error ===');
@@ -1168,11 +1180,12 @@ app.post('/api/analyze-website', async (req, res) => {
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
     console.error('================================');
-    
-    res.status(500).json({
-      error: 'Analysis failed',
-      message: error.message
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Analysis failed',
+        message: error.message
+      });
+    }
   }
 });
 

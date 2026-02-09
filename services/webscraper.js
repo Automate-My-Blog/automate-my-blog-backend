@@ -12,6 +12,25 @@ export class WebScraperService {
     this.waitForContentTimeoutMs = Math.max(2000, parseInt(process.env.SCRAPE_WAIT_FOR_CONTENT_TIMEOUT_MS, 10)) || 8000;
     this.fastPathTimeoutMs = Math.max(2000, parseInt(process.env.SCRAPE_FAST_PATH_TIMEOUT_MS, 10)) || 5000;
     this.fastPathMinContentChars = Math.max(200, parseInt(process.env.SCRAPE_FAST_PATH_MIN_CONTENT_CHARS, 10)) || 500;
+    this.browserLaunchTimeoutMs = Math.max(5000, parseInt(process.env.SCRAPE_BROWSER_LAUNCH_TIMEOUT_MS, 10)) || 25000;
+  }
+
+  /**
+   * Run a promise with a timeout so browser launch never hangs indefinitely.
+   * @param {Promise<T>} promise
+   * @param {string} label - For error message
+   * @returns {Promise<T>}
+   */
+  _withLaunchTimeout(promise, label) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`${label} timed out after ${this.browserLaunchTimeoutMs}ms`)),
+          this.browserLaunchTimeoutMs
+        )
+      )
+    ]);
   }
 
   /**
@@ -222,7 +241,10 @@ export class WebScraperService {
       
       this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching browser');
       console.log('🌐 Launching browser...');
-      browser = await puppeteer.launch(puppeteerConfig);
+      browser = await this._withLaunchTimeout(
+        puppeteer.launch(puppeteerConfig),
+        'Puppeteer launch'
+      );
       console.log('✅ Browser launched successfully');
 
       page = await browser.newPage();
@@ -608,7 +630,10 @@ export class WebScraperService {
       
       this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching Playwright browser');
       console.log('🌐 Launching Playwright browser...');
-      browser = await chromium.launch(playwrightConfig);
+      browser = await this._withLaunchTimeout(
+        chromium.launch(playwrightConfig),
+        'Playwright launch'
+      );
       console.log('✅ Playwright browser launched successfully');
 
       page = await browser.newPage();
