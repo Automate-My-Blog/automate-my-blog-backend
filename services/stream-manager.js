@@ -380,13 +380,21 @@ class StreamManager extends EventEmitter {
     return this._jobPatternSubscribePromise;
   }
 
+  /** Max wait for Redis job-events pattern subscription (serverless cold start / slow Redis). */
+  static JOB_PATTERN_READY_TIMEOUT_MS = 5000;
+
   /**
    * Wait until the job-events Redis pattern is subscribed. Call before sending 'connected' on the job stream
    * so early worker events are not missed (fixes intermittent missed events on fast jobs).
+   * Resolves after JOB_PATTERN_READY_TIMEOUT_MS even if Redis is not ready, so the stream never hangs (e.g. on Vercel).
    */
   async whenJobPatternReady() {
     this.ensureRedisSubscriber();
-    return this.ensureRedisJobPatternSubscriber();
+    const ready = this.ensureRedisJobPatternSubscriber();
+    const timeout = new Promise((resolve) => {
+      setTimeout(resolve, StreamManager.JOB_PATTERN_READY_TIMEOUT_MS);
+    });
+    await Promise.race([ready, timeout]);
   }
 
   /**
