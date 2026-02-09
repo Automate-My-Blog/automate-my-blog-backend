@@ -9,7 +9,6 @@ import * as jobQueue from '../services/job-queue.js';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import DatabaseAuthService from '../services/auth-database.js';
-import { getJobNarrativeChannel } from '../utils/job-stream-channels.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -198,8 +197,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
       });
     }
 
-    const redis = jobQueue.getConnection?.();
-    if (!redis) {
+    if (!jobQueue.getConnection?.()) {
       return res.status(503).json({
         success: false,
         error: 'Service unavailable',
@@ -225,19 +223,9 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
       writeSSE(res, item.type, { content: item.content, ...(item.progress != null && { progress: item.progress }) });
     }
 
-    const channel = getJobNarrativeChannel(jobId);
-    const subscriber = redis.duplicate();
-    await subscriber.subscribe(channel);
-
-    subscriber.on('message', (ch, message) => {
-      if (res.writableEnded) return;
-      try {
-        const item = JSON.parse(message);
-        writeSSE(res, item.type, { content: item.content, ...(item.progress != null && { progress: item.progress }) });
-      } catch (e) {
-        console.warn('[narrative-stream] invalid message:', e?.message || e);
-      }
-    });
+    // Use shared Redis subscriber (stream-manager) instead of one connection per client
+    await streamManager.whenNarrativePatternReady();
+    streamManager.registerNarrativeStream(jobId, res);
 
     const checkInterval = setInterval(async () => {
       if (res.writableEnded) return;
@@ -246,8 +234,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
         clearInterval(checkInterval);
         if (!res.writableEnded) {
           writeSSE(res, 'complete', {});
-          subscriber.unsubscribe(channel);
-          subscriber.disconnect();
+          streamManager.unregisterNarrativeStream(jobId, res);
           res.end();
         }
       }
@@ -255,8 +242,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
 
     const onClose = () => {
       clearInterval(checkInterval);
-      subscriber.unsubscribe(channel).catch(() => {});
-      subscriber.disconnect();
+      streamManager.unregisterNarrativeStream(jobId, res);
       if (!res.writableEnded) res.end();
     };
     req.on('close', onClose);

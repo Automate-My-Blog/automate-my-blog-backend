@@ -15,3 +15,5 @@ export function getJobNarrativeChannel(jobId) {
 }
 
 export const JOB_EVENTS_PATTERN = 'jobs:*:events';
+/** Pattern for narrative stream (one shared subscriber instead of per-client connection). */
+export const JOB_NARRATIVE_PATTERN = 'jobs:*:narrative';
