@@ -71,6 +71,7 @@ app.set('trust proxy', 1);
 const allowedOriginList = [
   'https://automatemyblog.com',
   'https://www.automatemyblog.com',
+  'https://staging.automatemyblog.com',
   'https://automatemyblog.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
