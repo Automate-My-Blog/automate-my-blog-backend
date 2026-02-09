@@ -2478,10 +2478,12 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         if (delta) {
           fullContent += delta;
           const contentSoFar = this._extractContentValueFromStreamBuffer(fullContent);
-          if (contentSoFar.length > lastEmittedContentLength) {
-            const newContent = contentSoFar.slice(lastEmittedContentLength);
+          // Normalize so streamed preview shows ![IMAGE:...] (frontend expects leading !)
+          const normalizedSoFar = this.normalizeImagePlaceholders(contentSoFar);
+          if (normalizedSoFar.length > lastEmittedContentLength) {
+            const newContent = normalizedSoFar.slice(lastEmittedContentLength);
             streamManager.publish(connectionId, 'content-chunk', { field: 'content', content: newContent });
-            lastEmittedContentLength = contentSoFar.length;
+            lastEmittedContentLength = normalizedSoFar.length;
           }
         }
       }
