@@ -696,55 +696,18 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
    * @param {string} connectionId
    */
   async generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId) {
-    const model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
-    const systemContent = `You are a content strategist who creates blog topics optimized for search and user intent. You understand that readers search using specific keywords and phrases when looking for solutions to their problems.
+    const model = process.env.OPENAI_TOPICS_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const systemContent = `You are a content strategist. Create blog topics that are SEO-optimized, use searchable keywords, and promise clear value. Use direct language people actually search for—no abstract or academic phrasing.`;
 
-CRITICAL PRINCIPLES:
-1. SEO-OPTIMIZED: Focus on searchable keywords and clear value propositions that match what people actually search for
-2. CLEAR & DIRECT: Titles should tell readers exactly what they'll learn using straightforward language
-3. SEARCHABILITY: Use language people actually search for, not abstract concepts or academic phrasing
-4. PRACTICAL VALUE: Promise specific, actionable outcomes that solve real problems`;
+    const userContent = `Generate 2 blog topics for:
+Business: ${businessType}
+Audience: ${targetAudience}
+Focus: ${contentFocus}
 
-    const userContent = `Generate 2 strategic blog post topics for this business that promise genuinely insightful content:
+For each topic return JSON only:
+{"id":number,"trend":"string","title":"SEO-friendly title (e.g. How to X, not 'The Paradox of...')","subheader":"subtitle","seoBenefit":"value when they search for [terms]","category":"category"}
 
-Business Analysis:
-- Business Type: ${businessType}
-- Target Audience: ${targetAudience}
-- Content Focus: ${contentFocus}
-
-TOPIC QUALITY REQUIREMENTS:
-
-1. SEARCH-OPTIMIZED: Use keywords and phrases that people actually type into search engines when looking for solutions.
-
-2. CLEAR VALUE: Make it immediately obvious what specific benefit or solution the reader will get from the article.
-
-3. SPECIFIC FOCUS: Address concrete problems or questions with actionable answers, not broad conceptual overviews.
-
-4. NATURAL LANGUAGE: Use conversational, everyday language that real people use when describing their problems.
-
-For each topic, provide:
-{
-  "id": number,
-  "trend": "string - content theme/topic area using searchable keywords",
-  "title": "string - clear, SEO-friendly title using searchable keywords (e.g., 'How to Manage Postpartum Depression' not 'The Paradox of Maternal Mental Health')",
-  "subheader": "string - subtitle that clarifies the specific problem solved and target audience",
-  "seoBenefit": "string - specific value like 'Can help [audience] find answers when they search for [actual search terms they use]'",
-  "category": "string - content category using common search terms"
-}
-
-AVOID:
-- Abstract or philosophical language (e.g., "The Paradox of...", "Navigating the Complexity of...")
-- Excessive use of colons or clever wordplay in titles
-- Vague promises that don't specify what the reader will learn
-- Academic or overly formal language that people don't search for
-
-CREATE:
-- Direct, searchable titles that match common search queries
-- Specific problem statements that readers can immediately relate to
-- Clear benefit statements using action words (How to, Ways to, Steps to, Guide to)
-- Language that sounds like something a real person would type into Google
-
-Return an array of 2 SEO-optimized topics that address real search intent with clear value.`;
+Rules: Searchable keywords, clear benefit, specific problem/solution. Avoid vague or philosophical titles. Return an array of 2 objects, no other text.`;
 
     const extractCompleteObjects = (buf) => {
       let depth = 0;
@@ -776,7 +739,7 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
           { role: 'user', content: userContent }
         ],
         temperature: 0.7,
-        max_tokens: 1500,
+        max_tokens: 1024,
         stream: true
       });
 
@@ -1087,16 +1050,7 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
     try {
       console.log('Generating DALL-E image for topic:', topic.title);
       
-      // Create a descriptive prompt for realistic blog header image
-      const prompt = `Create a high-quality, realistic image for the blog post: "${topic.title}". 
-      
-      Style: Professional photography, sharp focus, excellent lighting
-      Quality: Ultra-high resolution, magazine quality, commercial photography
-      Composition: Clean, modern, suitable for blog header use
-      Colors: Vibrant but professional color palette
-      Requirements: No text, no people's faces, realistic style only
-      
-      The image should look like a professional stock photo that perfectly represents the topic.`;
+      const prompt = `Professional blog header image for: "${topic.title}". Style: sharp, well-lit, clean. No text, no faces. Realistic stock-photo style.`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
