@@ -224,10 +224,14 @@ router.post('/:organizationId/ctas/manual', async (req, res) => {
       }
     }
 
-    // Update organization to mark that it has CTA data
+    // Update organization data_availability to mark that it has CTA data
     await db.query(`
       UPDATE organizations
-      SET has_cta_data = true
+      SET data_availability = jsonb_set(
+        COALESCE(data_availability, '{}'::jsonb),
+        '{has_cta_data}',
+        'true'::jsonb
+      )
       WHERE id = $1
     `, [organizationId]);
 
