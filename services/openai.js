@@ -266,17 +266,17 @@ export class OpenAIService {
    * Short snippets that echo back what we learned (active listener), separated by double paragraph breaks
    */
   async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
-    console.log('📝 [NARRATIVE-GEN] Starting narrative generation');
+    console.log('📝 [NARRATIVE-GEN] Starting narrative generation (Insight Cards)');
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
 
-    const prompt = `You just analyzed ${analysisData.businessName} (${analysisData.businessType}). Think out loud as you process what you discovered. Write 8-12 short thoughts (1-2 sentences each) that show you're actively making sense of their business.
+    const prompt = `You are an insightful business consultant who just deeply analyzed ${analysisData.businessName} (${analysisData.businessType}). Generate 4-6 insight cards that demonstrate deep understanding of their business and build trust with the user.
 
-Each thought should:
-1. Start casually ("Ok, I see..." / "Hmm..." / "Interesting..." / "Wait...")
-2. Make an observation or connection
-3. Be 1-2 sentences maximum
-4. Feel like real-time discovery, not polished analysis
+**DESIGN PRINCIPLES:**
+1. INSIGHT OVER OBSERVATION - Go beyond obvious facts to reveal meaningful patterns
+2. SPECIFIC OVER GENERIC - Use concrete details, not vague generalities
+3. VALUE OVER PROCESS - Focus on implications, not just what you found
+4. FORWARD-LOOKING OVER BACKWARD-LOOKING - Show opportunities, not just current state
 
 **Business Context:**
 - Name: ${analysisData.businessName}
@@ -302,54 +302,58 @@ ${intelligenceData.seo_opportunities ? `- SEO Opportunities: ${intelligenceData.
 ${intelligenceData.content_strategy_recommendations ? `- Content Recommendations: ${intelligenceData.content_strategy_recommendations}` : ''}
 ${intelligenceData.business_value_assessment ? `- Value Assessment: ${intelligenceData.business_value_assessment}` : ''}
 
-OUTPUT FORMAT:
-- Write 8-12 thoughts (1-2 sentences each, NOT 3+)
-- Start each with casual discovery markers ("Ok..." / "Hmm..." / "I see..." / "Interesting..." / "Wait...")
-- Separate with double paragraph break (\\n\\n)
-- No section headers, no bullet lists
-- Tone: Casual analyst thinking through discoveries in real-time
+**CARD CATEGORIES TO CHOOSE FROM:**
+- Customer Psychology - Why customers choose them, emotional drivers, pain points
+- Market Positioning - Where they fit in their industry, competitive differentiation
+- Search Behavior - How customers find them, search intent, decision triggers
+- Competitive Advantage - What makes them unique, strengths to leverage
+- Content Gap - Opportunities to address unmet customer needs
+- Opportunity Preview - High-value audiences or content opportunities identified
 
-THINKING PATTERNS TO USE:
-- Initial recognition: "Ok, I see. This is a [type] business..."
-- Pattern spotting: "Hmm, their customers search when [moment]..."
-- Connecting dots: "Interesting—that timing combined with [X] means [Y]..."
-- Noticing gaps: "Wait, I'm seeing [pattern] but their content focuses on [different thing]..."
-- Industry context: "The [industry] space is [dynamic]. They're positioned in [niche]..."
-- Strategic observation: "[Specific finding] creates an opportunity for [action]..."
+**EACH CARD MUST HAVE:**
+1. **Category** - One of the categories above
+2. **Heading** - Short, compelling title (3-6 words)
+3. **Body** - 2-3 sentences showing deep insight (not obvious observations)
+4. **Takeaway** - One sentence implication or "so what" (starts with context like "Trust factor:", "Competitive advantage:", "Opportunity:", etc.)
 
-Example thoughts (\\n\\n between):
-"Ok, I see. This is an automotive dealership focusing on certified pre-owned vehicles."
-\\n\\n
-"Hmm, that's a less crowded space than new car sales. Most dealerships chase generic 'cars for sale' traffic."
-\\n\\n
-"Their customers search when they're actively comparing options across dealerships. High-intent moment."
-\\n\\n
-"Interesting—search behavior shows concerns about vehicle history and warranty coverage. That's the decision point."
-\\n\\n
-"Wait, three CTAs are below the fold. 60% of traffic is mobile searchers in shopping mode."
-\\n\\n
-"Their blog focuses on maintenance tips, but customers are stuck on financing concerns earlier in the journey."
-\\n\\n
-"I'm seeing a content gap around financial decision-making—before they even visit the lot."
+**GOOD EXAMPLES:**
+{
+  "category": "Customer Psychology",
+  "heading": "Your Patients Seek Specialized Care",
+  "body": "Patients arrive after feeling dismissed by general practitioners. Your specialized focus on reproductive psychiatry directly addresses their search for someone who truly understands the complexity of hormonal and emotional challenges combined.",
+  "takeaway": "Trust factor: Specialization beats general care for this vulnerable audience"
+}
+
+{
+  "category": "Market Positioning",
+  "heading": "You Bridge Two Worlds",
+  "body": "You occupy a unique niche between general psychiatry (too broad) and fertility clinics (not mental health focused). Most providers stay in their lane—you're one of the few who understand both the reproductive and psychological dimensions.",
+  "takeaway": "Competitive advantage: Few providers can speak to both aspects of their journey"
+}
+
+**BAD EXAMPLES (avoid these):**
+- "You are a psychiatry practice" (too obvious)
+- "Your website has a professional appearance" (generic)
+- "We analyzed your homepage structure" (process, not insight)
+- "You serve healthcare consumers" (vague)
 
 Format as JSON:
 {
-  "narrative": "Thought one.\\n\\nThought two.\\n\\nThought three...",
-  "confidence": <0-1 score based on data quality>,
-  "keyInsights": [
-    "Insight 1 (one sentence)",
-    "Insight 2 (one sentence)",
-    "Insight 3 (one sentence)"
-  ]
+  "cards": [
+    {
+      "category": "Category Name",
+      "heading": "Card Heading",
+      "body": "2-3 sentences of deep insight about their business.",
+      "takeaway": "Context: One sentence implication"
+    }
+  ],
+  "confidence": <0-1 score based on data quality>
 }`;
 
     console.log('📝 [NARRATIVE-GEN] Prompt length:', prompt.length);
-    console.log('📝 [NARRATIVE-GEN] Prompt contains "EXACT structure":', prompt.includes('EXACT structure'));
-    console.log('📝 [NARRATIVE-GEN] Prompt contains "**About Your Business:**":', prompt.includes('**About Your Business:**'));
-    console.log('📝 [NARRATIVE-GEN] First 300 chars of prompt:', prompt.substring(0, 300));
 
     try {
-      const systemMessage = 'You are an AI analyst thinking out loud as you process the business data. Start observations casually ("Ok, I see..." / "Hmm..." / "Interesting...") then layer in strategic insight. Keep each thought to 1-2 sentences maximum - it\'s better to have more frequent, smaller observations than long blocks. Show you\'re actively discovering patterns, not delivering polished conclusions.';
+      const systemMessage = 'You are an insightful business consultant who demonstrates understanding through specific, valuable insights. Show that you truly understand their business, their customers, and their opportunities. Be confident but not arrogant. Be specific, not generic. Focus on forward-looking implications, not just observations.';
 
       console.log('📝 [NARRATIVE-GEN] System message:', systemMessage);
       console.log('📝 [NARRATIVE-GEN] Model: gpt-4o');
@@ -366,39 +370,44 @@ Format as JSON:
           { role: 'user', content: prompt }
         ],
         response_format: { type: 'json_object' },
-        temperature: 0.7
+        temperature: 0.6
       });
 
       console.log('📝 [NARRATIVE-GEN] OpenAI response received');
 
       const result = JSON.parse(completion.choices[0].message.content);
 
-      console.log('📝 [NARRATIVE-GEN] Parsed JSON result');
-      console.log('📝 [NARRATIVE-GEN] Result has narrative:', !!result.narrative);
-      console.log('📝 [NARRATIVE-GEN] Narrative length:', result.narrative?.length);
-      console.log('📝 [NARRATIVE-GEN] First 200 chars of narrative:', result.narrative?.substring(0, 200));
-      console.log('📝 [NARRATIVE-GEN] Narrative contains "**About Your Business:**":', result.narrative?.includes('**About Your Business:**'));
-      console.log('📝 [NARRATIVE-GEN] Narrative contains "**Customer Search Patterns:**":', result.narrative?.includes('**Customer Search Patterns:**'));
+      console.log('📝 [NARRATIVE-GEN] Generated', result.cards?.length, 'insight cards');
       console.log('📝 [NARRATIVE-GEN] Confidence:', result.confidence);
-      console.log('📝 [NARRATIVE-GEN] Key insights count:', result.keyInsights?.length);
 
-      console.log('✅ Successfully generated narrative analysis');
+      console.log('✅ Successfully generated insight cards');
 
       return {
-        narrative: result.narrative,
+        cards: result.cards || [],
         confidence: result.confidence || 0.8,
-        keyInsights: result.keyInsights || [],
         isAIGenerated: true
       };
 
     } catch (error) {
-      console.error('❌ Error generating narrative:', error);
+      console.error('❌ Error generating insight cards:', error);
 
-      // Fallback: thinking-out-loud snippets separated by double paragraph break
+      // Fallback: Generate basic cards from available data
       return {
-        narrative: `Ok, I see. This is a ${analysisData.businessType} business.\n\nHmm, ${analysisData.businessName} serves ${analysisData.endUsers}.\n\nTheir customers search when ${analysisData.searchBehavior}.\n\nInteresting—content around ${analysisData.contentFocus} could connect with how they're looking.`,
+        cards: [
+          {
+            category: 'Market Positioning',
+            heading: 'Your Business Focus',
+            body: `${analysisData.businessName} operates as a ${analysisData.businessType}. ${analysisData.description}`,
+            takeaway: `Focus: Serving ${analysisData.endUsers} in this market`
+          },
+          {
+            category: 'Search Behavior',
+            heading: 'How Customers Find You',
+            body: `Your customers search when ${analysisData.searchBehavior}. This represents a key moment in their decision-making process.`,
+            takeaway: 'Opportunity: Content that addresses this search intent'
+          }
+        ],
         confidence: 0.5,
-        keyInsights: [],
         isAIGenerated: false
       };
     }
