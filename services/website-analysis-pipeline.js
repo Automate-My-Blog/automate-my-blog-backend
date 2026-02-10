@@ -765,32 +765,32 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
       // Signal narrative completion
       await streamNarrative({ type: 'narrative-complete', content: '' });
-
-      // Extract and stream business profile for PowerPoint-style display
-      const businessProfile = extractBusinessProfile(
-        {
-          businessName: analysis.businessName || analysis.companyName,
-          businessType: analysis.businessType,
-          description: analysis.description,
-          businessModel: analysis.businessModel,
-          decisionMakers: analysis.decisionMakers,
-          endUsers: analysis.endUsers,
-          searchBehavior: analysis.searchBehavior,
-          contentFocus: analysis.contentFocus,
-          websiteGoals: analysis.websiteGoals,
-          blogStrategy: analysis.blogStrategy,
-          website: url
-        },
-        intelligenceData,
-        ctaForNarrative
-      );
-
-      console.log('📊 [PROFILE] Streaming business profile');
-      await streamNarrative({
-        type: 'business-profile',
-        content: JSON.stringify(businessProfile)
-      });
     }
+
+    // Extract and stream business profile for PowerPoint-style display (always, regardless of cards)
+    const businessProfile = extractBusinessProfile(
+      {
+        businessName: analysis.businessName || analysis.companyName,
+        businessType: analysis.businessType,
+        description: analysis.description,
+        businessModel: analysis.businessModel,
+        decisionMakers: analysis.decisionMakers,
+        endUsers: analysis.endUsers,
+        searchBehavior: analysis.searchBehavior,
+        contentFocus: analysis.contentFocus,
+        websiteGoals: analysis.websiteGoals,
+        blogStrategy: analysis.blogStrategy,
+        website: url
+      },
+      intelligenceData,
+      ctaForNarrative
+    );
+
+    console.log('📊 [PROFILE] Streaming business profile');
+    await streamNarrative({
+      type: 'business-profile',
+      content: JSON.stringify(businessProfile)
+    });
 
     // Store cards in database (convert to text for backward compatibility)
     const narrativeText = insightCards.map(card =>
