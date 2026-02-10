@@ -1837,12 +1837,52 @@ This evidence-based approach aligns with current best practices in maternal ment
 - Use other forms of social proof (statistics, studies, quotes from publications)`}`;
 
     // Embeddable content: index-based placeholders [TWEET:0], [ARTICLE:0], [VIDEO:0] for frontend replacement
+    const preloadedTweets = topic.preloadedTweets || [];
     const preloadedArticles = topic.preloadedArticles || [];
     const preloadedVideos = topic.preloadedVideos || [];
     const tweetCount = realTweetUrls.length;
     const articleCount = preloadedArticles.length;
     const videoCount = preloadedVideos.length;
     let embedPlaceholdersSection = '';
+    let relatedContentSection = '';
+
+    // Build RELATED CONTENT section: give the model actual content so the post reflects it
+    const relatedParts = [];
+    if (preloadedTweets.length > 0) {
+      relatedParts.push(`**TWEETS (index matches [TWEET:0], [TWEET:1], etc.):**
+${preloadedTweets.map((t, i) => `- [TWEET:${i}] @${t.author_handle || t.handle || 'unknown'}: "${(t.text || '').replace(/"/g, "'").slice(0, 280)}"`).join('\n')}`);
+    }
+    if (preloadedArticles.length > 0) {
+      relatedParts.push(`**ARTICLES (index matches [ARTICLE:0], [ARTICLE:1], etc.):**
+${preloadedArticles.map((a, i) => {
+        const title = String(a.title || a.url || '').slice(0, 80);
+        const desc = (a.description || a.content || '').slice(0, 200);
+        return `- [ARTICLE:${i}] "${title}"${desc ? ` — ${desc}` : ''} (source: ${a.sourceName || a.author || 'unknown'})`;
+      }).join('\n')}`);
+    }
+    if (preloadedVideos.length > 0) {
+      relatedParts.push(`**VIDEOS (index matches [VIDEO:0], [VIDEO:1], etc.):**
+${preloadedVideos.map((v, i) => {
+        const title = String(v.title || v.url || '').slice(0, 80);
+        const desc = (v.description || '').slice(0, 150);
+        return `- [VIDEO:${i}] "${title}"${desc ? ` — ${desc}` : ''} (channel: ${v.channelTitle || 'unknown'})`;
+      }).join('\n')}`);
+    }
+    if (relatedParts.length > 0) {
+      relatedContentSection = `
+## RELATED CONTENT TO WEAVE INTO THE POST (CRITICAL)
+
+The following tweets, articles, and videos were provided for this topic. **Your post content MUST reflect their actual content.** Do not use them as decorative embeds—reference specific points, quotes, or insights from each item when you cite it.
+
+${relatedParts.join('\n\n')}
+
+**WEAVING INSTRUCTIONS:**
+- When you introduce a tweet, your surrounding text must summarize or reference what the tweet actually says
+- When you cite an article, mention specific findings or points from its description/content
+- When you embed a video, explain what the viewer will learn or why it's relevant based on its title/description
+- Place each embed in a section that directly relates to its content`;
+    }
+
     if (tweetCount > 0 || articleCount > 0 || videoCount > 0) {
       embedPlaceholdersSection = `
 **EMBEDDABLE CONTENT — use these exact placeholders in the post body** (the frontend will replace them):
@@ -1877,6 +1917,7 @@ ${seoInstructions}
 ${imageInstructions}
 
 ${highlightBoxInstructions}
+${relatedContentSection}
 ${embedPlaceholdersSection}
 
 CONTENT REQUIREMENTS:
@@ -1887,6 +1928,7 @@ CONTENT REQUIREMENTS:
 5. CTA INTEGRATION: Include 2-3 contextual calls-to-action that feel natural
 6. MOBILE OPTIMIZATION: Use scannable formatting with clear headings
 7. VALUE-FOCUSED: Every paragraph should provide genuine value to readers
+8. RELATED CONTENT INTEGRATION: If tweets, articles, or videos were provided above, weave their actual content into the post—reference specific points, quote relevant insights, and introduce each embed with context that reflects what it says (not generic filler)
 
 ABSOLUTE PROHIBITIONS - NEVER DO THESE:
 ❌ DO NOT create fake expert names (e.g., "Dr. Sarah Johnson", "Dr. Emily Chen", "Dr. Michael Roberts")
