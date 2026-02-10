@@ -87,7 +87,7 @@ export class GrokTweetSearchService {
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 25000  // 25s default for faster related-content; set to 60000 if needed
+          timeout: Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 60000  // 60s default; tune via env once you have average response times
         }
       );
 
@@ -189,7 +189,7 @@ export class GrokTweetSearchService {
 
     } catch (error) {
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        const timeoutMs = Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 25000;
+        const timeoutMs = Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 60000;
         console.warn(`⏱️ Grok tweet search timed out (${timeoutMs}ms) - continuing without tweets`);
       } else {
         console.error('❌ Grok tweet search failed:', error.message);
