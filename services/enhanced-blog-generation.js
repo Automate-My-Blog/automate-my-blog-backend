@@ -1003,11 +1003,22 @@ BAD examples (TOO LONG/ABSTRACT):
       SEO: ${topic.seoBenefit || ''}
     `.trim();
 
-    // Run both query extractions in parallel
-    const [tweetQueries, videoQueries] = await Promise.all([
-      this.extractTweetSearchQueries(topicDescription, topic, businessInfo),
-      this.extractYouTubeSearchQueries(topicDescription, topic, businessInfo)
-    ]);
+    let tweetQueries;
+    let videoQueries;
+
+    // Fast path: skip both LLM extractions when topic title is already a good search query (2–4 concrete words)
+    if (this.isSearchFriendlyTitle(topic?.title)) {
+      const query = topic.title.trim();
+      tweetQueries = [query];
+      videoQueries = [query];
+      console.log('🔍 [RELATED-CONTENT] Using topic title as search query (fast path):', query);
+    } else {
+      // Run both query extractions in parallel
+      [tweetQueries, videoQueries] = await Promise.all([
+        this.extractTweetSearchQueries(topicDescription, topic, businessInfo),
+        this.extractYouTubeSearchQueries(topicDescription, topic, businessInfo)
+      ]);
+    }
 
     // Run both searches in parallel
     const [tweets, videos] = await Promise.all([
