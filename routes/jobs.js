@@ -260,24 +260,14 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
 });
 
 /**
- * Redirect trailing slash so GET .../stream/ hits the stream handler (Vercel/proxies sometimes add slash).
+ * GET /api/v1/jobs/:jobId/stream[/?] — SSE stream for real-time job progress.
+ * Handles both /stream and /stream/ (no redirect, to avoid redirect loops with proxies).
+ * EventSource-compatible (?token=). Events: connected, progress-update, step-change, complete, failed.
  */
-router.get('/:jobId/stream/', (req, res) => {
-  const target = req.originalUrl.replace(/\/stream\/+/, '/stream');
-  res.redirect(301, target);
-});
-
-/**
- * GET /api/v1/jobs/:jobId/stream?token=JWT (or Authorization / x-session-id)
- * SSE stream for real-time job progress. EventSource-compatible (?token=).
- * Events: connected, progress-update, step-change, complete, failed.
- * Connection closes on complete/fail or after 10 min.
- */
-router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
+async function handleJobStream(req, res) {
   try {
     const { jobId } = req.params;
     const ctx = getJobContext(req);
-    // Retry when null to avoid 404 on create→stream race (read-after-write / replica lag)
     const status = await getJobStatusWithRetry(jobId, ctx);
     if (!status) {
       return res.status(404).json({
@@ -292,7 +282,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-    // Send a leading comment so proxies/clients see data immediately (reduces intermittent connection issues)
     if (!res.writableEnded) {
       res.write(': ok\n\n');
       if (typeof res.flush === 'function') res.flush();
@@ -305,7 +294,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     }, { keepalive: true, maxAgeMs: JOB_STREAM_MAX_AGE_MS });
 
     streamManager.subscribeToJob(jobId, connectionId);
-    // Wait for Redis job-events subscription so we don't miss early worker events (fixes intermittent missed events)
     await streamManager.whenJobPatternReady();
 
     if (res.writableEnded) return;
@@ -316,7 +304,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
       hint: 'If stream closes before job completes, poll GET /jobs/:jobId/status'
     });
 
-    // Catch-up: send current job state so frontend is never stuck (handles missed events during subscription or fast job completion)
     if (!res.writableEnded) {
       const current = await jobQueue.getJobStatus(jobId, ctx);
       if (current) {
@@ -340,7 +327,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
       }
     }
 
-    // Send stream-timeout event 10s before closing so frontend can fall back to polling
     const timeoutWarningMs = JOB_STREAM_MAX_AGE_MS - 10 * 1000;
     const warningTimer = setTimeout(() => {
       if (!res.writableEnded) {
@@ -360,7 +346,10 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
   } catch (e) {
     if (!res.headersSent) sendJobError(res, e, 'Failed to open stream');
   }
-});
+}
+
+router.get('/:jobId/stream', requireUserOrSession, handleJobStream);
+router.get('/:jobId/stream/', requireUserOrSession, handleJobStream);
 
 /**
  * GET /api/v1/jobs/:jobId/status
