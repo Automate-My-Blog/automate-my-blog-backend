@@ -2313,6 +2313,16 @@ Full JSON structure (content first, then metadata):
         generatedAt: new Date().toISOString()
       };
 
+      // Include request CTAs in result so frontend receives the CTAs used for this generation
+      if (requestCtas.length > 0) {
+        blogData.ctas = requestCtas.map((c) => ({
+          text: c.cta_text,
+          href: c.href,
+          type: c.cta_type,
+          placement: c.placement
+        }));
+      }
+
       // Final check: Log highlight boxes in final content being returned
       const finalBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
       console.log('📦 [FINAL CHECK] Highlight boxes in content being returned to frontend:', {
@@ -2614,6 +2624,15 @@ Full JSON structure (content first, then metadata):
         hasManualInputs: organizationContext.hasManualFallbacks,
         enhancementLevel: organizationContext.completenessScore > 60 ? 'high' : organizationContext.completenessScore > 30 ? 'medium' : 'basic'
       };
+      // Include request CTAs in stream result so frontend receives the CTAs used for this generation
+      if (requestCtas.length > 0) {
+        blogData.ctas = requestCtas.map((c) => ({
+          text: c.cta_text,
+          href: c.href,
+          type: c.cta_type,
+          placement: c.placement
+        }));
+      }
       streamManager.publish(connectionId, 'complete', { result: blogData });
     } catch (error) {
       console.error('Blog stream error:', error);

@@ -47,6 +47,7 @@ router.post('/generate', async (req, res) => {
       businessInfo,
       organizationId,
       additionalInstructions,
+      ctas,
       options = {}
     } = req.body;
 
@@ -89,7 +90,7 @@ router.post('/generate', async (req, res) => {
       });
     }
 
-    // Generate complete enhanced blog
+    // Generate complete enhanced blog (pass request CTAs so they're used in prompt and included in result)
     const result = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
       topic,
       businessInfo,
@@ -97,7 +98,8 @@ router.post('/generate', async (req, res) => {
       {
         additionalInstructions,
         includeVisuals: options.includeVisuals !== false,
-        ...options
+        ...options,
+        ...(Array.isArray(ctas) && ctas.length > 0 && { ctas })
       }
     );
 
@@ -227,7 +229,7 @@ router.post('/generate', async (req, res) => {
  */
 router.post('/generate-stream', async (req, res) => {
   try {
-    const { connectionId, topic, businessInfo, organizationId, additionalInstructions, options = {} } = req.body;
+    const { connectionId, topic, businessInfo, organizationId, additionalInstructions, ctas, options = {} } = req.body;
     const userId = req.user?.userId;
     if (!userId) {
       return res.status(401).json({ success: false, error: 'Unauthorized', message: 'Authentication required' });
@@ -275,7 +277,7 @@ router.post('/generate-stream', async (req, res) => {
         businessInfo,
         organizationId,
         connectionId,
-        { additionalInstructions, ...options }
+        { additionalInstructions, ...options, ...(Array.isArray(ctas) && ctas.length > 0 && { ctas }) }
       ).catch((err) => console.error('generate-stream background error:', err));
     });
 
