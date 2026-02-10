@@ -1,7 +1,7 @@
 /**
  * Blog API routes. POST /api/v1/blog/generate-stream for streaming blog content (typing effect).
  * Frontend path: POST /api/v1/blog/generate-stream
- * Body: { topic, businessInfo, organizationId, additionalInstructions?, tweets?, articles?, videos?, options?: { preloadedTweets?, preloadedArticles?, preloadedVideos? } }
+ * Body: { topic, businessInfo, organizationId, additionalInstructions?, tweets?, articles?, videos?, ctas?, options?: { preloadedTweets?, preloadedArticles?, preloadedVideos? } }
  * Returns 200 { connectionId }. Stream content via GET /api/v1/stream/:connectionId?token=
  */
 
@@ -27,6 +27,7 @@ router.post('/generate-stream', async (req, res) => {
       tweets,
       articles,
       videos,
+      ctas,
       options = {}
     } = req.body;
 
@@ -73,6 +74,7 @@ router.post('/generate-stream', async (req, res) => {
       if (options.preloadedTweets != null) opts.preloadedTweets = options.preloadedTweets;
       if (options.preloadedArticles != null) opts.preloadedArticles = options.preloadedArticles;
       if (options.preloadedVideos != null) opts.preloadedVideos = options.preloadedVideos;
+      if (Array.isArray(ctas) && ctas.length > 0) opts.ctas = ctas;
       enhancedBlogGenerationService.generateBlogPostStream(
         topic,
         businessInfo,
