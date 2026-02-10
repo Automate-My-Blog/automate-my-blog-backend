@@ -6,8 +6,9 @@ Summary of performance changes and further opportunities.
 
 ### Topic ideas stream (streaming)
 - **File:** `services/openai.js` — `generateTrendingTopicsStream()`
-- **Change:** DALL·E images for topics are generated in parallel via `Promise.all` instead of sequentially. Total image wait ≈ max(per image) instead of sum.
-- **Impact:** Roughly halves topic-stream time when 2 topics (each with an image).
+- **Change 1:** DALL·E images for topics are generated in parallel via `Promise.all` instead of sequentially. Total image wait ≈ max(per image) instead of sum.
+- **Change 2:** Pipeline parallelism — start DALL·E for each topic as soon as that topic is streamed from GPT, instead of waiting for the full GPT stream to finish. Image generation for topic 1 now overlaps with GPT still producing topic 2.
+- **Impact:** Roughly halves topic-stream time when 2 topics (each with an image); total wall time is now closer to max(GPT stream, one DALL·E) instead of GPT stream + max(DALL·E).
 
 ### Topic ideas (non-streaming)
 - **File:** `services/openai.js` — `generateTrendingTopics()`

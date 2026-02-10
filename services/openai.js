@@ -782,6 +782,8 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
 
       let buffer = '';
       const allTopics = [];
+      /** Start each topic's image as soon as the topic is streamed (overlap GPT stream with DALL-E). */
+      const imagePromises = [];
 
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content ?? '';
@@ -790,22 +792,23 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
           const { objects, remainingBuffer } = extractCompleteObjects(buffer);
           buffer = remainingBuffer;
           for (const obj of objects) {
+            const index = allTopics.length;
             allTopics.push(obj);
             streamManager.publish(connectionId, 'topic-complete', { topic: obj });
+            streamManager.publish(connectionId, 'topic-image-start', {
+              index,
+              total: allTopics.length,
+              topic: obj
+            });
+            imagePromises.push(
+              this.generateTopicImage(obj).then((image) => ({ index, topic: { ...obj, image } }))
+            );
           }
         }
       }
 
-      // Generate DALL-E images in parallel so total wait is ~one image, not N
       const total = allTopics.length;
-      for (let i = 0; i < total; i++) {
-        streamManager.publish(connectionId, 'topic-image-start', { index: i, total, topic: allTopics[i] });
-      }
-      const imageResults = await Promise.all(
-        allTopics.map((topic, index) =>
-          this.generateTopicImage(topic).then((image) => ({ index, topic: { ...topic, image } }))
-        )
-      );
+      const imageResults = await Promise.all(imagePromises);
       for (const { index, topic } of imageResults) {
         allTopics[index] = topic;
         streamManager.publish(connectionId, 'topic-image-complete', { index, topic });
