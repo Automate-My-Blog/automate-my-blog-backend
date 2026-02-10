@@ -57,6 +57,13 @@ function requireUserOrSession(req, res, next) {
   next();
 }
 
+/**
+ * GET /api/v1/jobs — sanity check that the jobs router is mounted (e.g. on staging).
+ */
+router.get('/', (req, res) => {
+  res.json({ ok: true, message: 'Jobs API', endpoints: ['POST /website-analysis', 'POST /content-generation', 'GET /:jobId/status', 'GET /:jobId/stream', 'GET /:jobId/narrative-stream', 'POST /:jobId/retry', 'POST /:jobId/cancel'] });
+});
+
 /** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
 function sendJobError(res, e, defaultMessage = 'Internal error') {
   if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
@@ -250,6 +257,14 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
   } catch (e) {
     if (!res.headersSent) sendJobError(res, e, 'Failed to open narrative stream');
   }
+});
+
+/**
+ * Redirect trailing slash so GET .../stream/ hits the stream handler (Vercel/proxies sometimes add slash).
+ */
+router.get('/:jobId/stream/', (req, res) => {
+  const target = req.originalUrl.replace(/\/stream\/+/, '/stream');
+  res.redirect(301, target);
 });
 
 /**
