@@ -15,10 +15,23 @@ import streamManager from './stream-manager.js';
  * Targets 95+ SEO scores using comprehensive analysis insights
  */
 export class EnhancedBlogGenerationService extends OpenAIService {
+  /** Shared system prompt for blog generation (non-streaming and streaming). */
+  static BLOG_GENERATION_SYSTEM_PROMPT = `You are an expert SEO content strategist who writes blog posts that rank well and genuinely help readers. Your goal: content that earns a 95+ SEO score while feeling human, specific, and worth reading.
+
+PRIORITIES (in order):
+1. READER VALUE: Every section must answer "so what?"—clear benefit, actionable insight, or credible evidence. No filler, no generic intros, no vague conclusions.
+2. BRAND FIT: Match the provided brand voice and style patterns exactly so the post feels like it belongs to the business.
+3. SEO EXCELLENCE: Title 50–60 chars, meta 150–160 chars, clear H1/H2/H3 hierarchy, semantic keywords, scannable structure (short paragraphs, one main idea per paragraph).
+4. STRUCTURE: Strong opening hook (problem, question, or striking fact) → logical sections with clear takeaways → conclusion that summarizes value and next steps (no new claims). Never end with a generic "we hope this helped."
+5. FACTUAL INTEGRITY: Do not fabricate statistics, studies, expert names, or case studies. Use general patterns, hypotheticals, or cited sources when you have them.
+6. INTEGRATION: Weave internal links, CTAs, and any provided tweets/articles/videos only where they fit naturally; never force them.
+
+OUTPUT: Return valid JSON. Put the "content" key first so the post body can stream. The content value must be raw markdown with real line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs.`;
+
   constructor() {
     super();
     this.visualContentService = visualContentService;
-    
+
     // Initialize OpenAI client with proper API key
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -695,7 +708,7 @@ Keep it simple, specific, and searchable.`;
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries from blog posts. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant tweets. Output only a valid JSON array of one string, e.g. ["query"]. The query must be 2-4 concrete words, searchable and specific—no abstract phrases.'
           },
           {
             role: 'user',
@@ -855,7 +868,7 @@ BAD examples (TOO LONG/ABSTRACT):
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries for YouTube video discovery. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant YouTube videos. Output only a valid JSON array of one string (2-4 concrete words), e.g. ["query"]. Keep it specific and searchable.'
           },
           {
             role: 'user',
@@ -1055,7 +1068,7 @@ BAD examples (TOO LONG/ABSTRACT):
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries for news article discovery. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant news articles. Output only a valid JSON array of one string (2-4 concrete words), e.g. ["query"]. Use terms a journalist or publisher would use; keep it specific and searchable.'
           },
           {
             role: 'user',
@@ -1220,7 +1233,7 @@ If none of the tweets are suitable, return an empty array: []`;
         messages: [
           {
             role: 'system',
-            content: 'You select authoritative tweets that support blog narratives. Return only valid JSON arrays of URLs.'
+            content: 'You select 2-4 tweets that are authoritative (experts, practitioners, credible sources), directly support claims in the post, and match the brand voice. Return only a valid JSON array of tweet URLs, e.g. ["https://x.com/..."]. If none fit, return [].'
           },
           {
             role: 'user',
@@ -1312,7 +1325,7 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
         messages: [
           {
             role: 'system',
-            content: 'You insert tweets with explanatory context into blog posts. Preserve all original content and use exact placeholders provided.'
+            content: 'You insert tweets into a blog post with brief explanatory context. Preserve every word of the original post; only add 2-3 sentences before each tweet placeholder explaining why this expert or source matters and how it supports the section. Use the exact placeholder strings provided. Do not repeat or paraphrase the tweet in the surrounding text—add new context only.'
           },
           {
             role: 'user',
@@ -1689,6 +1702,7 @@ When you encounter these content patterns, you MUST use the corresponding highli
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
 - **CRITICAL: Use 2-3 DIFFERENT highlight types per post - NEVER use only one type**
+- One main idea per box; keep box content concise (one sentence or short phrase)
 - Match highlight type to content context (statistics → 'statistic', warnings → 'warning', tips → 'tip')
 - NEVER place highlight boxes in the conclusion section or after the last CTA
 - All highlight boxes must appear BEFORE the final call-to-action
@@ -1905,7 +1919,7 @@ ${videoCount > 0 ? `- Videos: [VIDEO:0]${videoCount > 1 ? `, [VIDEO:1]${videoCou
       availableBoxTypes: availableBoxTypes.join(', ')
     });
 
-    return `Write a high-quality blog post optimized for ${seoTarget}+ SEO score:
+    return `Write a single, publication-ready blog post that earns a ${seoTarget}+ SEO score and is genuinely useful to the target audience. Be specific, concrete, and avoid generic filler.
 
 TOPIC: ${topic.title}
 SUBTITLE: ${topic.subheader}
@@ -1925,14 +1939,15 @@ ${relatedContentSection}
 ${embedPlaceholdersSection}
 
 CONTENT REQUIREMENTS:
-1. STRATEGIC VALUE: Provide actionable insights that demonstrate expertise
-2. SEO OPTIMIZATION: Target ${seoTarget}+ score on comprehensive SEO analysis
-3. BRAND ALIGNMENT: Match the voice and tone patterns identified
-4. INTERNAL LINKING: Include 3-5 natural internal links to relevant content
-5. CTA INTEGRATION: Include 2-3 contextual calls-to-action that feel natural
-6. MOBILE OPTIMIZATION: Use scannable formatting with clear headings
-7. VALUE-FOCUSED: Every paragraph should provide genuine value to readers
-8. RELATED CONTENT INTEGRATION: If tweets, articles, or videos were provided above, weave their actual content into the post—reference specific points, quote relevant insights, and introduce each embed with context that reflects what it says (not generic filler)
+1. OPENING: Start with a clear hook—a specific problem, a surprising stat, or a direct question—not "In today's world..." or "X is important."
+2. VALUE PER SECTION: Each section should deliver one main idea with evidence, examples, or actionable steps. No fluff or restating the same point.
+3. PARAGRAPHS: Keep paragraphs short (2–4 sentences). One main idea per paragraph. Use subheadings so readers can scan.
+4. CONCLUSION: Summarize key takeaways and a clear next step or CTA. Do not introduce new claims or end with "we hope this helped."
+5. BRAND ALIGNMENT: Match the voice and tone patterns provided so the post feels on-brand.
+6. INTERNAL LINKS & CTAS: Use only from the lists provided; place them where they naturally support the reader's journey (see spacing rules above).
+7. RELATED CONTENT: If tweets, articles, or videos were provided, reference their actual content—specific points or quotes—and introduce each embed with context that reflects what it says, not generic filler.
+
+QUALITY BAR: Avoid obvious AI patterns. No stacked adjectives ("comprehensive, actionable, innovative"), no "delve" or "landscape" filler, no fake expert names or made-up studies. Prefer concrete examples and clear language.
 
 ABSOLUTE PROHIBITIONS - NEVER DO THESE:
 ❌ DO NOT create fake expert names (e.g., "Dr. Sarah Johnson", "Dr. Emily Chen", "Dr. Michael Roberts")
@@ -1953,13 +1968,14 @@ RULE: If you want to include an anecdote, expert story, or testimonial → Use a
 
 ADDITIONAL INSTRUCTIONS: ${additionalInstructions}
 
-Return JSON with the "content" key FIRST so the post body streams as raw markdown. The content value must be raw markdown with real line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs. Example content shape:
+OUTPUT FORMAT: Return a single valid JSON object. Put the "content" key first (so the post body can stream). Escape the content value for JSON: use \\n for newlines (e.g. after the # title, after each ## or ### heading, and a blank line between paragraphs). Double-quotes inside the content must be escaped as \\".
 
+Example content shape:
 "content": "# Your Title Here\\n\\nFirst paragraph.\\n\\n## First Section\\n\\nSection body.\\n\\n## Second Section\\n\\nMore body."
 
-Then add the other keys. Full format:
+Full JSON structure (content first, then metadata):
 {
-  "content": "Full blog post in markdown: # Title\\n\\n intro paragraph\\n\\n## Section\\n\\n body... (use \\n\\n after title, after each ##/###, between paragraphs)",
+  "content": "Full blog post in markdown with \\n for line breaks (e.g. # Title\\n\\nIntro.\\n\\n## Section\\n\\nBody...)",
   "title": "SEO-optimized title (50-60 chars)",
   "subtitle": "Compelling subtitle",
   "metaDescription": "Action-oriented meta description (150-160 chars)",
@@ -1967,19 +1983,10 @@ Then add the other keys. Full format:
   "estimatedReadTime": "X min read",
   "seoKeywords": ["primary", "secondary", "semantic", "keywords"],
   "internalLinks": [
-    {
-      "anchorText": "natural anchor text",
-      "suggestedUrl": "/suggested/url",
-      "context": "why this link adds value"
-    }
+    { "anchorText": "natural anchor text", "suggestedUrl": "/suggested/url", "context": "why this link adds value" }
   ],
   "ctaSuggestions": [
-    {
-      "text": "CTA text",
-      "placement": "end-of-post",
-      "type": "primary",
-      "context": "why this CTA fits here"
-    }
+    { "text": "CTA text", "placement": "end-of-post", "type": "primary", "context": "why this CTA fits here" }
   ],
   "seoOptimizationScore": "predicted score based on SEO best practices"
 }`;
@@ -2045,23 +2052,8 @@ Then add the other keys. Full format:
       const completion = await this.openai.chat.completions.create({
         model: model,
         messages: [
-          {
-            role: 'system',
-            content: `You are an expert SEO content strategist who creates blog posts that consistently score 95+ on comprehensive SEO analysis. You understand both technical SEO requirements and user experience needs. You integrate brand voice, internal linking, and CTAs naturally into valuable content.
-
-CRITICAL REQUIREMENTS:
-1. SEO EXCELLENCE: Target 95+ SEO score through comprehensive optimization
-2. BRAND CONSISTENCY: Match provided brand voice and style patterns exactly  
-3. STRATEGIC LINKING: Include internal links that genuinely add value
-4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
-5. MOBILE-FIRST: Structure content for mobile readability and engagement
-6. FACTUAL ACCURACY: No fabricated statistics or false claims
-7. GENUINE VALUE: Every section must provide actionable insights`
-          },
-          {
-            role: 'user',
-            content: enhancedPrompt
-          }
+          { role: 'system', content: EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT },
+          { role: 'user', content: enhancedPrompt }
         ],
         temperature: 0.3, // Lower temperature for more consistent quality
         max_tokens: 7000 // Increased to accommodate full blog with all visual elements
@@ -2492,24 +2484,11 @@ CRITICAL REQUIREMENTS:
       });
       const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
 
+      const streamingSystemPrompt = `${EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT}\n\nSTREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`;
       const stream = await this.openai.chat.completions.create({
         model,
         messages: [
-          {
-            role: 'system',
-            content: `You are an expert SEO content strategist who creates blog posts that consistently score 95+ on comprehensive SEO analysis. You understand both technical SEO requirements and user experience needs. You integrate brand voice, internal linking, and CTAs naturally into valuable content.
-
-CRITICAL REQUIREMENTS:
-1. SEO EXCELLENCE: Target 95+ SEO score through comprehensive optimization
-2. BRAND CONSISTENCY: Match provided brand voice and style patterns exactly
-3. STRATEGIC LINKING: Include internal links that genuinely add value
-4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
-5. MOBILE-FIRST: Structure content for mobile readability and engagement
-6. FACTUAL ACCURACY: No fabricated statistics or false claims
-7. GENUINE VALUE: Every section must provide actionable insights
-
-STREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`
-          },
+          { role: 'system', content: streamingSystemPrompt },
           { role: 'user', content: enhancedPrompt }
         ],
         temperature: 0.3,
