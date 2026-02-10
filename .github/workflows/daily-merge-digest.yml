@@ -1,0 +1,115 @@
+# Daily digest of everything merged into main in the last 24 hours.
+# Runs at 5pm UTC; creates an Issue, tags project owners, and adds a layman summary via OpenAI.
+# Optional secret: PROJECT_OWNER_LOGINS — comma-separated logins (e.g. "alice,bob") to tag if dynamic list is empty.
+
+name: Daily merge digest
+
+on:
+  schedule:
+    # 5pm UTC every day
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  digest:
+    name: Summarize last 24h merges
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch merged PRs, get owners, create layman summary and issue
+        uses: actions/github-script@v8
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_TOKEN_FOR_GITHUB_ACTIONS }}
+          PROJECT_OWNER_LOGINS: ${{ vars.PROJECT_OWNER_LOGINS || '' }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const sinceStr = since.toISOString().split('T')[0];
+
+            // Resolve project owners: repo admins first, then fallback to PROJECT_OWNER_LOGINS
+            let ownerLogins = [];
+            try {
+              const { data: admins } = await github.rest.repos.listCollaborators({
+                owner, repo, permission: 'admin', per_page: 100
+              });
+              ownerLogins = (admins || []).map(c => c.login).filter(Boolean);
+            } catch (e) {
+              core.warning('Could not list repo collaborators: ' + (e.message || e));
+            }
+            if (ownerLogins.length === 0 && process.env.PROJECT_OWNER_LOGINS) {
+              ownerLogins = process.env.PROJECT_OWNER_LOGINS.split(',').map(s => s.trim()).filter(Boolean);
+            }
+            const ownerMentions = ownerLogins.length ? ownerLogins.map(l => `@${l}`).join(' ') : '';
+
+            const { data: prs } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:pr is:merged merged:>=${sinceStr}`,
+              sort: 'updated',
+              order: 'desc',
+              per_page: 50
+            });
+
+            const items = prs.items || [];
+            const dateStr = new Date().toISOString().split('T')[0];
+
+            let laymanSummary = '';
+            if (items.length > 0 && process.env.OPENAI_API_KEY) {
+              const prList = items.map(pr => `- #${pr.number}: ${pr.title || '(no title)'}`).join('\n');
+              const prompt = `You are summarizing recent code changes for non-technical project owners. In 2–4 short, plain-language sentences, what did the team ship in the last day? Be concrete and avoid jargon.\n\nMerged pull requests:\n${prList}`;
+              try {
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + process.env.OPENAI_API_KEY
+                  },
+                  body: JSON.stringify({
+                    model: 'gpt-4o-mini',
+                    messages: [
+                      { role: 'system', content: 'You write brief, clear summaries for busy project owners. No technical jargon.' },
+                      { role: 'user', content: prompt }
+                    ],
+                    max_tokens: 300,
+                    temperature: 0.3
+                  })
+                });
+                const data = await res.json();
+                if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
+                  laymanSummary = data.choices[0].message.content.trim();
+                }
+              } catch (e) {
+                core.warning('OpenAI summary failed: ' + (e.message || e));
+              }
+            }
+
+            let body = '';
+            if (ownerMentions) body += `${ownerMentions}\n\n`;
+            body += `Summary of **main** branch activity in the last 24 hours (through ${dateStr}).\n\n`;
+            if (laymanSummary) {
+              body += `### In plain language\n${laymanSummary}\n\n`;
+            }
+            if (items.length === 0) {
+              body += `No pull requests were merged in the last 24 hours.\n`;
+            } else {
+              body += `**${items.length} pull request(s) merged:**\n\n`;
+              for (const pr of items) {
+                const title = pr.title || '(no title)';
+                const author = pr.user?.login ? `@${pr.user.login}` : 'unknown';
+                const num = pr.number;
+                const url = pr.html_url;
+                const labels = (pr.labels || []).map(l => l.name).filter(Boolean);
+                const labelStr = labels.length ? ` _${labels.join(', ')}_` : '';
+                body += `- **${title}** [#${num}](${url}) by ${author}${labelStr}\n`;
+              }
+            }
+            body += `\n---\n_Generated by the Daily merge digest workflow. Run manually from Actions → "Daily merge digest" → Run workflow._`;
+
+            const title = `Daily digest: main branch (last 24h) – ${dateStr}`;
+            await github.rest.issues.create({ owner, repo, title, body });
+            core.summary.addRaw(body.replace(/\n/g, '\n\n')).write();
