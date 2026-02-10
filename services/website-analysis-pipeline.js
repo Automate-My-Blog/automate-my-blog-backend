@@ -768,6 +768,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     }
 
     // Extract and stream business profile for PowerPoint-style display (always, regardless of cards)
+    console.log('📊 [PROFILE] About to extract business profile');
     const businessProfile = extractBusinessProfile(
       {
         businessName: analysis.businessName || analysis.companyName,
@@ -786,11 +787,13 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       ctaForNarrative
     );
 
-    console.log('📊 [PROFILE] Streaming business profile');
+    console.log('📊 [PROFILE] Business profile extracted:', JSON.stringify(businessProfile, null, 2));
+    console.log('📊 [PROFILE] Streaming business profile via streamNarrative');
     await streamNarrative({
       type: 'business-profile',
       content: JSON.stringify(businessProfile)
     });
+    console.log('📊 [PROFILE] Business profile event sent successfully');
 
     // Store cards in database (convert to text for backward compatibility)
     const narrativeText = insightCards.map(card =>
@@ -977,6 +980,25 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       console.log(`📊 Persisted ${scenarios.length} audience strategies to database`);
     } catch (persistErr) {
       console.warn('⚠️ Failed to persist audiences (scenarios still in job result):', persistErr.message);
+    }
+  }
+
+  // Generate and stream audience narrative
+  if (scenarios && scenarios.length > 0) {
+    try {
+      console.log('📝 Generating audience narrative');
+      const audienceNarrative = await openaiService.generateAudienceNarrative(analysis, scenarios);
+
+      // Stream the narrative word by word
+      const words = audienceNarrative.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        await streamNarrative({ type: 'audience-chunk', content: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      await streamNarrative({ type: 'audience-complete', content: '' });
+      console.log('✅ Audience narrative streamed successfully');
+    } catch (narrativeErr) {
+      console.warn('⚠️ Failed to generate audience narrative:', narrativeErr.message);
     }
   }
 

@@ -414,6 +414,125 @@ Format as JSON:
   }
 
   /**
+   * Generate audience narrative - contextual transition from analysis to audiences
+   * @param {object} analysisData - Business analysis data
+   * @param {array} audiences - Generated audience segments
+   * @returns {Promise<string>} Narrative text
+   */
+  async generateAudienceNarrative(analysisData, audiences) {
+    console.log('📝 [AUDIENCE-NARRATIVE] Generating audience narrative');
+    console.log('📝 [AUDIENCE-NARRATIVE] Business:', analysisData.businessName);
+    console.log('📝 [AUDIENCE-NARRATIVE] Audiences:', audiences.length);
+
+    const audienceList = audiences.slice(0, 3).map((a, i) =>
+      `${i + 1}. ${a.audienceName || a.name}: ${a.description || a.scenario || ''}`
+    ).join('\n');
+
+    const prompt = `You just analyzed ${analysisData.businessName} and learned they are a ${analysisData.businessType}. ${analysisData.description}
+
+Now you've identified ${audiences.length} audience segment${audiences.length > 1 ? 's' : ''} that could benefit from their ${analysisData.contentFocus || 'content'}:
+
+${audienceList}
+
+Write a 2-3 sentence narrative that:
+1. References what you learned about ${analysisData.businessName} (be specific about their business)
+2. Naturally transitions to introducing the audience segments you discovered
+3. Shows how these audiences connect to what ${analysisData.businessName} offers
+
+Be conversational, knowledgeable, and make it clear you understand their business context. Reference specific details from their analysis.
+
+Example style: "Based on what we learned about [Business] being a [specific type] that [specific offering], I've identified [number] audience segments who are actively searching for [specific solution]. These audiences represent decision-makers and end-users who would benefit from [their specific value]."
+
+Write ONLY the narrative text, no JSON or formatting.`;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an AI assistant helping with content strategy. You demonstrate understanding by referencing specific details from the business analysis.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      });
+
+      const narrative = completion.choices[0].message.content.trim();
+      console.log('✅ [AUDIENCE-NARRATIVE] Generated:', narrative.substring(0, 100) + '...');
+      return narrative;
+
+    } catch (error) {
+      console.error('❌ [AUDIENCE-NARRATIVE] Error:', error);
+      // Fallback narrative
+      return `Based on what we learned about ${analysisData.businessName}, I've identified ${audiences.length} audience segment${audiences.length > 1 ? 's' : ''} who would benefit from their ${analysisData.contentFocus || 'expertise'}. Each represents a unique opportunity to connect with decision-makers searching for solutions.`;
+    }
+  }
+
+  /**
+   * Generate topic narrative - contextual transition from audience to topics
+   * @param {object} analysisData - Business analysis data
+   * @param {object} selectedAudience - The audience segment user selected
+   * @param {array} topics - Generated topic suggestions
+   * @returns {Promise<string>} Narrative text
+   */
+  async generateTopicNarrative(analysisData, selectedAudience, topics) {
+    console.log('📝 [TOPIC-NARRATIVE] Generating topic narrative');
+    console.log('📝 [TOPIC-NARRATIVE] Business:', analysisData.businessName);
+    console.log('📝 [TOPIC-NARRATIVE] Audience:', selectedAudience?.audienceName || selectedAudience?.name);
+    console.log('📝 [TOPIC-NARRATIVE] Topics:', topics.length);
+
+    const audienceName = selectedAudience?.audienceName || selectedAudience?.name || 'your target audience';
+    const topicList = topics.slice(0, 3).map((t, i) =>
+      `${i + 1}. ${t.title || t.topic}`
+    ).join('\n');
+
+    const prompt = `You're helping ${analysisData.businessName} (a ${analysisData.businessType}) create content for ${audienceName}.
+
+The business offers: ${analysisData.description}
+The audience: ${selectedAudience?.description || selectedAudience?.scenario || audienceName}
+
+You've generated ${topics.length} topic ideas:
+${topicList}
+
+Write a 2-3 sentence narrative that:
+1. References the specific audience segment they chose (${audienceName})
+2. Shows how these topics address that audience's needs
+3. Naturally transitions to having them select a topic
+
+Be conversational and show you understand the connection between ${analysisData.businessName}'s offering, the audience's needs, and why these topics will resonate.
+
+Example style: "Now that we've identified [specific audience], let's explore topics that address their needs. I've found [number] article ideas that directly speak to [audience challenge/need]. These topics will help position ${analysisData.businessName} as the solution they're searching for."
+
+Write ONLY the narrative text, no JSON or formatting.`;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an AI assistant helping with content strategy. You connect business offerings to audience needs through specific, relevant topics.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      });
+
+      const narrative = completion.choices[0].message.content.trim();
+      console.log('✅ [TOPIC-NARRATIVE] Generated:', narrative.substring(0, 100) + '...');
+      return narrative;
+
+    } catch (error) {
+      console.error('❌ [TOPIC-NARRATIVE] Error:', error);
+      // Fallback narrative
+      return `Now that we've identified ${audienceName}, let's explore topics that will resonate with them. I've found ${topics.length} article ideas that address their specific needs and position ${analysisData.businessName} as the solution they're searching for.`;
+    }
+  }
+
+  /**
    * Generate a brief conversational observation during scraping (Moment 1).
    * Used for narrative-driven streaming UX - "thinking out loud" observations.
    * @param {{ domain: string, initialContent: string }} context
@@ -515,50 +634,6 @@ Respond with only valid JSON, e.g. {"businessName": "Acme Corp", "targetAudience
     }
   }
 
-  /**
-   * Generate first-person audience-step narration for the guided funnel (Issue #261).
-   * @param {{ businessName?: string, targetAudience?: string, scenariosCount?: number }} context
-   * @returns {Promise<string>} Short first-person paragraph
-   */
-  async generateAudienceNarration(context = {}) {
-    const name = context.businessName || 'your business';
-    const audience = context.targetAudience || 'your ideal customers';
-    const count = context.scenariosCount ?? 0;
-    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant) speaking to the user. Say that we've identified audience segments for ${name} and that we're about to show them (${count} segments). Be warm and concise. No markdown.`;
-
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 150,
-      temperature: 0.6
-    });
-    return (response.choices[0]?.message?.content || '').trim();
-  }
-
-  /**
-   * Generate first-person topic-step narration for the guided funnel (Issue #261).
-   * @param {{ businessName?: string, selectedAudience?: string, topicCount?: number }} context
-   * @returns {Promise<string>} Short first-person paragraph
-   */
-  async generateTopicNarration(context = {}) {
-    const name = context.businessName || 'your business';
-    const segment = context.selectedAudience || 'this audience';
-    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant). Say we're now picking content topics that fit ${name} and ${segment}. Be warm and concise. No markdown.`;
-
-    const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 150,
-      temperature: 0.6
-    });
-    return (response.choices[0]?.message?.content || '').trim();
-  }
 
   /**
    * Generate first-person content-generation-step narration for the guided funnel (Issue #261).
@@ -704,7 +779,26 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
    * @param {string} contentFocus
    * @param {string} connectionId
    */
-  async generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId) {
+  async generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId, analysisData = null, selectedAudience = null) {
+    // Generate and stream topic narrative first (if we have the data)
+    if (analysisData && selectedAudience) {
+      try {
+        console.log('📝 [TOPIC-NARRATIVE-STREAM] Generating narrative before topics');
+        const narrative = await this.generateTopicNarrative(analysisData, selectedAudience, []);
+
+        // Stream narrative word by word
+        const words = narrative.split(/(\s+)/);
+        for (let i = 0; i < words.length; i++) {
+          streamManager.publish(connectionId, 'topic-chunk', { text: words[i] });
+          if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+        }
+        streamManager.publish(connectionId, 'topic-complete-narrative', {});
+        console.log('✅ [TOPIC-NARRATIVE-STREAM] Narrative streamed');
+      } catch (narrativeErr) {
+        console.warn('⚠️ [TOPIC-NARRATIVE-STREAM] Error:', narrativeErr.message);
+      }
+    }
+
     const model = process.env.OPENAI_TOPICS_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const systemContent = `You are a content strategist. Create blog topics that are SEO-optimized, use searchable keywords, and promise clear value. Use direct language people actually search for—no abstract or academic phrasing.`;
 
