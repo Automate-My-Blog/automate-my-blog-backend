@@ -1023,6 +1023,25 @@ BAD examples (TOO LONG/ABSTRACT):
   }
 
   /**
+   * Check if topic title is already a good news search query (2-4 words, no abstract terms).
+   * When true, we can skip the LLM extraction and use the title directly for a faster path.
+   * @param {string} title - Topic title
+   * @returns {boolean}
+   */
+  isSearchFriendlyTitle(title) {
+    if (!title || typeof title !== 'string') return false;
+    const trimmed = title.trim();
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 4) return false;
+    const abstractTerms = [
+      'impact', 'hidden', 'paradox', 'transformation', 'revolution', 'revolutionary',
+      'ultimate', 'secret', 'unveiled', 'unlocking', 'discover', 'essential', 'complete'
+    ];
+    const lower = trimmed.toLowerCase();
+    return !abstractTerms.some((term) => lower.includes(term));
+  }
+
+  /**
    * Extract news search queries from topic/description (similar to tweets/YouTube)
    * @param {string} content - Topic description or content
    * @param {Object} topic - Blog topic information
@@ -1076,7 +1095,7 @@ BAD examples (TOO LONG/ABSTRACT):
           }
         ],
         temperature: 0.3,
-        max_tokens: 200
+        max_tokens: 100
       });
 
       const queriesText = response.choices[0].message.content;
@@ -1112,30 +1131,33 @@ BAD examples (TOO LONG/ABSTRACT):
 
     console.log(`🔍 [NEWS] Searching with ${limitedQueries.length} query...`);
 
-    const allArticles = [];
     const seenUrls = new Set();
+    const allArticles = [];
 
-    for (const query of limitedQueries) {
-      try {
-        console.log(`🔍 [NEWS] Searching: "${query}"`);
-
-        const articles = await newsArticleSearch.searchRelevantArticles({
-          topic: query,
-          businessType: 'General',
-          targetAudience: 'General',
-          maxArticles
-        });
-
-        for (const article of articles) {
-          if (!seenUrls.has(article.url)) {
-            seenUrls.add(article.url);
-            allArticles.push(article);
-          }
+    // Run all queries in parallel for speed (when multiple queries are used)
+    const results = await Promise.all(
+      limitedQueries.map(async (query) => {
+        try {
+          console.log(`🔍 [NEWS] Searching: "${query}"`);
+          return await newsArticleSearch.searchRelevantArticles({
+            topic: query,
+            businessType: 'General',
+            targetAudience: 'General',
+            maxArticles
+          });
+        } catch (error) {
+          console.warn(`⚠️ News search failed for "${query}":`, error.message);
+          return [];
         }
+      })
+    );
 
-        console.log(`✅ Found ${articles.length} articles (${allArticles.length} total unique)`);
-      } catch (error) {
-        console.warn(`⚠️ News search failed for "${query}":`, error.message);
+    for (const articles of results) {
+      for (const article of articles) {
+        if (article.url && !seenUrls.has(article.url)) {
+          seenUrls.add(article.url);
+          allArticles.push(article);
+        }
       }
     }
 
@@ -1153,18 +1175,24 @@ BAD examples (TOO LONG/ABSTRACT):
    */
   async searchForTopicStreamNews(topic, businessInfo, maxArticles = 5, connectionId) {
     try {
-      const topicDescription = `
+      // Fast path: use topic.title directly when it's already a good search query (saves ~0.5–2s LLM call)
+      let searchQueries;
+      if (this.isSearchFriendlyTitle(topic?.title)) {
+        searchQueries = [topic.title.trim()];
+        console.log('🔍 [NEWS] Using topic title as search query (fast path):', searchQueries[0]);
+      } else {
+        const topicDescription = `
       Title: ${topic.title}
       Subheader: ${topic.subheader || ''}
       Focus: ${topic.trend || ''}
       SEO: ${topic.seoBenefit || ''}
     `.trim();
-
-      const searchQueries = await this.extractNewsSearchQueries(
-        topicDescription,
-        topic,
-        businessInfo
-      );
+        searchQueries = await this.extractNewsSearchQueries(
+          topicDescription,
+          topic,
+          businessInfo
+        );
+      }
       streamManager.publish(connectionId, 'queries-extracted', {
         searchTermsUsed: searchQueries
       });
