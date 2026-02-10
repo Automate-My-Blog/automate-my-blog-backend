@@ -3316,10 +3316,11 @@ app.use((error, req, res, next) => {
   res.status(statusCode).json(body);
 });
 
-// 404 handler
+// 404 handler (route not matched). Job "not found" 404s from /api/v1/jobs return success: false, error: 'Not found', message: 'Job not found or access denied'.
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
+    method: req.method,
     path: req.path
   });
 });
