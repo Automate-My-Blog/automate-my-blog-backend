@@ -15,10 +15,23 @@ import streamManager from './stream-manager.js';
  * Targets 95+ SEO scores using comprehensive analysis insights
  */
 export class EnhancedBlogGenerationService extends OpenAIService {
+  /** Shared system prompt for blog generation (non-streaming and streaming). */
+  static BLOG_GENERATION_SYSTEM_PROMPT = `You are an expert SEO content strategist who writes blog posts that rank well and genuinely help readers. Your goal: content that earns a 95+ SEO score while feeling human, specific, and worth reading.
+
+PRIORITIES (in order):
+1. READER VALUE: Every section must answer "so what?"—clear benefit, actionable insight, or credible evidence. No filler, no generic intros, no vague conclusions.
+2. BRAND FIT: Match the provided brand voice and style patterns exactly so the post feels like it belongs to the business.
+3. SEO EXCELLENCE: Title 50–60 chars, meta 150–160 chars, clear H1/H2/H3 hierarchy, semantic keywords, scannable structure (short paragraphs, one main idea per paragraph).
+4. STRUCTURE: Strong opening hook (problem, question, or striking fact) → logical sections with clear takeaways → conclusion that summarizes value and next steps (no new claims). Never end with a generic "we hope this helped."
+5. FACTUAL INTEGRITY: Do not fabricate statistics, studies, expert names, or case studies. Use general patterns, hypotheticals, or cited sources when you have them.
+6. INTEGRATION: Weave internal links, CTAs, and any provided tweets/articles/videos only where they fit naturally; never force them.
+
+OUTPUT: Return valid JSON. Put the "content" key first so the post body can stream. The content value must be raw markdown with real line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs.`;
+
   constructor() {
     super();
     this.visualContentService = visualContentService;
-    
+
     // Initialize OpenAI client with proper API key
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -695,7 +708,7 @@ Keep it simple, specific, and searchable.`;
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries from blog posts. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant tweets. Output only a valid JSON array of one string, e.g. ["query"]. The query must be 2-4 concrete words, searchable and specific—no abstract phrases.'
           },
           {
             role: 'user',
@@ -855,7 +868,7 @@ BAD examples (TOO LONG/ABSTRACT):
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries for YouTube video discovery. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant YouTube videos. Output only a valid JSON array of one string (2-4 concrete words), e.g. ["query"]. Keep it specific and searchable.'
           },
           {
             role: 'user',
@@ -990,11 +1003,22 @@ BAD examples (TOO LONG/ABSTRACT):
       SEO: ${topic.seoBenefit || ''}
     `.trim();
 
-    // Run both query extractions in parallel
-    const [tweetQueries, videoQueries] = await Promise.all([
-      this.extractTweetSearchQueries(topicDescription, topic, businessInfo),
-      this.extractYouTubeSearchQueries(topicDescription, topic, businessInfo)
-    ]);
+    let tweetQueries;
+    let videoQueries;
+
+    // Fast path: skip both LLM extractions when topic title is already a good search query (2–4 concrete words)
+    if (this.isSearchFriendlyTitle(topic?.title)) {
+      const query = topic.title.trim();
+      tweetQueries = [query];
+      videoQueries = [query];
+      console.log('🔍 [RELATED-CONTENT] Using topic title as search query (fast path):', query);
+    } else {
+      // Run both query extractions in parallel
+      [tweetQueries, videoQueries] = await Promise.all([
+        this.extractTweetSearchQueries(topicDescription, topic, businessInfo),
+        this.extractYouTubeSearchQueries(topicDescription, topic, businessInfo)
+      ]);
+    }
 
     // Run both searches in parallel
     const [tweets, videos] = await Promise.all([
@@ -1007,6 +1031,25 @@ BAD examples (TOO LONG/ABSTRACT):
       videos,
       searchTermsUsed: { tweets: tweetQueries, videos: videoQueries }
     };
+  }
+
+  /**
+   * Check if topic title is already a good news search query (2-4 words, no abstract terms).
+   * When true, we can skip the LLM extraction and use the title directly for a faster path.
+   * @param {string} title - Topic title
+   * @returns {boolean}
+   */
+  isSearchFriendlyTitle(title) {
+    if (!title || typeof title !== 'string') return false;
+    const trimmed = title.trim();
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 4) return false;
+    const abstractTerms = [
+      'impact', 'hidden', 'paradox', 'transformation', 'revolution', 'revolutionary',
+      'ultimate', 'secret', 'unveiled', 'unlocking', 'discover', 'essential', 'complete'
+    ];
+    const lower = trimmed.toLowerCase();
+    return !abstractTerms.some((term) => lower.includes(term));
   }
 
   /**
@@ -1055,7 +1098,7 @@ BAD examples (TOO LONG/ABSTRACT):
         messages: [
           {
             role: 'system',
-            content: 'You extract search queries for news article discovery. Return only valid JSON arrays.'
+            content: 'You extract a single, short search query from blog content to find relevant news articles. Output only a valid JSON array of one string (2-4 concrete words), e.g. ["query"]. Use terms a journalist or publisher would use; keep it specific and searchable.'
           },
           {
             role: 'user',
@@ -1063,7 +1106,7 @@ BAD examples (TOO LONG/ABSTRACT):
           }
         ],
         temperature: 0.3,
-        max_tokens: 200
+        max_tokens: 100
       });
 
       const queriesText = response.choices[0].message.content;
@@ -1099,30 +1142,33 @@ BAD examples (TOO LONG/ABSTRACT):
 
     console.log(`🔍 [NEWS] Searching with ${limitedQueries.length} query...`);
 
-    const allArticles = [];
     const seenUrls = new Set();
+    const allArticles = [];
 
-    for (const query of limitedQueries) {
-      try {
-        console.log(`🔍 [NEWS] Searching: "${query}"`);
-
-        const articles = await newsArticleSearch.searchRelevantArticles({
-          topic: query,
-          businessType: 'General',
-          targetAudience: 'General',
-          maxArticles
-        });
-
-        for (const article of articles) {
-          if (!seenUrls.has(article.url)) {
-            seenUrls.add(article.url);
-            allArticles.push(article);
-          }
+    // Run all queries in parallel for speed (when multiple queries are used)
+    const results = await Promise.all(
+      limitedQueries.map(async (query) => {
+        try {
+          console.log(`🔍 [NEWS] Searching: "${query}"`);
+          return await newsArticleSearch.searchRelevantArticles({
+            topic: query,
+            businessType: 'General',
+            targetAudience: 'General',
+            maxArticles
+          });
+        } catch (error) {
+          console.warn(`⚠️ News search failed for "${query}":`, error.message);
+          return [];
         }
+      })
+    );
 
-        console.log(`✅ Found ${articles.length} articles (${allArticles.length} total unique)`);
-      } catch (error) {
-        console.warn(`⚠️ News search failed for "${query}":`, error.message);
+    for (const articles of results) {
+      for (const article of articles) {
+        if (article.url && !seenUrls.has(article.url)) {
+          seenUrls.add(article.url);
+          allArticles.push(article);
+        }
       }
     }
 
@@ -1140,18 +1186,24 @@ BAD examples (TOO LONG/ABSTRACT):
    */
   async searchForTopicStreamNews(topic, businessInfo, maxArticles = 5, connectionId) {
     try {
-      const topicDescription = `
+      // Fast path: use topic.title directly when it's already a good search query (saves ~0.5–2s LLM call)
+      let searchQueries;
+      if (this.isSearchFriendlyTitle(topic?.title)) {
+        searchQueries = [topic.title.trim()];
+        console.log('🔍 [NEWS] Using topic title as search query (fast path):', searchQueries[0]);
+      } else {
+        const topicDescription = `
       Title: ${topic.title}
       Subheader: ${topic.subheader || ''}
       Focus: ${topic.trend || ''}
       SEO: ${topic.seoBenefit || ''}
     `.trim();
-
-      const searchQueries = await this.extractNewsSearchQueries(
-        topicDescription,
-        topic,
-        businessInfo
-      );
+        searchQueries = await this.extractNewsSearchQueries(
+          topicDescription,
+          topic,
+          businessInfo
+        );
+      }
       streamManager.publish(connectionId, 'queries-extracted', {
         searchTermsUsed: searchQueries
       });
@@ -1220,7 +1272,7 @@ If none of the tweets are suitable, return an empty array: []`;
         messages: [
           {
             role: 'system',
-            content: 'You select authoritative tweets that support blog narratives. Return only valid JSON arrays of URLs.'
+            content: 'You select 2-4 tweets that are authoritative (experts, practitioners, credible sources), directly support claims in the post, and match the brand voice. Return only a valid JSON array of tweet URLs, e.g. ["https://x.com/..."]. If none fit, return [].'
           },
           {
             role: 'user',
@@ -1312,7 +1364,7 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
         messages: [
           {
             role: 'system',
-            content: 'You insert tweets with explanatory context into blog posts. Preserve all original content and use exact placeholders provided.'
+            content: 'You insert tweets into a blog post with brief explanatory context. Preserve every word of the original post; only add 2-3 sentences before each tweet placeholder explaining why this expert or source matters and how it supports the section. Use the exact placeholder strings provided. Do not repeat or paraphrase the tweet in the surrounding text—add new context only.'
           },
           {
             role: 'user',
@@ -1458,21 +1510,44 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
-   * Ensure IMAGE placeholders use Markdown image syntax ![IMAGE:...] so the frontend regex matches.
-   * Converts [IMAGE:type:description] to ![IMAGE:type:description] when the leading ! is missing.
+   * Ensure IMAGE/CHART placeholders use Markdown image syntax ![IMAGE:...] / ![CHART:...] so the frontend regex matches.
+   * Converts [IMAGE:...] and [CHART:...] to ![IMAGE:...] and ![CHART:...] when the leading ! is missing.
+   * Uses a simple prefix replacement so descriptions with colons/brackets are not broken.
    */
   normalizeImagePlaceholders(content) {
     if (!content || typeof content !== 'string') {
       return content;
     }
-    return content.replace(/(?<!!)\[IMAGE:(\w+):(.*?)\]/g, '![IMAGE:$1:$2]');
+    // Add leading ! when missing (frontend and processImagePlaceholders expect ![IMAGE:...] / ![CHART:...])
+    let out = content.replace(/(?<!!)\[IMAGE:/g, '![IMAGE:');
+    out = out.replace(/(?<!!)\[CHART:/g, '![CHART:');
+    return out;
+  }
+
+  /**
+   * Normalize request CTAs (body.ctas / job payload ctas) to internal shape for prompt.
+   * Request shape: { text: string, href?: string, type?: string, placement?: string }
+   */
+  normalizeRequestCtas(ctas) {
+    if (!Array.isArray(ctas) || ctas.length === 0) return [];
+    return ctas
+      .filter((c) => c && typeof c.text === 'string')
+      .map((c) => ({
+        cta_text: c.text,
+        href: c.href ?? '',
+        cta_type: c.type ?? 'general',
+        placement: c.placement ?? 'inline',
+        context: null
+      }));
   }
 
   /**
    * Build enhanced generation prompt with all available data
+   * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
    */
-  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = []) {
+  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = [], requestCtas = []) {
     const { availability, settings, manualData, websiteData, completenessScore } = organizationContext;
+    const normalizedRequestCtas = this.normalizeRequestCtas(requestCtas);
 
     // Build context sections based on available data
     let contextSections = [];
@@ -1543,14 +1618,51 @@ When including specific statistics, research findings, or expert quotes, provide
 **FORMAT:** [descriptive text](https://full-url.com)`;
     contextSections.push(externalRefInstructions);
 
-    // CTA context with real URLs
+    // CTA context with real URLs (request CTAs override DB when provided)
     console.log('🎯 [CTA DEBUG] Prompt Building: Checking CTA availability:', {
+      hasRequestCTAs: normalizedRequestCtas.length > 0,
       hasWebsiteDataCTAs: websiteData?.ctas && websiteData.ctas.length > 0,
       ctaCount: websiteData?.ctas?.length || 0,
       hasManualCTAPreferences: !!manualData?.cta_preferences
     });
 
-    if (websiteData.ctas && websiteData.ctas.length > 0) {
+    if (normalizedRequestCtas.length > 0) {
+      console.log('✅ [CTA DEBUG] Prompt Building: Using request CTAs in prompt:', {
+        ctaCount: normalizedRequestCtas.length,
+        ctas: normalizedRequestCtas.map((cta) => ({
+          text: cta.cta_text,
+          href: cta.href,
+          type: cta.cta_type,
+          placement: cta.placement
+        }))
+      });
+
+      const ctaContext = `AVAILABLE CTAS (use these EXACT URLs - do not modify):
+
+${normalizedRequestCtas.map((cta, i) =>
+  `${i + 1}. "${cta.cta_text}" → ${cta.href}
+   Type: ${cta.cta_type} | Best placement: ${cta.placement}
+   Context: ${cta.context || 'General use'}`
+).join('\n\n')}
+
+CRITICAL CTA INSTRUCTIONS:
+- ONLY use CTAs from the list above
+- Use the EXACT href URLs provided - do not modify them
+- Integrate CTAs naturally where they fit the content flow
+- If a CTA doesn't fit naturally, skip it (don't force it)
+- NEVER create placeholder URLs like "https://www.yourwebsite.com/..."
+- If no CTAs fit, it's okay to have none
+
+CTA SPACING RULES (CRITICAL - NEVER VIOLATE):
+- MINIMUM 200-300 words between ANY two CTAs (NEVER back-to-back or in consecutive paragraphs)
+- First CTA: After 300-400 words of content (NOT in introduction)
+- Middle CTA(s): Space out every 400-500 words throughout the body
+- Final CTA: Place 100-200 words BEFORE the conclusion section
+- NEVER place CTAs in the first 200 words (introduction zone)
+- Distribute strategically throughout the post - avoid clustering 3+ CTAs in one section
+- If you cannot maintain proper spacing, use fewer CTAs (2 well-spaced CTAs > 3 clustered CTAs)`;
+      contextSections.push(ctaContext);
+    } else if (websiteData.ctas && websiteData.ctas.length > 0) {
       console.log('✅ [CTA DEBUG] Prompt Building: Adding REAL CTAs to prompt:', {
         ctaCount: websiteData.ctas.length,
         ctas: websiteData.ctas.map(cta => ({
@@ -1611,7 +1723,7 @@ CTA SPACING RULES (CRITICAL - NEVER VIOLATE):
     // SEO optimization instructions (conditional based on available data)
     const seoTarget = settings.target_seo_score || 95;
     const hasInternalLinks = websiteData.internal_links && websiteData.internal_links.length > 0;
-    const hasCTAs = websiteData.ctas && websiteData.ctas.length > 0;
+    const hasCTAs = normalizedRequestCtas.length > 0 || (websiteData.ctas && websiteData.ctas.length > 0);
 
     console.log('🎯 [CTA DEBUG] Prompt Building: CTA flag for SEO instructions:', {
       hasCTAs,
@@ -1685,6 +1797,7 @@ When you encounter these content patterns, you MUST use the corresponding highli
 **Highlight Box Rules:**
 - Use MAXIMUM 3 highlight boxes per post (regardless of length)
 - **CRITICAL: Use 2-3 DIFFERENT highlight types per post - NEVER use only one type**
+- One main idea per box; keep box content concise (one sentence or short phrase)
 - Match highlight type to content context (statistics → 'statistic', warnings → 'warning', tips → 'tip')
 - NEVER place highlight boxes in the conclusion section or after the last CTA
 - All highlight boxes must appear BEFORE the final call-to-action
@@ -1837,12 +1950,52 @@ This evidence-based approach aligns with current best practices in maternal ment
 - Use other forms of social proof (statistics, studies, quotes from publications)`}`;
 
     // Embeddable content: index-based placeholders [TWEET:0], [ARTICLE:0], [VIDEO:0] for frontend replacement
+    const preloadedTweets = topic.preloadedTweets || [];
     const preloadedArticles = topic.preloadedArticles || [];
     const preloadedVideos = topic.preloadedVideos || [];
     const tweetCount = realTweetUrls.length;
     const articleCount = preloadedArticles.length;
     const videoCount = preloadedVideos.length;
     let embedPlaceholdersSection = '';
+    let relatedContentSection = '';
+
+    // Build RELATED CONTENT section: give the model actual content so the post reflects it
+    const relatedParts = [];
+    if (preloadedTweets.length > 0) {
+      relatedParts.push(`**TWEETS (index matches [TWEET:0], [TWEET:1], etc.):**
+${preloadedTweets.map((t, i) => `- [TWEET:${i}] @${t.author_handle || t.handle || 'unknown'}: "${(t.text || '').replace(/"/g, "'").slice(0, 280)}"`).join('\n')}`);
+    }
+    if (preloadedArticles.length > 0) {
+      relatedParts.push(`**ARTICLES (index matches [ARTICLE:0], [ARTICLE:1], etc.):**
+${preloadedArticles.map((a, i) => {
+        const title = String(a.title || a.url || '').slice(0, 80);
+        const desc = (a.description || a.content || '').slice(0, 200);
+        return `- [ARTICLE:${i}] "${title}"${desc ? ` — ${desc}` : ''} (source: ${a.sourceName || a.author || 'unknown'})`;
+      }).join('\n')}`);
+    }
+    if (preloadedVideos.length > 0) {
+      relatedParts.push(`**VIDEOS (index matches [VIDEO:0], [VIDEO:1], etc.):**
+${preloadedVideos.map((v, i) => {
+        const title = String(v.title || v.url || '').slice(0, 80);
+        const desc = (v.description || '').slice(0, 150);
+        return `- [VIDEO:${i}] "${title}"${desc ? ` — ${desc}` : ''} (channel: ${v.channelTitle || 'unknown'})`;
+      }).join('\n')}`);
+    }
+    if (relatedParts.length > 0) {
+      relatedContentSection = `
+## RELATED CONTENT TO WEAVE INTO THE POST (CRITICAL)
+
+The following tweets, articles, and videos were provided for this topic. **Your post content MUST reflect their actual content.** Do not use them as decorative embeds—reference specific points, quotes, or insights from each item when you cite it.
+
+${relatedParts.join('\n\n')}
+
+**WEAVING INSTRUCTIONS:**
+- When you introduce a tweet, your surrounding text must summarize or reference what the tweet actually says
+- When you cite an article, mention specific findings or points from its description/content
+- When you embed a video, explain what the viewer will learn or why it's relevant based on its title/description
+- Place each embed in a section that directly relates to its content`;
+    }
+
     if (tweetCount > 0 || articleCount > 0 || videoCount > 0) {
       embedPlaceholdersSection = `
 **EMBEDDABLE CONTENT — use these exact placeholders in the post body** (the frontend will replace them):
@@ -1861,7 +2014,7 @@ ${videoCount > 0 ? `- Videos: [VIDEO:0]${videoCount > 1 ? `, [VIDEO:1]${videoCou
       availableBoxTypes: availableBoxTypes.join(', ')
     });
 
-    return `Write a high-quality blog post optimized for ${seoTarget}+ SEO score:
+    return `Write a single, publication-ready blog post that earns a ${seoTarget}+ SEO score and is genuinely useful to the target audience. Be specific, concrete, and avoid generic filler.
 
 TOPIC: ${topic.title}
 SUBTITLE: ${topic.subheader}
@@ -1877,16 +2030,19 @@ ${seoInstructions}
 ${imageInstructions}
 
 ${highlightBoxInstructions}
+${relatedContentSection}
 ${embedPlaceholdersSection}
 
 CONTENT REQUIREMENTS:
-1. STRATEGIC VALUE: Provide actionable insights that demonstrate expertise
-2. SEO OPTIMIZATION: Target ${seoTarget}+ score on comprehensive SEO analysis
-3. BRAND ALIGNMENT: Match the voice and tone patterns identified
-4. INTERNAL LINKING: Include 3-5 natural internal links to relevant content
-5. CTA INTEGRATION: Include 2-3 contextual calls-to-action that feel natural
-6. MOBILE OPTIMIZATION: Use scannable formatting with clear headings
-7. VALUE-FOCUSED: Every paragraph should provide genuine value to readers
+1. OPENING: Start with a clear hook—a specific problem, a surprising stat, or a direct question—not "In today's world..." or "X is important."
+2. VALUE PER SECTION: Each section should deliver one main idea with evidence, examples, or actionable steps. No fluff or restating the same point.
+3. PARAGRAPHS: Keep paragraphs short (2–4 sentences). One main idea per paragraph. Use subheadings so readers can scan.
+4. CONCLUSION: Summarize key takeaways and a clear next step or CTA. Do not introduce new claims or end with "we hope this helped."
+5. BRAND ALIGNMENT: Match the voice and tone patterns provided so the post feels on-brand.
+6. INTERNAL LINKS & CTAS: Use only from the lists provided; place them where they naturally support the reader's journey (see spacing rules above).
+7. RELATED CONTENT: If tweets, articles, or videos were provided, reference their actual content—specific points or quotes—and introduce each embed with context that reflects what it says, not generic filler.
+
+QUALITY BAR: Avoid obvious AI patterns. No stacked adjectives ("comprehensive, actionable, innovative"), no "delve" or "landscape" filler, no fake expert names or made-up studies. Prefer concrete examples and clear language.
 
 ABSOLUTE PROHIBITIONS - NEVER DO THESE:
 ❌ DO NOT create fake expert names (e.g., "Dr. Sarah Johnson", "Dr. Emily Chen", "Dr. Michael Roberts")
@@ -1907,13 +2063,14 @@ RULE: If you want to include an anecdote, expert story, or testimonial → Use a
 
 ADDITIONAL INSTRUCTIONS: ${additionalInstructions}
 
-Return JSON with the "content" key FIRST so the post body streams as raw markdown. The content value must be raw markdown with real line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs. Example content shape:
+OUTPUT FORMAT: Return a single valid JSON object. Put the "content" key first (so the post body can stream). Escape the content value for JSON: use \\n for newlines (e.g. after the # title, after each ## or ### heading, and a blank line between paragraphs). Double-quotes inside the content must be escaped as \\".
 
+Example content shape:
 "content": "# Your Title Here\\n\\nFirst paragraph.\\n\\n## First Section\\n\\nSection body.\\n\\n## Second Section\\n\\nMore body."
 
-Then add the other keys. Full format:
+Full JSON structure (content first, then metadata):
 {
-  "content": "Full blog post in markdown: # Title\\n\\n intro paragraph\\n\\n## Section\\n\\n body... (use \\n\\n after title, after each ##/###, between paragraphs)",
+  "content": "Full blog post in markdown with \\n for line breaks (e.g. # Title\\n\\nIntro.\\n\\n## Section\\n\\nBody...)",
   "title": "SEO-optimized title (50-60 chars)",
   "subtitle": "Compelling subtitle",
   "metaDescription": "Action-oriented meta description (150-160 chars)",
@@ -1921,19 +2078,10 @@ Then add the other keys. Full format:
   "estimatedReadTime": "X min read",
   "seoKeywords": ["primary", "secondary", "semantic", "keywords"],
   "internalLinks": [
-    {
-      "anchorText": "natural anchor text",
-      "suggestedUrl": "/suggested/url",
-      "context": "why this link adds value"
-    }
+    { "anchorText": "natural anchor text", "suggestedUrl": "/suggested/url", "context": "why this link adds value" }
   ],
   "ctaSuggestions": [
-    {
-      "text": "CTA text",
-      "placement": "end-of-post",
-      "type": "primary",
-      "context": "why this CTA fits here"
-    }
+    { "text": "CTA text", "placement": "end-of-post", "type": "primary", "context": "why this CTA fits here" }
   ],
   "seoOptimizationScore": "predicted score based on SEO best practices"
 }`;
@@ -1941,8 +2089,9 @@ Then add the other keys. Full format:
 
   /**
    * Generate enhanced blog post with website analysis integration
+   * @param {object} opts - Optional: { ctas?: Array<{ text, href?, type?, placement? }> } for request-provided CTAs
    */
-  async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '') {
+  async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '', opts = {}) {
     const startTime = Date.now();
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
@@ -1987,7 +2136,8 @@ Then add the other keys. Full format:
       console.log(`🐦 [TWEET] Building prompt with ${tweetPlaceholders.length} pre-loaded tweets (with embedded data)`);
 
       // Build enhanced prompt WITH tweet placeholders (OpenAI will insert them during generation)
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
+      const requestCtas = this.normalizeRequestCtas(opts.ctas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -1999,23 +2149,8 @@ Then add the other keys. Full format:
       const completion = await this.openai.chat.completions.create({
         model: model,
         messages: [
-          {
-            role: 'system',
-            content: `You are an expert SEO content strategist who creates blog posts that consistently score 95+ on comprehensive SEO analysis. You understand both technical SEO requirements and user experience needs. You integrate brand voice, internal linking, and CTAs naturally into valuable content.
-
-CRITICAL REQUIREMENTS:
-1. SEO EXCELLENCE: Target 95+ SEO score through comprehensive optimization
-2. BRAND CONSISTENCY: Match provided brand voice and style patterns exactly  
-3. STRATEGIC LINKING: Include internal links that genuinely add value
-4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
-5. MOBILE-FIRST: Structure content for mobile readability and engagement
-6. FACTUAL ACCURACY: No fabricated statistics or false claims
-7. GENUINE VALUE: Every section must provide actionable insights`
-          },
-          {
-            role: 'user',
-            content: enhancedPrompt
-          }
+          { role: 'system', content: EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT },
+          { role: 'user', content: enhancedPrompt }
         ],
         temperature: 0.3, // Lower temperature for more consistent quality
         max_tokens: 7000 // Increased to accommodate full blog with all visual elements
@@ -2188,6 +2323,16 @@ CRITICAL REQUIREMENTS:
         enhancementLevel: blogData.organizationContext.enhancementLevel,
         generatedAt: new Date().toISOString()
       };
+
+      // Include request CTAs in result so frontend receives the CTAs used for this generation
+      if (requestCtas.length > 0) {
+        blogData.ctas = requestCtas.map((c) => ({
+          text: c.cta_text,
+          href: c.href,
+          type: c.cta_type,
+          placement: c.placement
+        }));
+      }
 
       // Final check: Log highlight boxes in final content being returned
       const finalBoxMatches = blogData.content?.match(/<blockquote[^>]*data-highlight-type[^>]*>.*?<\/blockquote>/gs) || [];
@@ -2444,26 +2589,14 @@ CRITICAL REQUIREMENTS:
         const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
         return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
       });
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
+      const requestCtas = this.normalizeRequestCtas(options.ctas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
+      const streamingSystemPrompt = `${EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT}\n\nSTREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`;
       const stream = await this.openai.chat.completions.create({
         model,
         messages: [
-          {
-            role: 'system',
-            content: `You are an expert SEO content strategist who creates blog posts that consistently score 95+ on comprehensive SEO analysis. You understand both technical SEO requirements and user experience needs. You integrate brand voice, internal linking, and CTAs naturally into valuable content.
-
-CRITICAL REQUIREMENTS:
-1. SEO EXCELLENCE: Target 95+ SEO score through comprehensive optimization
-2. BRAND CONSISTENCY: Match provided brand voice and style patterns exactly
-3. STRATEGIC LINKING: Include internal links that genuinely add value
-4. CONVERSION OPTIMIZATION: Place CTAs where they feel natural and helpful
-5. MOBILE-FIRST: Structure content for mobile readability and engagement
-6. FACTUAL ACCURACY: No fabricated statistics or false claims
-7. GENUINE VALUE: Every section must provide actionable insights
-
-STREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`
-          },
+          { role: 'system', content: streamingSystemPrompt },
           { role: 'user', content: enhancedPrompt }
         ],
         temperature: 0.3,
@@ -2502,6 +2635,15 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         hasManualInputs: organizationContext.hasManualFallbacks,
         enhancementLevel: organizationContext.completenessScore > 60 ? 'high' : organizationContext.completenessScore > 30 ? 'medium' : 'basic'
       };
+      // Include request CTAs in stream result so frontend receives the CTAs used for this generation
+      if (requestCtas.length > 0) {
+        blogData.ctas = requestCtas.map((c) => ({
+          text: c.cta_text,
+          href: c.href,
+          type: c.cta_type,
+          placement: c.placement
+        }));
+      }
       streamManager.publish(connectionId, 'complete', { result: blogData });
     } catch (error) {
       console.error('Blog stream error:', error);
@@ -2547,7 +2689,8 @@ STREAMING: Your response is streamed; only the "content" field is sent to the pr
         topic,
         businessInfo,
         organizationId,
-        options.additionalInstructions || ''
+        options.additionalInstructions || '',
+        { ctas: options.ctas }
       );
       if (typeof onPartialResult === 'function') {
         onPartialResult('blog-result', {

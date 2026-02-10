@@ -134,7 +134,7 @@ Once the backend follows this contract, the frontend can rely on it and simplify
 
 ## Backend implementation
 
-- **Stream:** `POST /api/v1/enhanced-blog-generation/generate-stream` (client opens `GET /api/v1/stream?token=...` first, then POSTs with `connectionId`).
+- **Stream:** `POST /api/v1/blog/generate-stream` or `POST /api/v1/enhanced-blog-generation/generate-stream` (client opens `GET /api/v1/stream?token=...` first, then POSTs with `connectionId`). Request body can include optional **`ctas`** (array of `{ text, href?, type?, placement? }`); when present, the backend uses these in the prompt so the streamed post includes the business’s real CTAs.
 - **Prompt:** The backend asks the model to put the `"content"` key **first** in the JSON and to write the content value as **raw markdown with line breaks** (`\n` in JSON after the # title, after each ##/### heading, and between paragraphs). The streaming system message reinforces that only the content field is streamed and must be formatted for preview.
 - **Logic:** `services/enhanced-blog-generation.js` — `generateBlogPostStream()` accumulates the raw OpenAI stream, extracts only the `"content"` field value via `_extractContentValueFromStreamBuffer()` (unescaping `\n` to real newlines), and emits `content-chunk` with `field: "content"` for that body text only. On completion, parses full JSON and sends `complete` with `result` (including `result.content` with normal newlines). When `topic.preloadedArticles` or `topic.preloadedVideos` are present (or passed in options), the prompt instructs the model to use [ARTICLE:0], [VIDEO:0], etc. in the body.
 

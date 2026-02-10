@@ -2,10 +2,18 @@ import axios from 'axios';
 
 /**
  * Grok Tweet Search Service
- * Uses xAI's Agent Tools API with grok-4-1-fast for FAST X/Twitter searches
+ * Uses xAI's Agent Tools API with grok-4-1-fast for X/Twitter searches.
  *
- * Updated Jan 2026: Migrated from deprecated Live Search API to Agent Tools
- * Benefits: Server-side orchestration, parallel execution, FREE (no cost), faster
+ * Updated Jan 2026: Migrated from deprecated Live Search API to Agent Tools.
+ *
+ * WHY IT CAN BE SLOW (10–30+ seconds):
+ * The API is agentic: there is no "raw search with this query" endpoint. Each request runs:
+ * 1. Model turn 1: Read our prompt → decide to call x_search → formulate search query → invoke tool.
+ * 2. Server-side: x_search runs (xAI → X/Twitter backend); we don't control this latency.
+ * 3. Model turn 2: Receive tool results → format final JSON.
+ * So we pay for two full model round-trips plus one external search. max_turns: 1 limits to one
+ * tool use, but we still need both the "call tool" and "format answer" phases. Shorter prompts
+ * and lower max_tokens help a little; the rest is xAI/X backend. Set GROK_DEBUG=1 to log timings.
  */
 export class GrokTweetSearchService {
   constructor() {
@@ -34,6 +42,9 @@ export class GrokTweetSearchService {
       return [];
     }
 
+    const debug = process.env.GROK_DEBUG === '1' || process.env.GROK_DEBUG === 'true';
+    const startMs = Date.now();
+
     try {
       console.log(`🔍 Searching for real tweets about: ${topic}`);
 
@@ -42,25 +53,9 @@ export class GrokTweetSearchService {
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
       const fromDate = sixMonthsAgo.toISOString().split('T')[0]; // YYYY-MM-DD format
 
-      // Simplified prompt - let Grok's agentic search handle the strategy
-      const prompt = `Find ${maxTweets} popular, high-engagement tweets about: ${topic}
-
-Look for tweets from experts, professionals, or advocates with verified accounts or significant followings.
-
-Return ONLY this JSON (no explanations):
-{
-  "tweets": [
-    {
-      "url": "https://x.com/username/status/1234567890",
-      "author": "Full Name",
-      "handle": "username",
-      "text": "Full tweet text...",
-      "likes": 1234,
-      "retweets": 567,
-      "verified": true
-    }
-  ]
-}`;
+      // Short prompt to reduce first model turn; model still decides search query and formats JSON
+      const prompt = `Find ${maxTweets} popular tweets about: ${topic}. Prefer experts/verified. Return ONLY this JSON, no other text:
+{"tweets":[{"url":"https://x.com/handle/status/123","author":"Full Name","handle":"handle","text":"tweet text","likes":0,"retweets":0,"verified":true}]}`;
 
       const response = await axios.post(
         this.endpoint,
@@ -92,20 +87,23 @@ Return ONLY this JSON (no explanations):
             'Authorization': `Bearer ${this.apiKey}`,
             'Content-Type': 'application/json'
           },
-          timeout: 60000  // 60s max - give xAI API more time (Vercel limit)
+          timeout: Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 60000  // 60s default; tune via env once you have average response times
         }
       );
 
-      // NEW: Agent Tools API response format (/v1/responses)
-      console.log('🔍 [GROK DEBUG] Response structure:', {
-        hasOutput: !!response.data.output,
-        outputLength: response.data.output?.length,
-        hasText: !!response.data.text,
-        textKeys: response.data.text ? Object.keys(response.data.text) : [],
-        outputTypes: response.data.output?.map(o => o.type),
-        status: response.data.status,
-        allKeys: Object.keys(response.data)
-      });
+      const elapsedMs = Date.now() - startMs;
+      if (debug) {
+        console.log('🔍 [GROK DEBUG] Response structure:', {
+          hasOutput: !!response.data.output,
+          outputLength: response.data.output?.length,
+          hasText: !!response.data.text,
+          textKeys: response.data.text ? Object.keys(response.data.text) : [],
+          outputTypes: response.data.output?.map(o => o.type),
+          status: response.data.status,
+          allKeys: Object.keys(response.data)
+        });
+      }
+      console.log(`🔍 [GROK] Tweet search completed in ${elapsedMs}ms, status: ${response.data.status ?? 'n/a'}`);
 
       // Log if status indicates incomplete/error
       if (response.data.status && response.data.status !== 'completed') {
@@ -191,7 +189,8 @@ Return ONLY this JSON (no explanations):
 
     } catch (error) {
       if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        console.warn('⏱️ Grok tweet search timed out (60s) - continuing without tweets');
+        const timeoutMs = Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 60000;
+        console.warn(`⏱️ Grok tweet search timed out (${timeoutMs}ms) - continuing without tweets`);
       } else {
         console.error('❌ Grok tweet search failed:', error.message);
         if (error.response) {

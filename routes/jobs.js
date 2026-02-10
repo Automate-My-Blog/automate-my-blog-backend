@@ -57,6 +57,13 @@ function requireUserOrSession(req, res, next) {
   next();
 }
 
+/**
+ * GET /api/v1/jobs — sanity check that the jobs router is mounted (e.g. on staging).
+ */
+router.get('/', (req, res) => {
+  res.json({ ok: true, message: 'Jobs API', endpoints: ['POST /website-analysis', 'POST /content-generation', 'GET /:jobId/status', 'GET /:jobId/stream', 'GET /:jobId/narrative-stream', 'POST /:jobId/retry', 'POST /:jobId/cancel'] });
+});
+
 /** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
 function sendJobError(res, e, defaultMessage = 'Internal error') {
   if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
@@ -127,7 +134,7 @@ router.post('/website-analysis', requireUserOrSession, async (req, res) => {
 
 /**
  * POST /api/v1/jobs/content-generation
- * Body: same as POST /api/v1/enhanced-blog-generation/generate (topic, businessInfo, organizationId, etc.)
+ * Body: same as POST /api/v1/enhanced-blog-generation/generate (topic, businessInfo, organizationId, etc.); optional top-level ctas array.
  * Returns: 201 { jobId: string }
  */
 router.post('/content-generation', requireUserOrSession, async (req, res) => {
@@ -141,7 +148,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       });
     }
 
-    const { topic, businessInfo, organizationId, additionalInstructions, options } = req.body;
+    const { topic, businessInfo, organizationId, additionalInstructions, options, ctas } = req.body;
     if (!topic || !businessInfo || !organizationId) {
       return res.status(400).json({
         success: false,
@@ -157,6 +164,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       additionalInstructions: additionalInstructions ?? null,
       options: options ?? {}
     };
+    if (Array.isArray(ctas) && ctas.length > 0) input.ctas = ctas;
 
     const { jobId } = await jobQueue.createJob('content_generation', input, {
       userId,
@@ -253,16 +261,14 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
 });
 
 /**
- * GET /api/v1/jobs/:jobId/stream?token=JWT (or Authorization / x-session-id)
- * SSE stream for real-time job progress. EventSource-compatible (?token=).
- * Events: connected, progress-update, step-change, complete, failed.
- * Connection closes on complete/fail or after 10 min.
+ * GET /api/v1/jobs/:jobId/stream[/?] — SSE stream for real-time job progress.
+ * Handles both /stream and /stream/ (no redirect, to avoid redirect loops with proxies).
+ * EventSource-compatible (?token=). Events: connected, progress-update, step-change, complete, failed.
  */
-router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
+async function handleJobStream(req, res) {
   try {
     const { jobId } = req.params;
     const ctx = getJobContext(req);
-    // Retry when null to avoid 404 on create→stream race (read-after-write / replica lag)
     const status = await getJobStatusWithRetry(jobId, ctx);
     if (!status) {
       return res.status(404).json({
@@ -277,7 +283,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-    // Send a leading comment so proxies/clients see data immediately (reduces intermittent connection issues)
     if (!res.writableEnded) {
       res.write(': ok\n\n');
       if (typeof res.flush === 'function') res.flush();
@@ -290,7 +295,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
     }, { keepalive: true, maxAgeMs: JOB_STREAM_MAX_AGE_MS });
 
     streamManager.subscribeToJob(jobId, connectionId);
-    // Wait for Redis job-events subscription so we don't miss early worker events (fixes intermittent missed events)
     await streamManager.whenJobPatternReady();
 
     if (res.writableEnded) return;
@@ -301,7 +305,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
       hint: 'If stream closes before job completes, poll GET /jobs/:jobId/status'
     });
 
-    // Catch-up: send current job state so frontend is never stuck (handles missed events during subscription or fast job completion)
     if (!res.writableEnded) {
       const current = await jobQueue.getJobStatus(jobId, ctx);
       if (current) {
@@ -325,7 +328,6 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
       }
     }
 
-    // Send stream-timeout event 10s before closing so frontend can fall back to polling
     const timeoutWarningMs = JOB_STREAM_MAX_AGE_MS - 10 * 1000;
     const warningTimer = setTimeout(() => {
       if (!res.writableEnded) {
@@ -345,7 +347,10 @@ router.get('/:jobId/stream', requireUserOrSession, async (req, res) => {
   } catch (e) {
     if (!res.headersSent) sendJobError(res, e, 'Failed to open stream');
   }
-});
+}
+
+router.get('/:jobId/stream', requireUserOrSession, handleJobStream);
+router.get('/:jobId/stream/', requireUserOrSession, handleJobStream);
 
 /**
  * GET /api/v1/jobs/:jobId/status

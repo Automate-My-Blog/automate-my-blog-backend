@@ -71,6 +71,7 @@ app.set('trust proxy', 1);
 const allowedOriginList = [
   'https://automatemyblog.com',
   'https://www.automatemyblog.com',
+  'https://staging.automatemyblog.com',
   'https://automatemyblog.vercel.app',
   'http://localhost:3000',
   'http://localhost:3001',
@@ -97,6 +98,34 @@ function corsOrigin(origin, callback) {
   callback(null, false);
 }
 
+function isOriginAllowed(origin) {
+  if (!origin) return false;
+  if (allAllowedOrigins.includes(origin)) return true;
+  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return true;
+  if (process.env.NODE_ENV === 'development') {
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
+    } catch (_) { /* ignore */ }
+  }
+  return false;
+}
+
+// Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
+// The browser sends OPTIONS first; without these headers the actual request is blocked.
+app.use((req, res, next) => {
+  if (req.method !== 'OPTIONS') return next();
+  const origin = req.headers.origin;
+  if (isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+  res.status(204).end();
+});
+
 app.use(cors({
   origin: corsOrigin,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -116,7 +145,7 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health'
+  skip: (req) => req.path === '/health' || req.path === '/manifest.json'
 });
 
 app.use(limiter);
@@ -192,6 +221,20 @@ app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 
 // Founder Email Routes (Admin only - should add auth middleware)
 app.use(founderEmailRoutes);
+
+// PWA manifest — public, no auth (fixes 401 when frontend or proxy requests /manifest.json from backend origin).
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.json({
+    name: 'AutoBlog',
+    short_name: 'AutoBlog',
+    description: 'AutoBlog — automate your blog',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#ffffff',
+    theme_color: '#000000'
+  });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -1618,6 +1661,8 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       additionalInstructions,
       saveToAccount,
       tweets,  // Pre-fetched tweets for the topic
+      articles, // Pre-fetched news articles (optional)
+      videos,  // Pre-fetched YouTube videos (optional)
       // Enhanced Phase 3 parameters (backward compatible)
       organizationId,
       useEnhancedGeneration = false,
@@ -1682,7 +1727,7 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
           businessInfo,
           organizationId,
           targetSEOScore,
-          { additionalInstructions: additionalInstructions || '', includeVisuals, preloadedTweets: tweets }
+          { additionalInstructions: additionalInstructions || '', includeVisuals, preloadedTweets: tweets, preloadedArticles: articles, preloadedVideos: videos }
         );
         blogPost = optimizationResult.bestResult;
         qualityPrediction = optimizationResult.finalScore;
@@ -1697,7 +1742,9 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
             {
               additionalInstructions: additionalInstructions || '',
               includeVisuals,
-              preloadedTweets: tweets  // Pass pre-fetched tweets
+              preloadedTweets: tweets,
+              preloadedArticles: articles,
+              preloadedVideos: videos
             }
           );
           console.log(`✅ Enhanced generation completed successfully`);
@@ -3283,10 +3330,11 @@ app.use((error, req, res, next) => {
   res.status(statusCode).json(body);
 });
 
-// 404 handler
+// 404 handler (route not matched). Job "not found" 404s from /api/v1/jobs return success: false, error: 'Not found', message: 'Job not found or access denied'.
 app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
+    method: req.method,
     path: req.path
   });
 });

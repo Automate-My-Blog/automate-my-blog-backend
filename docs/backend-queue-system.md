@@ -85,7 +85,7 @@ Single job runs: **analyze → audiences → pitches → audience images**.
 
 ## Content generation
 
-- **Input:** Same as `POST /api/v1/enhanced-blog-generation/generate` (e.g. `topic`, `businessInfo`, `organizationId`, `additionalInstructions`, `options`).
+- **Input:** Same as `POST /api/v1/enhanced-blog-generation/generate` (e.g. `topic`, `businessInfo`, `organizationId`, `additionalInstructions`, `options`). Optional top-level **`ctas`** array: when present, the worker uses these CTAs when building the generation prompt so the post includes the business’s real calls-to-action. Shape: `[{ text: string, href?: string, type?: string, placement?: string }]`. If omitted, backend uses org CTAs from DB (or none).
 - **Output:** Same shape as the generate API (`data`, `savedPost`, `metadata`, `imageGeneration`, etc.).
 - **Credits:** Checked before run; deducted on successful save.
 
