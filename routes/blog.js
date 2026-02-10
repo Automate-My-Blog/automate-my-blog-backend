@@ -1,7 +1,7 @@
 /**
  * Blog API routes. POST /api/v1/blog/generate-stream for streaming blog content (typing effect).
  * Frontend path: POST /api/v1/blog/generate-stream
- * Body: { topic, businessInfo, organizationId, additionalInstructions?, tweets? }
+ * Body: { topic, businessInfo, organizationId, additionalInstructions?, tweets?, articles?, videos?, options?: { preloadedTweets?, preloadedArticles?, preloadedVideos? } }
  * Returns 200 { connectionId }. Stream content via GET /api/v1/stream/:connectionId?token=
  */
 
@@ -25,6 +25,8 @@ router.post('/generate-stream', async (req, res) => {
       organizationId,
       additionalInstructions,
       tweets,
+      articles,
+      videos,
       options = {}
     } = req.body;
 
@@ -64,7 +66,13 @@ router.post('/generate-stream', async (req, res) => {
 
     setImmediate(() => {
       const opts = { additionalInstructions, ...options };
-      if (tweets != null) opts.tweets = tweets;
+      // Service expects preloadedTweets, preloadedArticles, preloadedVideos for [TWEET:0], [ARTICLE:0], [VIDEO:0] in prompt
+      if (tweets != null) opts.preloadedTweets = tweets;
+      if (articles != null) opts.preloadedArticles = articles;
+      if (videos != null) opts.preloadedVideos = videos;
+      if (options.preloadedTweets != null) opts.preloadedTweets = options.preloadedTweets;
+      if (options.preloadedArticles != null) opts.preloadedArticles = options.preloadedArticles;
+      if (options.preloadedVideos != null) opts.preloadedVideos = options.preloadedVideos;
       enhancedBlogGenerationService.generateBlogPostStream(
         topic,
         businessInfo,

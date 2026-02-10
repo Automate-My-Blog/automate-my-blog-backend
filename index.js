@@ -1647,6 +1647,8 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
       additionalInstructions,
       saveToAccount,
       tweets,  // Pre-fetched tweets for the topic
+      articles, // Pre-fetched news articles (optional)
+      videos,  // Pre-fetched YouTube videos (optional)
       // Enhanced Phase 3 parameters (backward compatible)
       organizationId,
       useEnhancedGeneration = false,
@@ -1711,7 +1713,7 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
           businessInfo,
           organizationId,
           targetSEOScore,
-          { additionalInstructions: additionalInstructions || '', includeVisuals, preloadedTweets: tweets }
+          { additionalInstructions: additionalInstructions || '', includeVisuals, preloadedTweets: tweets, preloadedArticles: articles, preloadedVideos: videos }
         );
         blogPost = optimizationResult.bestResult;
         qualityPrediction = optimizationResult.finalScore;
@@ -1726,7 +1728,9 @@ app.post('/api/generate-content', authService.optionalAuthMiddleware.bind(authSe
             {
               additionalInstructions: additionalInstructions || '',
               includeVisuals,
-              preloadedTweets: tweets  // Pass pre-fetched tweets
+              preloadedTweets: tweets,
+              preloadedArticles: articles,
+              preloadedVideos: videos
             }
           );
           console.log(`✅ Enhanced generation completed successfully`);
