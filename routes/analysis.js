@@ -1770,6 +1770,7 @@ router.get('/narration/audience', async (req, res) => {
     writeSSE(res, 'connected', { organizationId });
     console.log('✅ [ENDPOINT] SSE connected event sent');
 
+<<<<<<< HEAD
     // Generate and stream narration using contextual function from openai.js
     console.log('🎙️ [ENDPOINT] Generating audience narration...');
     console.log('🔍 [DEBUG] openaiService type:', typeof openaiService);
@@ -1798,10 +1799,36 @@ router.get('/narration/audience', async (req, res) => {
       analysisForNarrative,
       audiencesForNarrative
     );
+=======
+    // Generate and stream narration
+    console.log('🎙️ [ENDPOINT] Generating audience narration...');
+    const { generateAudienceNarration, streamTextAsChunks } =
+      await import('../services/narration-generator.js');
+
+    const narrationText = await generateAudienceNarration({
+      organizationId,
+      businessName: org.name,
+      businessType: org.business_type,
+      orgDescription: org.description,
+      analysisData: {
+        narrative: analysisData.narrative_analysis,
+        keyInsights: analysisData.key_insights,
+        customerScenarios: analysisData.customer_scenarios,
+        businessValue: analysisData.business_value_assessment
+      },
+      audiences: audiences.map(a => ({
+        segment: a.target_segment,
+        problem: a.customer_problem,
+        value: a.business_value,
+        pitch: a.pitch
+      }))
+    });
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
 
     console.log('✅ [ENDPOINT] Narration generated, starting stream...');
     console.log('📝 [ENDPOINT] Narration text:', narrationText);
 
+<<<<<<< HEAD
     // Stream text word by word (using simple split logic instead of importing streamTextAsChunks)
     const words = narrationText.split(' ');
     for (let i = 0; i < words.length; i++) {
@@ -1813,6 +1840,14 @@ router.get('/narration/audience', async (req, res) => {
         }
       }
     }
+=======
+    // Stream text word by word
+    await streamTextAsChunks(narrationText, async (chunk) => {
+      if (!res.writableEnded) {
+        writeSSE(res, 'audience-chunk', { text: chunk });
+      }
+    }, 50);
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
 
     console.log('✅ [ENDPOINT] Streaming complete');
 
@@ -1867,18 +1902,36 @@ router.get('/narration/topic', async (req, res) => {
       }
     }
 
+<<<<<<< HEAD
     // Resolve organization (same as narration/content and audience: context first, then fallback by id)
     let orgRow = await getOrganizationForContext(organizationId, userContext);
     if (!orgRow) orgRow = await getOrganizationById(organizationId);
     if (!orgRow) {
+=======
+    // Verify access
+    const orgQuery = userContext.isAuthenticated
+      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
+      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
+
+    const orgResult = await db.query(orgQuery, [
+      organizationId,
+      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
+    ]);
+
+    if (orgResult.rows.length === 0) {
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
       return res.status(404).json({
         success: false,
         error: 'Organization not found or access denied'
       });
     }
 
+<<<<<<< HEAD
     const fullOrgResult = await db.query('SELECT * FROM organizations WHERE id = $1', [organizationId]);
     const org = fullOrgResult.rows[0];
+=======
+    const org = orgResult.rows[0];
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
     console.log('✅ [ENDPOINT] Organization found:', {
       name: org.name,
       type: org.business_type
@@ -1943,6 +1996,7 @@ router.get('/narration/topic', async (req, res) => {
     writeSSE(res, 'connected', { organizationId });
     console.log('✅ [ENDPOINT] SSE connected event sent');
 
+<<<<<<< HEAD
     // Generate and stream narration using contextual function from openai.js
     console.log('🎙️ [ENDPOINT] Generating topic narration...');
 
@@ -1969,10 +2023,35 @@ router.get('/narration/topic', async (req, res) => {
       selectedAudienceForNarrative,
       [] // Empty topics array for initial narrative
     );
+=======
+    // Generate and stream narration
+    console.log('🎙️ [ENDPOINT] Generating topic narration...');
+    const { generateTopicNarration, streamTextAsChunks } =
+      await import('../services/narration-generator.js');
+
+    const narrationText = await generateTopicNarration({
+      businessName: org.name,
+      businessType: org.business_type,
+      orgDescription: org.description,
+      selectedAudience: audienceData.target_segment ? {
+        segment: audienceData.target_segment,
+        problem: audienceData.customer_problem,
+        language: audienceData.customer_language,
+        value: audienceData.business_value,
+        pitch: audienceData.pitch,
+        conversionPath: audienceData.conversion_path,
+        projectedProfit: {
+          low: audienceData.projected_profit_low,
+          high: audienceData.projected_profit_high
+        }
+      } : null
+    });
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
 
     console.log('✅ [ENDPOINT] Narration generated, starting stream...');
     console.log('📝 [ENDPOINT] Narration text:', narrationText);
 
+<<<<<<< HEAD
     // Stream text word by word (using simple split logic instead of importing streamTextAsChunks)
     const words = narrationText.split(' ');
     for (let i = 0; i < words.length; i++) {
@@ -1984,6 +2063,14 @@ router.get('/narration/topic', async (req, res) => {
         }
       }
     }
+=======
+    // Stream text word by word
+    await streamTextAsChunks(narrationText, async (chunk) => {
+      if (!res.writableEnded) {
+        writeSSE(res, 'topic-chunk', { text: chunk });
+      }
+    }, 50);
+>>>>>>> a7fcbf7 (fix: shift narration perspective to focus on business insights (Issue #303))
 
     console.log('✅ [ENDPOINT] Streaming complete');
 
