@@ -45,6 +45,29 @@ export const PROGRESS_PHASES = [
 ];
 
 /**
+ * Extract business profile data from analysis for PowerPoint-style display
+ */
+function extractBusinessProfile(analysisData, intelligenceData, ctaData) {
+  return {
+    businessName: analysisData.businessName || analysisData.companyName || 'Business Name',
+    domain: analysisData.website || '',
+    tagline: analysisData.businessType || 'Business Type',
+    whatTheyDo: analysisData.description || 'No description available',
+    targetAudience: analysisData.decisionMakers || analysisData.endUsers || 'Not specified',
+    brandVoice: intelligenceData?.customer_language_patterns?.tone || 'Professional',
+    contentFocus: analysisData.contentFocus || 'Content strategy',
+    ctas: ctaData?.map(cta => ({
+      text: cta.cta_text || cta.text || 'Learn more',
+      url: cta.cta_url || cta.url || ''
+    })) || [],
+    businessModel: analysisData.businessModel || 'Not specified',
+    websiteGoals: analysisData.websiteGoals || 'Not specified',
+    blogStrategy: analysisData.blogStrategy || 'Not specified',
+    keyTopics: intelligenceData?.seo_opportunities || null
+  };
+}
+
+/**
  * Persist analysis to organization, intelligence, and CTAs.
  * Returns { organizationId }.
  */
@@ -742,6 +765,31 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
       // Signal narrative completion
       await streamNarrative({ type: 'narrative-complete', content: '' });
+
+      // Extract and stream business profile for PowerPoint-style display
+      const businessProfile = extractBusinessProfile(
+        {
+          businessName: analysis.businessName || analysis.companyName,
+          businessType: analysis.businessType,
+          description: analysis.description,
+          businessModel: analysis.businessModel,
+          decisionMakers: analysis.decisionMakers,
+          endUsers: analysis.endUsers,
+          searchBehavior: analysis.searchBehavior,
+          contentFocus: analysis.contentFocus,
+          websiteGoals: analysis.websiteGoals,
+          blogStrategy: analysis.blogStrategy,
+          website: url
+        },
+        intelligenceData,
+        ctaForNarrative
+      );
+
+      console.log('📊 [PROFILE] Streaming business profile');
+      await streamNarrative({
+        type: 'business-profile',
+        content: JSON.stringify(businessProfile)
+      });
     }
 
     // Store cards in database (convert to text for backward compatibility)
