@@ -1458,14 +1458,18 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
-   * Ensure IMAGE placeholders use Markdown image syntax ![IMAGE:...] so the frontend regex matches.
-   * Converts [IMAGE:type:description] to ![IMAGE:type:description] when the leading ! is missing.
+   * Ensure IMAGE/CHART placeholders use Markdown image syntax ![IMAGE:...] / ![CHART:...] so the frontend regex matches.
+   * Converts [IMAGE:...] and [CHART:...] to ![IMAGE:...] and ![CHART:...] when the leading ! is missing.
+   * Uses a simple prefix replacement so descriptions with colons/brackets are not broken.
    */
   normalizeImagePlaceholders(content) {
     if (!content || typeof content !== 'string') {
       return content;
     }
-    return content.replace(/(?<!!)\[IMAGE:(\w+):(.*?)\]/g, '![IMAGE:$1:$2]');
+    // Add leading ! when missing (frontend and processImagePlaceholders expect ![IMAGE:...] / ![CHART:...])
+    let out = content.replace(/(?<!!)\[IMAGE:/g, '![IMAGE:');
+    out = out.replace(/(?<!!)\[CHART:/g, '![CHART:');
+    return out;
   }
 
   /**
