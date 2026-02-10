@@ -143,7 +143,8 @@ async function processContentGeneration(jobId, input, context) {
     businessInfo,
     organizationId,
     additionalInstructions,
-    options = {}
+    options = {},
+    ctas
   } = input;
 
   if (!topic || !businessInfo || !organizationId) {
@@ -180,6 +181,7 @@ async function processContentGeneration(jobId, input, context) {
       additionalInstructions,
       includeVisuals: options.includeVisuals !== false,
       onPartialResult,
+      ...(Array.isArray(ctas) && ctas.length > 0 && { ctas }),
       ...options
     }
   );

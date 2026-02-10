@@ -134,7 +134,7 @@ router.post('/website-analysis', requireUserOrSession, async (req, res) => {
 
 /**
  * POST /api/v1/jobs/content-generation
- * Body: same as POST /api/v1/enhanced-blog-generation/generate (topic, businessInfo, organizationId, etc.)
+ * Body: same as POST /api/v1/enhanced-blog-generation/generate (topic, businessInfo, organizationId, etc.); optional top-level ctas array.
  * Returns: 201 { jobId: string }
  */
 router.post('/content-generation', requireUserOrSession, async (req, res) => {
@@ -148,7 +148,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       });
     }
 
-    const { topic, businessInfo, organizationId, additionalInstructions, options } = req.body;
+    const { topic, businessInfo, organizationId, additionalInstructions, options, ctas } = req.body;
     if (!topic || !businessInfo || !organizationId) {
       return res.status(400).json({
         success: false,
@@ -164,6 +164,7 @@ router.post('/content-generation', requireUserOrSession, async (req, res) => {
       additionalInstructions: additionalInstructions ?? null,
       options: options ?? {}
     };
+    if (Array.isArray(ctas) && ctas.length > 0) input.ctas = ctas;
 
     const { jobId } = await jobQueue.createJob('content_generation', input, {
       userId,

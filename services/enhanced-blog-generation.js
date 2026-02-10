@@ -1514,10 +1514,29 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
-   * Build enhanced generation prompt with all available data
+   * Normalize request CTAs (body.ctas / job payload ctas) to internal shape for prompt.
+   * Request shape: { text: string, href?: string, type?: string, placement?: string }
    */
-  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = []) {
+  normalizeRequestCtas(ctas) {
+    if (!Array.isArray(ctas) || ctas.length === 0) return [];
+    return ctas
+      .filter((c) => c && typeof c.text === 'string')
+      .map((c) => ({
+        cta_text: c.text,
+        href: c.href ?? '',
+        cta_type: c.type ?? 'general',
+        placement: c.placement ?? 'inline',
+        context: null
+      }));
+  }
+
+  /**
+   * Build enhanced generation prompt with all available data
+   * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
+   */
+  buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = [], requestCtas = []) {
     const { availability, settings, manualData, websiteData, completenessScore } = organizationContext;
+    const normalizedRequestCtas = this.normalizeRequestCtas(requestCtas);
 
     // Build context sections based on available data
     let contextSections = [];
@@ -1588,14 +1607,51 @@ When including specific statistics, research findings, or expert quotes, provide
 **FORMAT:** [descriptive text](https://full-url.com)`;
     contextSections.push(externalRefInstructions);
 
-    // CTA context with real URLs
+    // CTA context with real URLs (request CTAs override DB when provided)
     console.log('🎯 [CTA DEBUG] Prompt Building: Checking CTA availability:', {
+      hasRequestCTAs: normalizedRequestCtas.length > 0,
       hasWebsiteDataCTAs: websiteData?.ctas && websiteData.ctas.length > 0,
       ctaCount: websiteData?.ctas?.length || 0,
       hasManualCTAPreferences: !!manualData?.cta_preferences
     });
 
-    if (websiteData.ctas && websiteData.ctas.length > 0) {
+    if (normalizedRequestCtas.length > 0) {
+      console.log('✅ [CTA DEBUG] Prompt Building: Using request CTAs in prompt:', {
+        ctaCount: normalizedRequestCtas.length,
+        ctas: normalizedRequestCtas.map((cta) => ({
+          text: cta.cta_text,
+          href: cta.href,
+          type: cta.cta_type,
+          placement: cta.placement
+        }))
+      });
+
+      const ctaContext = `AVAILABLE CTAS (use these EXACT URLs - do not modify):
+
+${normalizedRequestCtas.map((cta, i) =>
+  `${i + 1}. "${cta.cta_text}" → ${cta.href}
+   Type: ${cta.cta_type} | Best placement: ${cta.placement}
+   Context: ${cta.context || 'General use'}`
+).join('\n\n')}
+
+CRITICAL CTA INSTRUCTIONS:
+- ONLY use CTAs from the list above
+- Use the EXACT href URLs provided - do not modify them
+- Integrate CTAs naturally where they fit the content flow
+- If a CTA doesn't fit naturally, skip it (don't force it)
+- NEVER create placeholder URLs like "https://www.yourwebsite.com/..."
+- If no CTAs fit, it's okay to have none
+
+CTA SPACING RULES (CRITICAL - NEVER VIOLATE):
+- MINIMUM 200-300 words between ANY two CTAs (NEVER back-to-back or in consecutive paragraphs)
+- First CTA: After 300-400 words of content (NOT in introduction)
+- Middle CTA(s): Space out every 400-500 words throughout the body
+- Final CTA: Place 100-200 words BEFORE the conclusion section
+- NEVER place CTAs in the first 200 words (introduction zone)
+- Distribute strategically throughout the post - avoid clustering 3+ CTAs in one section
+- If you cannot maintain proper spacing, use fewer CTAs (2 well-spaced CTAs > 3 clustered CTAs)`;
+      contextSections.push(ctaContext);
+    } else if (websiteData.ctas && websiteData.ctas.length > 0) {
       console.log('✅ [CTA DEBUG] Prompt Building: Adding REAL CTAs to prompt:', {
         ctaCount: websiteData.ctas.length,
         ctas: websiteData.ctas.map(cta => ({
@@ -1656,7 +1712,7 @@ CTA SPACING RULES (CRITICAL - NEVER VIOLATE):
     // SEO optimization instructions (conditional based on available data)
     const seoTarget = settings.target_seo_score || 95;
     const hasInternalLinks = websiteData.internal_links && websiteData.internal_links.length > 0;
-    const hasCTAs = websiteData.ctas && websiteData.ctas.length > 0;
+    const hasCTAs = normalizedRequestCtas.length > 0 || (websiteData.ctas && websiteData.ctas.length > 0);
 
     console.log('🎯 [CTA DEBUG] Prompt Building: CTA flag for SEO instructions:', {
       hasCTAs,
@@ -2022,8 +2078,9 @@ Full JSON structure (content first, then metadata):
 
   /**
    * Generate enhanced blog post with website analysis integration
+   * @param {object} opts - Optional: { ctas?: Array<{ text, href?, type?, placement? }> } for request-provided CTAs
    */
-  async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '') {
+  async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '', opts = {}) {
     const startTime = Date.now();
     const model = process.env.OPENAI_MODEL || 'gpt-4o';
 
@@ -2068,7 +2125,8 @@ Full JSON structure (content first, then metadata):
       console.log(`🐦 [TWEET] Building prompt with ${tweetPlaceholders.length} pre-loaded tweets (with embedded data)`);
 
       // Build enhanced prompt WITH tweet placeholders (OpenAI will insert them during generation)
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
+      const requestCtas = this.normalizeRequestCtas(opts.ctas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -2510,7 +2568,8 @@ Full JSON structure (content first, then metadata):
         const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
         return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
       });
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders);
+      const requestCtas = this.normalizeRequestCtas(options.ctas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
       const streamingSystemPrompt = `${EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT}\n\nSTREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`;
       const stream = await this.openai.chat.completions.create({
@@ -2600,7 +2659,8 @@ Full JSON structure (content first, then metadata):
         topic,
         businessInfo,
         organizationId,
-        options.additionalInstructions || ''
+        options.additionalInstructions || '',
+        { ctas: options.ctas }
       );
       if (typeof onPartialResult === 'function') {
         onPartialResult('blog-result', {

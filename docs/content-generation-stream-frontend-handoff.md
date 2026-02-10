@@ -19,7 +19,7 @@ Streaming blog generation so the UI can show **partial results as each stage fin
 - **Method:** `POST`
 - **URL:** `${API_BASE}/api/v1/jobs/content-generation`
 - **Auth:** `Authorization: Bearer <JWT>` (required)
-- **Body (JSON):** Same as `POST /api/v1/enhanced-blog-generation/generate`:
+- **Body (JSON):** Same as `POST /api/v1/enhanced-blog-generation/generate`. Optional top-level **`ctas`** (array of `{ text, href?, type?, placement? }`): when the org has CTAs, send them so the generated post uses the business’s real calls-to-action; when omitted, backend uses DB CTAs or none.
 
 ```json
 {
@@ -34,7 +34,8 @@ Streaming blog generation so the UI can show **partial results as each stage fin
     "preloadedTweets": [],
     "preloadedArticles": [],
     "preloadedVideos": []
-  }
+  },
+  "ctas": [{ "text": "Book a demo", "href": "https://example.com/demo", "type": "primary", "placement": "end-of-post" }]
 }
 ```
 
