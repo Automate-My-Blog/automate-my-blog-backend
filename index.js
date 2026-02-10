@@ -145,7 +145,7 @@ const limiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health'
+  skip: (req) => req.path === '/health' || req.path === '/manifest.json'
 });
 
 app.use(limiter);
@@ -221,6 +221,20 @@ app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 
 // Founder Email Routes (Admin only - should add auth middleware)
 app.use(founderEmailRoutes);
+
+// PWA manifest — public, no auth (fixes 401 when frontend or proxy requests /manifest.json from backend origin).
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.json({
+    name: 'AutoBlog',
+    short_name: 'AutoBlog',
+    description: 'AutoBlog — automate your blog',
+    start_url: '/',
+    display: 'standalone',
+    background_color: '#ffffff',
+    theme_color: '#000000'
+  });
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
