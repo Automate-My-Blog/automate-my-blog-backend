@@ -45,6 +45,29 @@ export const PROGRESS_PHASES = [
 ];
 
 /**
+ * Extract business profile data from analysis for PowerPoint-style display
+ */
+function extractBusinessProfile(analysisData, intelligenceData, ctaData) {
+  return {
+    businessName: analysisData.businessName || analysisData.companyName || 'Business Name',
+    domain: analysisData.website || '',
+    tagline: analysisData.businessType || 'Business Type',
+    whatTheyDo: analysisData.description || 'No description available',
+    targetAudience: analysisData.decisionMakers || analysisData.endUsers || 'Not specified',
+    brandVoice: intelligenceData?.customer_language_patterns?.tone || 'Professional',
+    contentFocus: analysisData.contentFocus || 'Content strategy',
+    ctas: ctaData?.map(cta => ({
+      text: cta.cta_text || cta.text || 'Learn more',
+      url: cta.cta_url || cta.url || ''
+    })) || [],
+    businessModel: analysisData.businessModel || 'Not specified',
+    websiteGoals: analysisData.websiteGoals || 'Not specified',
+    blogStrategy: analysisData.blogStrategy || 'Not specified',
+    keyTopics: intelligenceData?.seo_opportunities || null
+  };
+}
+
+/**
  * Persist analysis to organization, intelligence, and CTAs.
  * Returns { organizationId }.
  */
@@ -715,19 +738,68 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       ctaForNarrative
     );
 
-    // Stream narrative word-by-word for typing effect (15ms per word)
-    const narrativeText = narrativeAnalysis?.narrative || '';
-    if (narrativeText) {
-      const words = narrativeText.split(/(\s+)/);
-      for (let i = 0; i < words.length; i++) {
+    // Stream insight cards progressively (3-4 second intervals)
+    const insightCards = narrativeAnalysis?.cards || [];
+    console.log('📊 [CARD-STREAM] Streaming', insightCards.length, 'insight cards');
+
+    if (insightCards.length > 0) {
+      for (let i = 0; i < insightCards.length; i++) {
         if (await checkCancelled()) throw new Error('Cancelled');
-        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
-        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+
+        const card = insightCards[i];
+        console.log('🎴 [CARD-STREAM] Streaming card', i + 1, ':', card.heading);
+
+        // Stream card as structured event
+        await streamNarrative({
+          type: 'insight-card',
+          content: JSON.stringify(card),
+          cardIndex: i,
+          totalCards: insightCards.length
+        });
+
+        // Wait 3.5 seconds before next card (except after last card)
+        if (i < insightCards.length - 1) {
+          await new Promise((r) => setTimeout(r, 3500));
+        }
       }
+
+      // Signal narrative completion
       await streamNarrative({ type: 'narrative-complete', content: '' });
     }
 
-    // Store narrative in database
+    // Extract and stream business profile for PowerPoint-style display (always, regardless of cards)
+    console.log('📊 [PROFILE] About to extract business profile');
+    const businessProfile = extractBusinessProfile(
+      {
+        businessName: analysis.businessName || analysis.companyName,
+        businessType: analysis.businessType,
+        description: analysis.description,
+        businessModel: analysis.businessModel,
+        decisionMakers: analysis.decisionMakers,
+        endUsers: analysis.endUsers,
+        searchBehavior: analysis.searchBehavior,
+        contentFocus: analysis.contentFocus,
+        websiteGoals: analysis.websiteGoals,
+        blogStrategy: analysis.blogStrategy,
+        website: url
+      },
+      intelligenceData,
+      ctaForNarrative
+    );
+
+    console.log('📊 [PROFILE] Business profile extracted:', JSON.stringify(businessProfile, null, 2));
+    console.log('📊 [PROFILE] Streaming business profile via streamNarrative');
+    await streamNarrative({
+      type: 'business-profile',
+      content: JSON.stringify(businessProfile)
+    });
+    console.log('📊 [PROFILE] Business profile event sent successfully');
+
+    // Store cards in database (convert to text for backward compatibility)
+    const narrativeText = insightCards.map(card =>
+      `${card.heading}\n\n${card.body}\n\n${card.takeaway}`
+    ).join('\n\n---\n\n');
+
     await db.query(
       `UPDATE organization_intelligence
        SET narrative_analysis = $1,
@@ -736,9 +808,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
            updated_at = NOW()
        WHERE organization_id = $4 AND is_current = TRUE`,
       [
-        narrativeAnalysis.narrative,
+        narrativeText,
         narrativeAnalysis.confidence,
-        JSON.stringify(narrativeAnalysis.keyInsights),
+        JSON.stringify(insightCards),
         organizationId
       ]
     );
@@ -746,15 +818,21 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     console.log('✅ Narrative analysis generated and stored successfully');
   } catch (error) {
     console.error('❌ Error generating narrative analysis:', error);
-    // Stream a fallback so the narrative stream is not empty
-    const fallback = `We've analyzed ${analysis?.businessName || analysis?.companyName || 'this business'}. Your customers are searching when ${analysis?.searchBehavior || 'they need solutions'}. Good moment to show up with content.`;
+    // Stream a fallback card so the narrative stream is not empty
+    const fallbackCard = {
+      category: 'Analysis Complete',
+      heading: 'Your Business Analysis',
+      body: `We've analyzed ${analysis?.businessName || analysis?.companyName || 'this business'}. Your customers are searching when ${analysis?.searchBehavior || 'they need solutions'}. This represents a key content opportunity.`,
+      takeaway: 'Opportunity: Create content that addresses this search intent'
+    };
     try {
       await streamNarrative({ type: 'transition', content: '\n\n' });
-      const words = fallback.split(/(\s+)/);
-      for (let i = 0; i < words.length; i++) {
-        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
-        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
-      }
+      await streamNarrative({
+        type: 'insight-card',
+        content: JSON.stringify(fallbackCard),
+        cardIndex: 0,
+        totalCards: 1
+      });
       await streamNarrative({ type: 'narrative-complete', content: '' });
     } catch (streamErr) {
       console.warn('⚠️ Fallback narrative stream failed:', streamErr?.message || streamErr);
@@ -902,6 +980,25 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       console.log(`📊 Persisted ${scenarios.length} audience strategies to database`);
     } catch (persistErr) {
       console.warn('⚠️ Failed to persist audiences (scenarios still in job result):', persistErr.message);
+    }
+  }
+
+  // Generate and stream audience narrative
+  if (scenarios && scenarios.length > 0) {
+    try {
+      console.log('📝 Generating audience narrative');
+      const audienceNarrative = await openaiService.generateAudienceNarrative(analysis, scenarios);
+
+      // Stream the narrative word by word
+      const words = audienceNarrative.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        await streamNarrative({ type: 'audience-chunk', content: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      await streamNarrative({ type: 'audience-complete', content: '' });
+      console.log('✅ Audience narrative streamed successfully');
+    } catch (narrativeErr) {
+      console.warn('⚠️ Failed to generate audience narrative:', narrativeErr.message);
     }
   }
 

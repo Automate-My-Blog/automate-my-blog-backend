@@ -1,6 +1,8 @@
 import express from 'express';
 import db from '../services/database.js';
+import DatabaseAuthService from '../services/auth-database.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
+import openaiService from '../services/openai.js';
 
 const router = express.Router();
 
@@ -677,131 +679,10 @@ async function getOrganizationById(organizationId) {
  * GET /api/v1/analysis/narration/audience?organizationId=xxx
  * SSE stream: audience-narration-chunk (payload { text }), audience-narration-complete (payload { text? }).
  */
-router.get('/narration/audience', async (req, res) => {
-  try {
-    const userContext = extractUserContext(req);
-    const organizationId = req.query.organizationId;
-    if (!organizationId) {
-      const validationError = validateUserContext(userContext);
-      if (validationError) return res.status(401).json(validationError);
-      return res.status(400).json({
-        success: false,
-        error: 'organizationId is required',
-        message: 'Provide organizationId as query parameter'
-      });
-    }
-
-    let org = await getOrganizationForContext(organizationId, userContext);
-    if (!org) org = await getOrganizationById(organizationId);
-    if (!org) {
-      return res.status(404).json({
-        success: false,
-        error: 'Organization not found',
-        message: 'Organization not found or access denied'
-      });
-    }
-
-    const scenarioCountResult = await db.query(
-      `SELECT COUNT(*) AS count FROM audiences a
-       JOIN organization_intelligence oi ON a.organization_intelligence_id = oi.id
-       WHERE oi.organization_id = $1`,
-      [organizationId]
-    );
-    const scenariosCount = parseInt(scenarioCountResult.rows[0]?.count || '0', 10);
-
-    const openaiService = (await import('../services/openai.js')).default;
-    const fullText = await openaiService.generateAudienceNarration({
-      businessName: org.name,
-      targetAudience: org.target_audience,
-      scenariosCount
-    });
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-
-    const words = (fullText || '').split(/(\s+)/);
-    for (const word of words) {
-      if (res.writableEnded) break;
-      writeSSE(res, 'audience-narration-chunk', { text: word });
-      if (word.trim()) await new Promise((r) => setTimeout(r, 20));
-    }
-    if (!res.writableEnded) writeSSE(res, 'audience-narration-complete', { text: fullText || '' });
-    res.end();
-  } catch (error) {
-    console.error('❌ Audience narration error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to generate audience narration',
-        message: error.message
-      });
-    }
-  }
-});
-
 /**
  * GET /api/v1/analysis/narration/topic?organizationId=xxx&selectedAudience=...
  * SSE stream: topic-narration-chunk, topic-narration-complete.
  */
-router.get('/narration/topic', async (req, res) => {
-  try {
-    const userContext = extractUserContext(req);
-    const { organizationId, selectedAudience } = req.query;
-    if (!organizationId) {
-      const validationError = validateUserContext(userContext);
-      if (validationError) return res.status(401).json(validationError);
-      return res.status(400).json({
-        success: false,
-        error: 'organizationId is required',
-        message: 'Provide organizationId as query parameter'
-      });
-    }
-
-    let org = await getOrganizationForContext(organizationId, userContext);
-    if (!org) org = await getOrganizationById(organizationId);
-    if (!org) {
-      return res.status(404).json({
-        success: false,
-        error: 'Organization not found',
-        message: 'Organization not found or access denied'
-      });
-    }
-
-    const openaiService = (await import('../services/openai.js')).default;
-    const fullText = await openaiService.generateTopicNarration({
-      businessName: org.name,
-      selectedAudience: selectedAudience || org.target_audience || 'this audience'
-    });
-
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-
-    const words = (fullText || '').split(/(\s+)/);
-    for (const word of words) {
-      if (res.writableEnded) break;
-      writeSSE(res, 'topic-narration-chunk', { text: word });
-      if (word.trim()) await new Promise((r) => setTimeout(r, 20));
-    }
-    if (!res.writableEnded) writeSSE(res, 'topic-narration-complete', { text: fullText || '' });
-    res.end();
-  } catch (error) {
-    console.error('❌ Topic narration error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to generate topic narration',
-        message: error.message
-      });
-    }
-  }
-});
-
 /**
  * GET /api/v1/analysis/narration/content?organizationId=xxx&selectedTopic=...
  * SSE stream: content-narration-chunk, content-narration-complete.
@@ -1552,6 +1433,680 @@ router.get('/visual-design/:orgId', async (req, res) => {
       error: 'Failed to retrieve visual design analysis',
       message: error.message
     });
+  }
+});
+
+/**
+ * GET /api/v1/analysis/narration/analysis?organizationId=xxx
+ * SSE stream for analysis completion narration (Issue #303)
+ */
+router.get('/narration/analysis', async (req, res) => {
+  console.log('\n🚀 [ENDPOINT] /narration/analysis called');
+  try {
+    const { organizationId } = req.query;
+    console.log('📥 [ENDPOINT] Request params:', { organizationId });
+
+    if (!organizationId) {
+      console.log('❌ [ENDPOINT] Missing organizationId');
+      return res.status(400).json({
+        success: false,
+        error: 'organizationId is required'
+      });
+    }
+
+    // Get user context for auth
+    const userContext = extractUserContext(req);
+    console.log('🔐 [ENDPOINT] User context:', {
+      isAuthenticated: userContext.isAuthenticated,
+      hasUserId: !!userContext.userId,
+      hasSessionId: !!userContext.sessionId
+    });
+
+    // Support token-based auth for EventSource
+    if (req.query.token && !userContext.isAuthenticated) {
+      try {
+        const token = String(req.query.token).trim();
+        const authService = new DatabaseAuthService();
+        const decoded = authService.verifyToken(token);
+        if (decoded?.userId) {
+          userContext.userId = decoded.userId;
+          userContext.isAuthenticated = true;
+          console.log('✅ [ENDPOINT] Token auth successful');
+        }
+      } catch (err) {
+        console.warn('⚠️ [ENDPOINT] Token validation failed:', err.message);
+      }
+    }
+
+    // Verify access to organization
+    const orgQuery = userContext.isAuthenticated
+      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
+      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
+
+    const queryParams = [
+      organizationId,
+      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
+    ];
+
+    console.log('🔍 [ENDPOINT] Querying organization with:', {
+      query: orgQuery,
+      params: queryParams,
+      authType: userContext.isAuthenticated ? 'user' : 'session'
+    });
+
+    const orgResult = await db.query(orgQuery, queryParams);
+    console.log('📊 [ENDPOINT] Query result:', {
+      rowCount: orgResult.rows.length,
+      foundOrg: orgResult.rows.length > 0
+    });
+
+    if (orgResult.rows.length === 0) {
+      console.log('❌ [ENDPOINT] Organization not found or access denied');
+
+      // Debug: try to find org without session restriction
+      const debugQuery = 'SELECT id, name, session_id, owner_user_id FROM organizations WHERE id = $1';
+      const debugResult = await db.query(debugQuery, [organizationId]);
+      console.log('🔍 [ENDPOINT] Debug - Organization exists?', {
+        found: debugResult.rows.length > 0,
+        orgData: debugResult.rows[0] || null
+      });
+
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    const org = orgResult.rows[0];
+    console.log('✅ [ENDPOINT] Organization found:', {
+      name: org.name,
+      type: org.business_type,
+      industry: org.industry_category
+    });
+
+    // Get RICH analysis data
+    const intelQuery = `
+      SELECT
+        narrative_analysis,
+        key_insights,
+        customer_scenarios,
+        business_value_assessment,
+        customer_language_patterns,
+        seo_opportunities,
+        analysis_confidence_score
+      FROM organization_intelligence
+      WHERE organization_id = $1 AND is_current = TRUE
+      LIMIT 1
+    `;
+    console.log('🔍 [ENDPOINT] Querying organization_intelligence...');
+    const intelResult = await db.query(intelQuery, [organizationId]);
+    const analysisData = intelResult.rows[0] || {};
+    console.log('📊 [ENDPOINT] Analysis data retrieved:', {
+      hasNarrative: !!analysisData.narrative_analysis,
+      hasKeyInsights: !!analysisData.key_insights,
+      hasCustomerScenarios: !!analysisData.customer_scenarios,
+      hasBusinessValue: !!analysisData.business_value_assessment,
+      confidenceScore: analysisData.analysis_confidence_score
+    });
+
+    // Set up SSE
+    console.log('📡 [ENDPOINT] Setting up SSE...');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    if (res.socket?.setNoDelay) res.socket.setNoDelay(true);
+
+    writeSSE(res, 'connected', { organizationId });
+    console.log('✅ [ENDPOINT] SSE connected event sent');
+
+    // Generate and stream narration
+    console.log('🎙️ [ENDPOINT] Generating narration...');
+    const { generateAnalysisNarration, streamTextAsChunks } =
+      await import('../services/narration-generator.js');
+
+    const narrationText = await generateAnalysisNarration({
+      organizationId,
+      businessName: org.name,
+      businessType: org.business_type,
+      industryCategory: org.industry_category,
+      orgDescription: org.description,
+      analysisData: {
+        narrative: analysisData.narrative_analysis,
+        keyInsights: analysisData.key_insights,
+        customerScenarios: analysisData.customer_scenarios,
+        businessValue: analysisData.business_value_assessment,
+        confidenceScore: analysisData.analysis_confidence_score
+      }
+    });
+
+    console.log('✅ [ENDPOINT] Narration generated, starting stream...');
+    console.log('📝 [ENDPOINT] Narration text:', narrationText);
+
+    // Stream text word by word
+    await streamTextAsChunks(narrationText, async (chunk) => {
+      if (!res.writableEnded) {
+        writeSSE(res, 'analysis-chunk', { text: chunk });
+      }
+    }, 50);
+
+    console.log('✅ [ENDPOINT] Streaming complete');
+
+    // Send complete event
+    if (!res.writableEnded) {
+      writeSSE(res, 'analysis-complete', { text: '' });
+    }
+
+    // Extract and stream business profile for PowerPoint-style display
+    console.log('📊 [ENDPOINT-PROFILE] Extracting business profile...');
+
+    // Get CTAs from database
+    const ctaQuery = `
+      SELECT cta_text, href, cta_type, page_url
+      FROM cta_analysis
+      WHERE organization_id = $1
+      ORDER BY conversion_potential DESC
+      LIMIT 10
+    `;
+    const ctaResult = await db.query(ctaQuery, [organizationId]);
+    const ctas = ctaResult.rows.map(cta => ({
+      text: cta.cta_text,
+      url: cta.href || cta.page_url,
+      type: cta.cta_type
+    }));
+
+    const businessProfile = {
+      businessName: org.name || 'Business Name',
+      domain: org.website_url || '',
+      tagline: org.business_type || 'Business Type',
+      whatTheyDo: org.description || 'No description available',
+      targetAudience: org.target_audience || 'Not specified',
+      brandVoice: org.brand_voice || 'Professional',
+      contentFocus: org.content_focus || analysisData.customer_language_patterns?.tone || 'Content strategy',
+      ctas: ctas.length > 0 ? ctas : [],
+      businessModel: org.business_model || 'Not specified',
+      websiteGoals: org.website_goals || 'Not specified',
+      blogStrategy: analysisData.customer_language_patterns?.content_preferences?.join(', ') || 'Not specified',
+      keyTopics: analysisData.seo_opportunities || null
+    };
+
+    console.log('📊 [ENDPOINT-PROFILE] Business profile extracted:', JSON.stringify(businessProfile, null, 2));
+
+    // Stream business profile event
+    if (!res.writableEnded) {
+      console.log('📊 [ENDPOINT-PROFILE] Streaming business profile...');
+      writeSSE(res, 'business-profile', { content: JSON.stringify(businessProfile) });
+      console.log('📊 [ENDPOINT-PROFILE] Business profile event sent');
+
+      res.end();
+      console.log('✅ [ENDPOINT] Connection closed');
+    }
+
+  } catch (error) {
+    console.error('❌ [ENDPOINT] Analysis narration stream error:', error);
+    console.error('❌ [ENDPOINT] Error stack:', error.stack);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to stream analysis narration',
+        message: error.message
+      });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/analysis/narration/audience?organizationId=xxx
+ * SSE stream for audience selection narration (Issue #303)
+ */
+router.get('/narration/audience', async (req, res) => {
+  try {
+    const { organizationId } = req.query;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'organizationId is required'
+      });
+    }
+
+    // Get user context for auth
+    const userContext = extractUserContext(req);
+
+    // Support token-based auth for EventSource
+    if (req.query.token && !userContext.isAuthenticated) {
+      try {
+        const token = String(req.query.token).trim();
+        const authService = new DatabaseAuthService();
+        const decoded = authService.verifyToken(token);
+        if (decoded?.userId) {
+          userContext.userId = decoded.userId;
+          userContext.isAuthenticated = true;
+        }
+      } catch (err) {
+        console.warn('Token validation failed:', err.message);
+      }
+    }
+
+    // Verify access to organization
+    const orgQuery = userContext.isAuthenticated
+      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
+      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
+
+    const orgResult = await db.query(orgQuery, [
+      organizationId,
+      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
+    ]);
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    const org = orgResult.rows[0];
+    console.log('✅ [ENDPOINT] Organization found:', {
+      name: org.name,
+      type: org.business_type
+    });
+
+    // Get RICH analysis data including audience summaries
+    const intelQuery = `
+      SELECT
+        narrative_analysis,
+        key_insights,
+        customer_scenarios,
+        business_value_assessment
+      FROM organization_intelligence
+      WHERE organization_id = $1 AND is_current = TRUE
+      LIMIT 1
+    `;
+    console.log('🔍 [ENDPOINT] Querying organization_intelligence...');
+    const intelResult = await db.query(intelQuery, [organizationId]);
+    const analysisData = intelResult.rows[0] || {};
+    console.log('📊 [ENDPOINT] Analysis data retrieved:', {
+      hasNarrative: !!analysisData.narrative_analysis,
+      hasKeyInsights: !!analysisData.key_insights,
+      hasCustomerScenarios: !!analysisData.customer_scenarios,
+      hasBusinessValue: !!analysisData.business_value_assessment
+    });
+
+    // Get audience summaries (problems and value)
+    const audiencesWhereCondition = userContext.isAuthenticated
+      ? 'user_id = $1'
+      : 'session_id = $1';
+    const audiencesQueryParam = userContext.isAuthenticated
+      ? org.owner_user_id
+      : org.session_id;
+
+    const audiencesQuery = `
+      SELECT
+        target_segment,
+        customer_problem,
+        business_value,
+        pitch,
+        conversion_score
+      FROM audiences
+      WHERE ${audiencesWhereCondition}
+      ORDER BY conversion_score DESC
+      LIMIT 5
+    `;
+    console.log('🔍 [ENDPOINT] Querying audiences with:', {
+      whereCondition: audiencesWhereCondition,
+      param: audiencesQueryParam
+    });
+    const audiencesResult = await db.query(audiencesQuery, [audiencesQueryParam]);
+    const audiences = audiencesResult.rows || [];
+    console.log('👥 [ENDPOINT] Audiences retrieved:', {
+      count: audiences.length,
+      hasProblems: audiences.filter(a => a.customer_problem).length
+    });
+
+    // Set up SSE
+    console.log('📡 [ENDPOINT] Setting up SSE...');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    if (res.socket?.setNoDelay) res.socket.setNoDelay(true);
+
+    writeSSE(res, 'connected', { organizationId });
+    console.log('✅ [ENDPOINT] SSE connected event sent');
+
+    // Generate and stream narration using contextual function from openai.js
+    console.log('🎙️ [ENDPOINT] Generating audience narration...');
+    console.log('🔍 [DEBUG] openaiService type:', typeof openaiService);
+    console.log('🔍 [DEBUG] Has generateAudienceNarrative:', typeof openaiService.generateAudienceNarrative);
+    console.log('🔍 [DEBUG] Constructor:', openaiService.constructor.name);
+
+    // Prepare analysis data for the narrative generator
+    const analysisForNarrative = {
+      businessName: org.name,
+      businessType: org.business_type,
+      description: org.description,
+      contentFocus: org.content_focus || 'content'
+    };
+
+    // Prepare audiences in the format expected by the narrative generator
+    const audiencesForNarrative = audiences.map(a => ({
+      audienceName: a.target_segment,
+      name: a.target_segment,
+      description: a.customer_problem,
+      scenario: a.customer_problem,
+      value: a.business_value,
+      pitch: a.pitch
+    }));
+
+    const narrationText = await openaiService.generateAudienceNarrative(
+      analysisForNarrative,
+      audiencesForNarrative
+    );
+
+    console.log('✅ [ENDPOINT] Narration generated, starting stream...');
+    console.log('📝 [ENDPOINT] Narration text:', narrationText);
+
+    // Stream text word by word (using simple split logic instead of importing streamTextAsChunks)
+    const words = narrationText.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      const chunk = i === 0 ? words[i] : ' ' + words[i];
+      if (!res.writableEnded) {
+        writeSSE(res, 'audience-chunk', { text: chunk });
+        if (i < words.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+    }
+
+    console.log('✅ [ENDPOINT] Streaming complete');
+
+    // Send complete event
+    if (!res.writableEnded) {
+      writeSSE(res, 'audience-complete', { text: '' });
+      res.end();
+      console.log('✅ [ENDPOINT] Complete event sent, connection closed');
+    }
+
+  } catch (error) {
+    console.error('Audience narration stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to stream audience narration',
+        message: error.message
+      });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/analysis/narration/topic?organizationId=xxx&selectedAudience=yyy
+ * SSE stream for topic selection narration (Issue #303)
+ */
+router.get('/narration/topic', async (req, res) => {
+  try {
+    const { organizationId, selectedAudience } = req.query;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'organizationId is required'
+      });
+    }
+
+    // Get user context for auth (same pattern as audience)
+    const userContext = extractUserContext(req);
+
+    if (req.query.token && !userContext.isAuthenticated) {
+      try {
+        const token = String(req.query.token).trim();
+        const authService = new DatabaseAuthService();
+        const decoded = authService.verifyToken(token);
+        if (decoded?.userId) {
+          userContext.userId = decoded.userId;
+          userContext.isAuthenticated = true;
+        }
+      } catch (err) {
+        console.warn('Token validation failed:', err.message);
+      }
+    }
+
+    // Verify access
+    const orgQuery = userContext.isAuthenticated
+      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
+      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
+
+    const orgResult = await db.query(orgQuery, [
+      organizationId,
+      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
+    ]);
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    const org = orgResult.rows[0];
+    console.log('✅ [ENDPOINT] Organization found:', {
+      name: org.name,
+      type: org.business_type
+    });
+
+    // Get FULL audience record for selected audience
+    let audienceData = {};
+    if (selectedAudience) {
+      console.log('🔍 [ENDPOINT] Querying audience for:', selectedAudience);
+
+      const audienceWhereCondition = userContext.isAuthenticated
+        ? 'user_id = $1'
+        : 'session_id = $1';
+      const audienceQueryParam = userContext.isAuthenticated
+        ? org.owner_user_id
+        : org.session_id;
+
+      const audienceQuery = `
+        SELECT
+          target_segment,
+          customer_problem,
+          customer_language,
+          business_value,
+          pitch,
+          conversion_path,
+          projected_profit_low,
+          projected_profit_high,
+          conversion_score
+        FROM audiences
+        WHERE ${audienceWhereCondition} AND target_segment::text ILIKE $2
+        LIMIT 1
+      `;
+      console.log('🔍 [ENDPOINT] Audience query:', {
+        whereCondition: audienceWhereCondition,
+        param: audienceQueryParam,
+        selectedAudience
+      });
+      const audienceResult = await db.query(audienceQuery, [
+        audienceQueryParam,
+        `%${selectedAudience}%`
+      ]);
+      audienceData = audienceResult.rows[0] || {};
+      console.log('📊 [ENDPOINT] Audience data retrieved:', {
+        found: !!audienceData.target_segment,
+        hasProblem: !!audienceData.customer_problem,
+        hasPitch: !!audienceData.pitch,
+        hasBusinessValue: !!audienceData.business_value
+      });
+    } else {
+      console.log('⚠️ [ENDPOINT] No selectedAudience provided');
+    }
+
+    // Set up SSE
+    console.log('📡 [ENDPOINT] Setting up SSE...');
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    if (res.socket?.setNoDelay) res.socket.setNoDelay(true);
+
+    writeSSE(res, 'connected', { organizationId });
+    console.log('✅ [ENDPOINT] SSE connected event sent');
+
+    // Generate and stream narration using contextual function from openai.js
+    console.log('🎙️ [ENDPOINT] Generating topic narration...');
+
+    // Prepare analysis data for the narrative generator
+    const analysisForNarrative = {
+      businessName: org.name,
+      businessType: org.business_type,
+      description: org.description,
+      contentFocus: org.content_focus || 'content'
+    };
+
+    // Prepare selected audience in the format expected by the narrative generator
+    const selectedAudienceForNarrative = audienceData.target_segment ? {
+      audienceName: audienceData.target_segment,
+      name: audienceData.target_segment,
+      description: audienceData.customer_problem,
+      scenario: audienceData.customer_problem,
+      value: audienceData.business_value,
+      pitch: audienceData.pitch
+    } : null;
+
+    const narrationText = await openaiService.generateTopicNarrative(
+      analysisForNarrative,
+      selectedAudienceForNarrative,
+      [] // Empty topics array for initial narrative
+    );
+
+    console.log('✅ [ENDPOINT] Narration generated, starting stream...');
+    console.log('📝 [ENDPOINT] Narration text:', narrationText);
+
+    // Stream text word by word (using simple split logic instead of importing streamTextAsChunks)
+    const words = narrationText.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      const chunk = i === 0 ? words[i] : ' ' + words[i];
+      if (!res.writableEnded) {
+        writeSSE(res, 'topic-chunk', { text: chunk });
+        if (i < words.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+    }
+
+    console.log('✅ [ENDPOINT] Streaming complete');
+
+    // Send complete event
+    if (!res.writableEnded) {
+      writeSSE(res, 'topic-complete', { text: '' });
+      res.end();
+      console.log('✅ [ENDPOINT] Complete event sent, connection closed');
+    }
+
+  } catch (error) {
+    console.error('Topic narration stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to stream topic narration',
+        message: error.message
+      });
+    }
+  }
+});
+
+/**
+ * GET /api/v1/analysis/narration/content?organizationId=xxx&selectedTopic=yyy
+ * SSE stream for content narration (Issue #303) - Future use
+ */
+router.get('/narration/content', async (req, res) => {
+  try {
+    const { organizationId, selectedTopic } = req.query;
+
+    if (!organizationId) {
+      return res.status(400).json({
+        success: false,
+        error: 'organizationId is required'
+      });
+    }
+
+    // Get user context (same auth pattern)
+    const userContext = extractUserContext(req);
+
+    if (req.query.token && !userContext.isAuthenticated) {
+      try {
+        const token = String(req.query.token).trim();
+        const authService = new DatabaseAuthService();
+        const decoded = authService.verifyToken(token);
+        if (decoded?.userId) {
+          userContext.userId = decoded.userId;
+          userContext.isAuthenticated = true;
+        }
+      } catch (err) {
+        console.warn('Token validation failed:', err.message);
+      }
+    }
+
+    // Verify access
+    const orgQuery = userContext.isAuthenticated
+      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
+      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
+
+    const orgResult = await db.query(orgQuery, [
+      organizationId,
+      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
+    ]);
+
+    if (orgResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found or access denied'
+      });
+    }
+
+    // Set up SSE
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    if (res.socket?.setNoDelay) res.socket.setNoDelay(true);
+
+    writeSSE(res, 'connected', { organizationId });
+
+    // Generate and stream narration
+    const { generateContentNarration, streamTextAsChunks } =
+      await import('../services/narration-generator.js');
+
+    const narrationText = await generateContentNarration({
+      selectedTopic: selectedTopic ? { title: selectedTopic } : null
+    });
+
+    // Stream text word by word
+    await streamTextAsChunks(narrationText, async (chunk) => {
+      if (!res.writableEnded) {
+        writeSSE(res, 'content-chunk', { text: chunk });
+      }
+    }, 50);
+
+    // Send complete event
+    if (!res.writableEnded) {
+      writeSSE(res, 'content-complete', { text: '' });
+      res.end();
+    }
+
+  } catch (error) {
+    console.error('Content narration stream error:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to stream content narration',
+        message: error.message
+      });
+    }
   }
 });
 

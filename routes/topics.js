@@ -13,7 +13,6 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import openaiService from '../services/openai.js';
-import streamManager from '../services/stream-manager.js';
 
 const router = express.Router();
 
@@ -30,7 +29,7 @@ async function handleGenerateStream(req, res) {
       });
     }
 
-    const { businessType, targetAudience, contentFocus } = req.body;
+    const { businessType, targetAudience, contentFocus, analysisData, selectedAudience } = req.body;
     if (!businessType || !targetAudience || !contentFocus) {
       return res.status(400).json({
         success: false,
@@ -52,7 +51,7 @@ async function handleGenerateStream(req, res) {
     // Start topic generation immediately so events are published (Redis) and delivered
     // to the client regardless of which instance handles GET /stream/:connectionId
     openaiService
-      .generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId)
+      .generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId, analysisData, selectedAudience)
       .catch((err) => console.error('topics generate-stream error:', err));
 
     res.status(200).json({ connectionId, streamUrl });
