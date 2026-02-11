@@ -424,7 +424,7 @@ function adminPanelHtml() {
 
   <section>
     <h2>Overview</h2>
-    <div class="row"><button class="btn-primary" id="refresh-stats">Refresh all</button></div>
+    <div class="row"><button class="btn-primary" id="refresh-stats">Refresh</button></div>
     <div id="stats-error" class="msg" style="display: none;"></div>
     <div id="stat-cards" class="stat-grid"></div>
     <div id="stats-charts" class="charts"></div>
@@ -497,11 +497,11 @@ function adminPanelHtml() {
     }
 
     let jobChart = null, tablesChart = null;
-    document.getElementById('refresh-stats').onclick = async () => {
+    async function loadStats() {
       const cardsEl = document.getElementById('stat-cards');
       const chartsEl = document.getElementById('stats-charts');
       const errEl = document.getElementById('stats-error');
-      cardsEl.innerHTML = '';
+      cardsEl.innerHTML = 'Loading…';
       chartsEl.innerHTML = '';
       errEl.style.display = 'none';
       if (typeof Chart !== 'undefined' && jobChart) { jobChart.destroy(); jobChart = null; }
@@ -511,6 +511,7 @@ function adminPanelHtml() {
         checkAuth(r);
         const data = await r.json();
         if (!r.ok) {
+          cardsEl.innerHTML = '';
           errEl.textContent = data.error || data.message || r.status;
           errEl.style.display = 'block';
           return;
@@ -555,10 +556,13 @@ function adminPanelHtml() {
           });
         }
       } catch (e) {
+        cardsEl.innerHTML = '';
         document.getElementById('stats-error').textContent = 'Error: ' + e.message;
         document.getElementById('stats-error').style.display = 'block';
       }
-    };
+    }
+    document.getElementById('refresh-stats').onclick = loadStats;
+    loadStats();
 
     function showCacheMsg(msg, type) {
       const el = document.getElementById('cache-msg');
