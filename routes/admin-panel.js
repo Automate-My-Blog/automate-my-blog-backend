@@ -425,6 +425,10 @@ router.get('/', (req, res) => {
  * Only super_admin users are allowed; token is stored in sessionStorage and used for /admin.
  */
 export function adminLoginHtml() {
+  return loginFormHtml();
+}
+
+function loginFormHtml() {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -446,65 +450,111 @@ export function adminLoginHtml() {
     .msg.error { background: #450a0a; color: #fca5a5; }
     .msg.success { background: #14532d; color: #86efac; }
     a { color: #3b82f6; }
+    .loading { color: #a1a1aa; text-align: center; padding: 2rem; }
   </style>
 </head>
 <body>
-  <h1>Admin Login</h1>
-  <p class="sub">Sign in with a super admin account</p>
-  <form id="login-form">
-    <label for="email">Email</label>
-    <input type="email" id="email" name="email" required autocomplete="email" />
-    <label for="password">Password</label>
-    <input type="password" id="password" name="password" required autocomplete="current-password" />
-    <button type="submit" id="submit-btn">Sign in</button>
-    <div id="msg" class="msg" style="display: none;"></div>
-  </form>
+  <div id="admin-root">
+    <div id="login-form-container">
+      <h1>Admin Login</h1>
+      <p class="sub">Sign in with a super admin account</p>
+      <form id="login-form">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required autocomplete="email" />
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required autocomplete="current-password" />
+        <button type="submit" id="submit-btn">Sign in</button>
+        <div id="msg" class="msg" style="display: none;"></div>
+      </form>
+    </div>
+    <div id="loading-panel" class="loading" style="display: none;">Loading panel…</div>
+  </div>
   <script>
-    const form = document.getElementById('login-form');
-    const msg = document.getElementById('msg');
-    const submitBtn = document.getElementById('submit-btn');
-    function showMsg(text, type) {
-      msg.textContent = text;
-      msg.className = 'msg ' + (type || 'error');
-      msg.style.display = 'block';
-    }
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      submitBtn.disabled = true;
-      msg.style.display = 'none';
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value;
-      try {
-        const r = await fetch('/api/v1/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-          credentials: 'same-origin'
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          showMsg(data.message || data.error || 'Login failed');
-          submitBtn.disabled = false;
-          return;
-        }
-        const role = data.user && (data.user.role || data.user.role_name);
-        if (role !== 'super_admin') {
-          showMsg('Access denied. Super admin account required.');
-          submitBtn.disabled = false;
-          return;
-        }
-        if (data.accessToken) {
-          sessionStorage.setItem('adminToken', data.accessToken);
-        }
-        window.location.href = '/admin';
-      } catch (err) {
-        showMsg('Error: ' + (err.message || 'Request failed'));
-        submitBtn.disabled = false;
+    (function() {
+      var token = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('adminToken') : null;
+      var adminKey = new URLSearchParams(window.location.search).get('admin_key') || '';
+
+      if (token || adminKey) {
+        document.getElementById('login-form-container').style.display = 'none';
+        document.getElementById('loading-panel').style.display = 'block';
+        var headers = { 'Content-Type': 'text/html' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        if (adminKey) headers['x-admin-key'] = adminKey;
+        fetch('/api/v1/admin-panel', { method: 'GET', headers: headers, credentials: 'same-origin' })
+          .then(function(r) {
+            if (r.status === 401) {
+              if (sessionStorage) sessionStorage.removeItem('adminToken');
+              window.location.href = '/admin';
+              return null;
+            }
+            return r.text();
+          })
+          .then(function(html) {
+            if (!html) return;
+            document.open();
+            document.write(html);
+            document.close();
+          })
+          .catch(function(err) {
+            document.getElementById('loading-panel').textContent = 'Error: ' + (err.message || 'Failed to load');
+            document.getElementById('login-form-container').style.display = 'block';
+            document.getElementById('loading-panel').style.display = 'none';
+          });
+        return;
       }
-    };
+
+      var form = document.getElementById('login-form');
+      var msg = document.getElementById('msg');
+      var submitBtn = document.getElementById('submit-btn');
+      function showMsg(text, type) {
+        msg.textContent = text;
+        msg.className = 'msg ' + (type || 'error');
+        msg.style.display = 'block';
+      }
+      form.onsubmit = async function(e) {
+        e.preventDefault();
+        submitBtn.disabled = true;
+        msg.style.display = 'none';
+        var email = document.getElementById('email').value.trim();
+        var password = document.getElementById('password').value;
+        try {
+          var r = await fetch('/api/v1/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+            credentials: 'same-origin'
+          });
+          var data = await r.json().catch(function() { return {}; });
+          if (!r.ok) {
+            showMsg(data.message || data.error || 'Login failed');
+            submitBtn.disabled = false;
+            return;
+          }
+          var role = data.user && (data.user.role || data.user.role_name);
+          if (role !== 'super_admin') {
+            showMsg('Access denied. Super admin account required.');
+            submitBtn.disabled = false;
+            return;
+          }
+          if (data.accessToken) sessionStorage.setItem('adminToken', data.accessToken);
+          window.location.href = '/admin';
+        } catch (err) {
+          showMsg('Error: ' + (err.message || 'Request failed'));
+          submitBtn.disabled = false;
+        }
+      };
+    })();
   </script>
 </body>
 </html>`;
+}
+
+/**
+ * Shell for GET /admin: shows login form, or if token/admin_key present fetches panel with auth and writes it.
+ * Use this for GET /admin so that after redirect from login the client can send the token via fetch.
+ */
+export function adminShellHtml() {
+  return loginFormHtml();
 }
 
 export { adminPanelHtml };
