@@ -772,31 +772,43 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
   }
 
   /**
+   * Generate and stream topic narrative in the background. Does not block topic stream.
+   * Events: topic-chunk (per word), topic-complete-narrative.
+   * @param {string} connectionId
+   * @param {object} analysisData
+   * @param {object} selectedAudience
+   */
+  async streamTopicNarrativeInBackground(connectionId, analysisData, selectedAudience) {
+    try {
+      console.log('📝 [TOPIC-NARRATIVE-STREAM] Generating narrative (parallel with topics)');
+      const narrative = await this.generateTopicNarrative(analysisData, selectedAudience, []);
+
+      const words = narrative.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        streamManager.publish(connectionId, 'topic-chunk', { text: words[i] });
+        if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
+      }
+      streamManager.publish(connectionId, 'topic-complete-narrative', {});
+      console.log('✅ [TOPIC-NARRATIVE-STREAM] Narrative streamed');
+    } catch (narrativeErr) {
+      console.warn('⚠️ [TOPIC-NARRATIVE-STREAM] Error:', narrativeErr.message);
+    }
+  }
+
+  /**
    * Stream trending topics: GPT stream then DALL-E per topic. Events: topic-complete (per topic, no image),
    * topic-image-complete (per topic with image), complete { topics }.
+   * topic-complete is emitted as soon as each topic's JSON is ready so the frontend can show cards immediately.
+   * Narrative (if any) runs in parallel and does not block topic-complete.
    * @param {string} businessType
    * @param {string} targetAudience
    * @param {string} contentFocus
    * @param {string} connectionId
    */
   async generateTrendingTopicsStream(businessType, targetAudience, contentFocus, connectionId, analysisData = null, selectedAudience = null) {
-    // Generate and stream topic narrative first (if we have the data)
+    // Stream narrative in background so topic-complete can fire as soon as topic JSON is ready
     if (analysisData && selectedAudience) {
-      try {
-        console.log('📝 [TOPIC-NARRATIVE-STREAM] Generating narrative before topics');
-        const narrative = await this.generateTopicNarrative(analysisData, selectedAudience, []);
-
-        // Stream narrative word by word
-        const words = narrative.split(/(\s+)/);
-        for (let i = 0; i < words.length; i++) {
-          streamManager.publish(connectionId, 'topic-chunk', { text: words[i] });
-          if (words[i].trim()) await new Promise((r) => setTimeout(r, 15));
-        }
-        streamManager.publish(connectionId, 'topic-complete-narrative', {});
-        console.log('✅ [TOPIC-NARRATIVE-STREAM] Narrative streamed');
-      } catch (narrativeErr) {
-        console.warn('⚠️ [TOPIC-NARRATIVE-STREAM] Error:', narrativeErr.message);
-      }
+      void this.streamTopicNarrativeInBackground(connectionId, analysisData, selectedAudience).catch(() => {});
     }
 
     const model = process.env.OPENAI_TOPICS_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
