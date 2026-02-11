@@ -687,25 +687,40 @@ Respond with only valid JSON, e.g. {"businessName": "Acme Corp", "targetAudience
 
 
   /**
-   * Generate first-person content-generation-step narration for the guided funnel (Issue #261).
+   * Generate content-generation-step narration for the guided funnel (Issue #261).
+   * Style aligned with analysis narration: consultant tone, direct, specific.
    * @param {{ businessName?: string, selectedTopic?: string }} context
-   * @returns {Promise<string>} Short first-person paragraph
+   * @returns {Promise<string>} Short direct statement (1-2 sentences)
    */
   async generateContentGenerationNarration(context = {}) {
-    const name = context.businessName || 'your business';
-    const topic = context.selectedTopic || 'this topic';
-    const prompt = `Write one short first-person paragraph (2-4 sentences) for an onboarding funnel. The narrator is the product (AI assistant). Say we're about to generate a blog post for ${name} on "${topic}". Be warm and concise. No markdown.`;
+    const businessName = context.businessName || 'your business';
+    const selectedTopic = context.selectedTopic || 'this topic';
+
+    const prompt = `You are a business consultant presenting the next step. This is PART 3 of a 3-part presentation.
+
+Business: ${businessName}
+Selected topic for this post: ${selectedTopic}
+
+Write a direct statement (1-2 sentences, max 140 chars) that:
+- States what you're doing next: generating a blog post for THEIR business on this topic
+- References their business and the topic specifically (not generic "we're creating content")
+- Professional consultant tone - NO quotes, NO exclamation marks, NO flowery language
+- Use simple present tense: "I'm generating a post for [business] on [topic]." or "Next: a post for ${businessName} on [specific topic]."
+
+WRONG: "We're about to create something amazing for you."
+RIGHT: "I'm generating a post for ${businessName} on ${selectedTopic}."
+
+Be factual and direct.`;
 
     const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'You write short, first-person onboarding copy. One paragraph only.' },
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 150,
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 120,
       temperature: 0.6
     });
-    return (response.choices[0]?.message?.content || '').trim();
+    let text = (response.choices[0]?.message?.content || '').trim();
+    text = text.replace(/^["']|["']$/g, '');
+    return text;
   }
 
   /**
