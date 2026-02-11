@@ -5,11 +5,10 @@ Simple administration panel for application statistics and DB cache management.
 ## Access
 
 - **URL**: `GET /admin` or `GET /api/v1/admin-panel`
+- **Login**: `GET /admin/login` — login page using existing app auth (`POST /api/v1/auth/login`). Only **super_admin** users can proceed; others see "Access denied".
 - **Auth**: Either
-  - Log in as a **super_admin** user (JWT in `Authorization: Bearer <token>`), or
-  - Set `ADMIN_API_KEY` in the environment and pass it via:
-    - Header: `x-admin-key: <key>`
-    - Query: `/admin?admin_key=<key>`
+  - **Super admin login**: Open `/admin` or `/admin/login`, sign in with a super admin account (email/password). Token is stored in sessionStorage and used for panel requests. Use "Log out" to clear it.
+  - **API key**: Set `ADMIN_API_KEY` and pass via header `x-admin-key` or query `admin_key` (e.g. `/admin?admin_key=<key>`).
 
 ## Features
 

@@ -23,12 +23,16 @@ describe('admin panel', () => {
   const ADMIN_KEY = 'test-admin-key-123';
   let app;
   let originalEnv;
+  let adminLoginHtml;
+  let isAdminRequest;
 
   beforeEach(async () => {
     originalEnv = { ...process.env };
     process.env.ADMIN_API_KEY = ADMIN_KEY;
     vi.resetModules();
-    const { default: adminPanelRouter, requireAdmin } = await import('../../routes/admin-panel.js');
+    const { default: adminPanelRouter, requireAdmin, adminLoginHtml: loginHtml, isAdminRequest: adminCheck } = await import('../../routes/admin-panel.js');
+    adminLoginHtml = loginHtml;
+    isAdminRequest = adminCheck;
     app = express();
     app.use(express.json());
     app.use((req, res, next) => {
@@ -253,6 +257,25 @@ describe('admin panel', () => {
           expect(res.text).toContain('Refresh');
           expect(res.text).toContain('Clear cache');
         });
+    });
+  });
+
+  describe('adminLoginHtml and isAdminRequest', () => {
+    it('adminLoginHtml returns login form using existing auth', () => {
+      const html = adminLoginHtml();
+      expect(html).toContain('Admin Login');
+      expect(html).toContain('/api/v1/auth/login');
+      expect(html).toContain('super_admin');
+      expect(html).toContain('email');
+      expect(html).toContain('password');
+    });
+
+    it('isAdminRequest returns true for key or super_admin', () => {
+      expect(isAdminRequest({ headers: { 'x-admin-key': ADMIN_KEY }, query: {} })).toBe(true);
+      expect(isAdminRequest({ headers: {}, query: {}, user: { role: 'super_admin' } })).toBe(true);
+      expect(isAdminRequest({ headers: {}, query: {}, user: { permissions: ['view_platform_analytics'] } })).toBe(true);
+      expect(isAdminRequest({ headers: {}, query: {} })).toBe(false);
+      expect(isAdminRequest({ headers: {}, query: {}, user: { role: 'user' } })).toBe(false);
     });
   });
 });

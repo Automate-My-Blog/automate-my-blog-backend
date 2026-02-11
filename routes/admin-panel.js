@@ -13,8 +13,21 @@ const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
 
 function validAdminKey(req) {
   if (!ADMIN_API_KEY) return false;
-  const key = req.headers['x-admin-key'] || req.query.admin_key || '';
+  const key = (req.headers && req.headers['x-admin-key']) || (req.query && req.query.admin_key) || '';
   return key === ADMIN_API_KEY;
+}
+
+function isSuperAdminUser(user) {
+  if (!user) return false;
+  const role = user.role || user.role_name;
+  return role === 'super_admin' || !!(user.permissions && Array.isArray(user.permissions) && user.permissions.includes('view_platform_analytics'));
+}
+
+/**
+ * Returns true if request is authorized (key or super_admin). Use after optionalAuth so req.user may be set.
+ */
+export function isAdminRequest(req) {
+  return validAdminKey(req) || isSuperAdminUser(req.user);
 }
 
 /**
@@ -28,9 +41,7 @@ export function requireAdmin(req, res, next) {
       message: 'Provide x-admin-key header, admin_key query, or log in as super_admin'
     });
   }
-  const role = req.user.role || req.user.role_name;
-  const isSuperAdmin = role === 'super_admin' || (req.user.permissions && Array.isArray(req.user.permissions) && req.user.permissions.includes('view_platform_analytics'));
-  if (!isSuperAdmin) {
+  if (!isSuperAdminUser(req.user)) {
     return res.status(403).json({
       error: 'Forbidden',
       message: 'Super admin or admin API key required'
@@ -274,7 +285,7 @@ function adminPanelHtml() {
 </head>
 <body>
   <h1>AutoBlog Admin</h1>
-  <p class="sub">Application stats and website analysis cache</p>
+  <p class="sub">Application stats and website analysis cache · <a href="/admin/login" id="logout-link">Log out</a></p>
 
   <section>
     <h2>Application &amp; DB stats</h2>
@@ -301,10 +312,12 @@ function adminPanelHtml() {
       ? window.location.pathname.replace(/\\/?admin-panel\\/?.*$/, '') + '/api/v1/admin-panel'
       : '/api/v1/admin-panel');
     const adminKey = new URLSearchParams(window.location.search).get('admin_key') || '';
+    const adminToken = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('adminToken') : null;
 
     function headers() {
       const h = { 'Content-Type': 'application/json' };
       if (adminKey) h['x-admin-key'] = adminKey;
+      if (adminToken) h['Authorization'] = 'Bearer ' + adminToken;
       return h;
     }
 
@@ -312,11 +325,25 @@ function adminPanelHtml() {
       return { method, headers: headers(), credentials: 'same-origin' };
     }
 
+    function checkAuth(r) {
+      if (r.status === 401) {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('adminToken');
+        window.location.href = '/admin/login';
+      }
+    }
+
+    document.getElementById('logout-link').onclick = function(e) {
+      e.preventDefault();
+      if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem('adminToken');
+      window.location.href = '/admin/login';
+    };
+
     document.getElementById('refresh-stats').onclick = async () => {
       const el = document.getElementById('stats-output');
       el.textContent = 'Loading…';
       try {
         const r = await fetch(base + '/stats', opts('GET'));
+        checkAuth(r);
         const data = await r.json();
         el.textContent = r.ok ? JSON.stringify(data, null, 2) : 'Error: ' + (data.error || data.message || r.status);
       } catch (e) {
@@ -342,6 +369,7 @@ function adminPanelHtml() {
       showCacheResult('');
       try {
         const r = await fetch(base + '/cache?url=' + encodeURIComponent(url), opts('GET'));
+        checkAuth(r);
         const data = await r.json();
         if (!r.ok) {
           showCacheMsg(data.error || data.message || r.status, 'error');
@@ -369,6 +397,7 @@ function adminPanelHtml() {
       showCacheMsg('Clearing…', 'info');
       try {
         const r = await fetch(base + '/cache?url=' + encodeURIComponent(url), { ...opts('DELETE') });
+        checkAuth(r);
         const data = await r.json();
         if (r.ok) {
           showCacheMsg(data.message || 'Cache cleared.', 'success');
@@ -390,6 +419,93 @@ router.get('/', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(adminPanelHtml());
 });
+
+/**
+ * Login page HTML: email/password form that uses POST /api/v1/auth/login.
+ * Only super_admin users are allowed; token is stored in sessionStorage and used for /admin.
+ */
+export function adminLoginHtml() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Login — AutoBlog</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 400px; margin: 4rem auto; padding: 1.5rem; background: #0f0f12; color: #e4e4e7; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .sub { color: #71717a; font-size: 0.9rem; margin-bottom: 1.5rem; }
+    form { background: #18181b; border: 1px solid #27272a; border-radius: 8px; padding: 1.5rem; }
+    label { display: block; margin-bottom: 0.25rem; color: #a1a1aa; font-size: 0.9rem; }
+    input[type="email"], input[type="password"] { width: 100%; padding: 0.6rem 0.75rem; margin-bottom: 1rem; border: 1px solid #3f3f46; border-radius: 6px; background: #27272a; color: #e4e4e7; }
+    button { width: 100%; padding: 0.6rem 1rem; border-radius: 6px; border: none; background: #3b82f6; color: #fff; font-weight: 500; cursor: pointer; }
+    button:hover { background: #2563eb; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .msg { margin-top: 1rem; padding: 0.6rem; border-radius: 6px; font-size: 0.9rem; }
+    .msg.error { background: #450a0a; color: #fca5a5; }
+    .msg.success { background: #14532d; color: #86efac; }
+    a { color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <h1>Admin Login</h1>
+  <p class="sub">Sign in with a super admin account</p>
+  <form id="login-form">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required autocomplete="email" />
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password" />
+    <button type="submit" id="submit-btn">Sign in</button>
+    <div id="msg" class="msg" style="display: none;"></div>
+  </form>
+  <script>
+    const form = document.getElementById('login-form');
+    const msg = document.getElementById('msg');
+    const submitBtn = document.getElementById('submit-btn');
+    function showMsg(text, type) {
+      msg.textContent = text;
+      msg.className = 'msg ' + (type || 'error');
+      msg.style.display = 'block';
+    }
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      submitBtn.disabled = true;
+      msg.style.display = 'none';
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      try {
+        const r = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+          credentials: 'same-origin'
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          showMsg(data.message || data.error || 'Login failed');
+          submitBtn.disabled = false;
+          return;
+        }
+        const role = data.user && (data.user.role || data.user.role_name);
+        if (role !== 'super_admin') {
+          showMsg('Access denied. Super admin account required.');
+          submitBtn.disabled = false;
+          return;
+        }
+        if (data.accessToken) {
+          sessionStorage.setItem('adminToken', data.accessToken);
+        }
+        window.location.href = '/admin';
+      } catch (err) {
+        showMsg('Error: ' + (err.message || 'Request failed'));
+        submitBtn.disabled = false;
+      }
+    };
+  </script>
+</body>
+</html>`;
+}
 
 export { adminPanelHtml };
 export default router;

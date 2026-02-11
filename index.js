@@ -45,7 +45,7 @@ import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
 import { registerStreamRoute } from './routes/stream.js';
-import adminPanelRouter, { requireAdmin, adminPanelHtml } from './routes/admin-panel.js';
+import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, isAdminRequest } from './routes/admin-panel.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse } from './lib/errors.js';
@@ -225,9 +225,15 @@ app.use(founderEmailRoutes);
 
 // Admin panel: stats and cache management (super_admin JWT or ADMIN_API_KEY)
 app.use('/api/v1/admin-panel', authService.optionalAuthMiddleware.bind(authService), requireAdmin, adminPanelRouter);
-app.get('/admin', authService.optionalAuthMiddleware.bind(authService), requireAdmin, (req, res) => {
+// Admin login page (public): uses existing POST /api/v1/auth/login; only super_admin can proceed to panel
+app.get('/admin/login', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(adminPanelHtml());
+  res.send(adminLoginHtml());
+});
+// Admin panel: show login page if not authenticated, otherwise panel
+app.get('/admin', authService.optionalAuthMiddleware.bind(authService), (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(isAdminRequest(req) ? adminPanelHtml() : adminLoginHtml());
 });
 
 // PWA manifest — public, no auth (fixes 401 when frontend or proxy requests /manifest.json from backend origin).
