@@ -118,12 +118,22 @@ describe('admin panel', () => {
       mockQuery.mockImplementation((sql) => {
         if (sql === 'SELECT 1') return Promise.resolve({ rows: [{ 1: 1 }] });
         if (sql === 'SELECT * FROM platform_metrics_summary') return Promise.reject(new Error('view missing'));
+        if (typeof sql === 'string' && sql.includes('pg_database_size')) return Promise.resolve({ rows: [{ bytes: 12345678 }] });
+        if (typeof sql === 'string' && sql.includes('jobs') && sql.includes('GROUP BY')) {
+          return Promise.resolve({
+            rows: [
+              { status: 'queued', type: 'website_analysis', c: '2' },
+              { status: 'succeeded', type: 'website_analysis', c: '10' },
+              { status: 'failed', type: 'content_generation', c: '1' }
+            ]
+          });
+        }
         if (typeof sql === 'string' && sql.includes('COUNT(*)')) return Promise.resolve({ rows: [{ c: '42' }] });
         return Promise.resolve({ rows: [] });
       });
     });
 
-    it('returns app and db stats with table counts', async () => {
+    it('returns app and db stats with table counts, size, job summary', async () => {
       await request(app)
         .get('/api/v1/admin-panel/stats')
         .set('x-admin-key', ADMIN_KEY)
@@ -135,7 +145,11 @@ describe('admin panel', () => {
           expect(res.body.db.connected).toBe(true);
           expect(res.body.db.tables).toBeDefined();
           expect(res.body.db.tables.users).toBe(42);
-          expect(res.body.db.tables.organizations).toBe(42);
+          expect(res.body.db.sizeBytes).toBe(12345678);
+          expect(res.body.db.jobSummary).toBeDefined();
+          expect(res.body.db.jobSummary.byStatus.succeeded).toBe(10);
+          expect(res.body.db.jobSummary.byStatus.queued).toBe(2);
+          expect(res.body.db.jobSummary.total).toBe(13);
         });
     });
 
@@ -242,6 +256,77 @@ describe('admin panel', () => {
           expect(res.body.message).toContain('Cleared');
         });
       expect(mockTransaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('GET /jobs/recent', () => {
+    it('returns recent jobs', async () => {
+      mockQuery.mockResolvedValue({
+        rows: [
+          { id: 'j1', type: 'website_analysis', status: 'succeeded', progress: 100, error: null, created_at: '2026-01-01T00:00:00Z', started_at: null, finished_at: null }
+        ]
+      });
+      await request(app)
+        .get('/api/v1/admin-panel/jobs/recent')
+        .query({ limit: 10 })
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.jobs).toHaveLength(1);
+          expect(res.body.jobs[0].type).toBe('website_analysis');
+          expect(res.body.jobs[0].status).toBe('succeeded');
+        });
+    });
+  });
+
+  describe('GET /cache/urls', () => {
+    it('returns list of cached URLs', async () => {
+      mockQuery.mockResolvedValue({
+        rows: [
+          { id: 'o1', name: 'Example', website_url: 'https://example.com', last_analyzed_at: '2026-01-15T12:00:00Z' }
+        ]
+      });
+      await request(app)
+        .get('/api/v1/admin-panel/cache/urls')
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.urls).toHaveLength(1);
+          expect(res.body.urls[0].websiteUrl).toBe('https://example.com');
+        });
+    });
+  });
+
+  describe('DELETE /cache/all', () => {
+    it('returns cleared 0 when no cached orgs', async () => {
+      mockQuery.mockResolvedValue({ rows: [] });
+      await request(app)
+        .delete('/api/v1/admin-panel/cache/all')
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.cleared).toBe(0);
+        });
+    });
+
+    it('clears all and returns count', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [{ id: 'org-1' }, { id: 'org-2' }] });
+      mockTransaction.mockImplementation(async (fn) => {
+        const client = { query: vi.fn().mockResolvedValue({ rows: [] }) };
+        return fn(client);
+      });
+      await request(app)
+        .delete('/api/v1/admin-panel/cache/all')
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.cleared).toBe(2);
+        });
+      expect(mockTransaction).toHaveBeenCalledTimes(2);
     });
   });
 
