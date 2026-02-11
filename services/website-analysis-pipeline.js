@@ -738,8 +738,19 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       ctaForNarrative
     );
 
-    // Stream insight cards progressively (3-4 second intervals)
     const insightCards = narrativeAnalysis?.cards || [];
+    const openingNarrative = narrativeAnalysis?.narrative || '';
+
+    // Stream short opening narrative word-by-word first (if present)
+    if (openingNarrative) {
+      const words = openingNarrative.split(/(\s+)/);
+      for (let i = 0; i < words.length; i++) {
+        if (await checkCancelled()) throw new Error('Cancelled');
+        await streamNarrative({ type: 'analysis-chunk', content: words[i] });
+      }
+    }
+
+    // Stream insight cards progressively (3-4 second intervals)
     console.log('📊 [CARD-STREAM] Streaming', insightCards.length, 'insight cards');
 
     if (insightCards.length > 0) {
@@ -762,10 +773,10 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
           await new Promise((r) => setTimeout(r, 3500));
         }
       }
-
-      // Signal narrative completion
-      await streamNarrative({ type: 'narrative-complete', content: '' });
     }
+
+    // Signal narrative completion (after opening and/or cards)
+    await streamNarrative({ type: 'narrative-complete', content: '' });
 
     // Extract and stream business profile for PowerPoint-style display (always, regardless of cards)
     console.log('📊 [PROFILE] About to extract business profile');
@@ -795,8 +806,8 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     });
     console.log('📊 [PROFILE] Business profile event sent successfully');
 
-    // Store cards in database (convert to text for backward compatibility)
-    const narrativeText = insightCards.map(card =>
+    // Store short opening as narrative_analysis; cards as key_insights (frontend shows both)
+    const narrativeText = openingNarrative || insightCards.map(card =>
       `${card.heading}\n\n${card.body}\n\n${card.takeaway}`
     ).join('\n\n---\n\n');
 

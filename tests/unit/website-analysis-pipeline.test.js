@@ -29,8 +29,9 @@ vi.mock('../../services/openai.js', () => ({
     generateScrapingObservation: vi.fn().mockResolvedValue('Ok, B2B company...'),
     generateCTAObservation: vi.fn().mockResolvedValue('Found 0 CTAs.'),
     generateWebsiteAnalysisNarrative: vi.fn().mockResolvedValue({
-      narrative: "Oh, you're in B2B. Test serves Everyone—good space.\n\nYour customers are searching when they're evaluating solutions. Good moment to show up.",
+      narrative: "I analyzed Test Co and learned you're a B2B business focused on serving Everyone.",
       confidence: 0.8,
+      cards: [],
       keyInsights: [],
     }),
     generateAudienceScenarios: vi.fn().mockResolvedValue([

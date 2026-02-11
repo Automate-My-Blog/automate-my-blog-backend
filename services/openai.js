@@ -262,13 +262,61 @@ export class OpenAIService {
   }
 
   /**
-   * Generate narrative analysis from website analysis data
-   * Short snippets that echo back what we learned (active listener), separated by double paragraph breaks
+   * Generate narrative analysis from website analysis data.
+   * Returns a short opening statement (1-2 sentences, max 140 chars) plus 4-6 insight cards for the frontend.
    */
   async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
-    console.log('📝 [NARRATIVE-GEN] Starting narrative generation (Insight Cards)');
+    console.log('📝 [NARRATIVE-GEN] Starting narrative generation (opening + insight cards)');
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
+
+    const businessName = analysisData.businessName || 'this business';
+    const businessType = analysisData.businessType || 'Not specified';
+    const orgDescription = analysisData.description || 'Not provided';
+    const scenariosRaw = intelligenceData.customer_scenarios;
+    const scenarioCount = Array.isArray(scenariosRaw)
+      ? scenariosRaw.length
+      : (typeof scenariosRaw === 'string' ? (() => { try { const a = JSON.parse(scenariosRaw); return Array.isArray(a) ? a.length : 0; } catch { return 0; } })() : 0);
+    const keyInsightsSnippet = intelligenceData.business_value_assessment
+      ? String(intelligenceData.business_value_assessment).substring(0, 100)
+      : (intelligenceData.content_strategy_recommendations ? String(intelligenceData.content_strategy_recommendations).substring(0, 100) : 'Multiple patterns');
+
+    const openingPrompt = `You are a business consultant presenting analysis findings. This is PART 1 of a 3-part presentation.
+
+Business: ${businessName}
+Type: ${businessType}
+Description: ${orgDescription}
+
+Analysis:
+- ${scenarioCount} customer scenarios identified
+- Key insights: ${keyInsightsSnippet}
+
+Write a direct opening statement (1-2 sentences, max 140 chars) that:
+- States what you LEARNED about THEIR BUSINESS (positioning, brand, focus areas)
+- NOT what customers want - focus on the business itself
+- Be specific about their business model, positioning, or value proposition
+- Professional consultant tone - NO quotes, NO exclamation marks, NO flowery language
+- Use simple present tense: "I analyzed X and learned Y"
+
+WRONG: "I found that Safety Managers seek immediate solutions" (talks about customers)
+RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType} positioned as [specific positioning], focusing on [specific solutions]."
+
+Be factual and direct. This leads into showing them the audience segments next.`;
+
+    let openingStatement = '';
+    try {
+      const openingCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [{ role: 'user', content: openingPrompt }],
+        max_tokens: 120,
+        temperature: 0.7
+      });
+      openingStatement = (openingCompletion.choices[0]?.message?.content?.trim() || '').replace(/^["']|["']$/g, '');
+      console.log('📝 [NARRATIVE-GEN] Opening statement:', openingStatement.substring(0, 80) + (openingStatement.length > 80 ? '...' : ''));
+    } catch (e) {
+      console.warn('⚠️ [NARRATIVE-GEN] Opening statement failed, using fallback:', e?.message);
+      openingStatement = `I analyzed ${businessName} and learned you're a ${businessType} focused on ${orgDescription.substring(0, 50)}${orgDescription.length > 50 ? '...' : ''}.`;
+    }
 
     const prompt = `You are an insightful business consultant who just deeply analyzed ${analysisData.businessName} (${analysisData.businessType}). Generate 4-6 insight cards that demonstrate deep understanding of their business and build trust with the user.
 
@@ -380,34 +428,37 @@ Format as JSON:
       console.log('📝 [NARRATIVE-GEN] Generated', result.cards?.length, 'insight cards');
       console.log('📝 [NARRATIVE-GEN] Confidence:', result.confidence);
 
-      console.log('✅ Successfully generated insight cards');
-
+      const cards = result.cards || [];
       return {
-        cards: result.cards || [],
+        narrative: openingStatement,
+        cards,
         confidence: result.confidence || 0.8,
+        keyInsights: cards,
         isAIGenerated: true
       };
 
     } catch (error) {
       console.error('❌ Error generating insight cards:', error);
 
-      // Fallback: Generate basic cards from available data
+      const fallbackCards = [
+        {
+          category: 'Market Positioning',
+          heading: 'Your Business Focus',
+          body: `${analysisData.businessName} operates as a ${analysisData.businessType}. ${analysisData.description}`,
+          takeaway: `Focus: Serving ${analysisData.endUsers} in this market`
+        },
+        {
+          category: 'Search Behavior',
+          heading: 'How Customers Find You',
+          body: `Your customers search when ${analysisData.searchBehavior}. This represents a key moment in their decision-making process.`,
+          takeaway: 'Opportunity: Content that addresses this search intent'
+        }
+      ];
       return {
-        cards: [
-          {
-            category: 'Market Positioning',
-            heading: 'Your Business Focus',
-            body: `${analysisData.businessName} operates as a ${analysisData.businessType}. ${analysisData.description}`,
-            takeaway: `Focus: Serving ${analysisData.endUsers} in this market`
-          },
-          {
-            category: 'Search Behavior',
-            heading: 'How Customers Find You',
-            body: `Your customers search when ${analysisData.searchBehavior}. This represents a key moment in their decision-making process.`,
-            takeaway: 'Opportunity: Content that addresses this search intent'
-          }
-        ],
+        narrative: openingStatement || `I analyzed ${analysisData.businessName} and found ${scenarioCount} distinct customer scenarios.`,
+        cards: fallbackCards,
         confidence: 0.5,
+        keyInsights: fallbackCards,
         isAIGenerated: false
       };
     }
