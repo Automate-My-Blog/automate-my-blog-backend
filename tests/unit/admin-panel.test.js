@@ -330,6 +330,38 @@ describe('admin panel', () => {
     });
   });
 
+  describe('DELETE /seo-cache', () => {
+    it('clears SEO cache and returns count', async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ c: '5' }] })
+        .mockResolvedValueOnce({ rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], rowCount: 3 });
+      await request(app)
+        .delete('/api/v1/admin-panel/seo-cache')
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.cleared).toBe(3);
+          expect(res.body.before).toBe(5);
+          expect(res.body.message).toContain('Cleared');
+        });
+    });
+
+    it('returns cleared 0 when no SEO cache entries', async () => {
+      mockQuery
+        .mockResolvedValueOnce({ rows: [{ c: '0' }] })
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await request(app)
+        .delete('/api/v1/admin-panel/seo-cache')
+        .set('x-admin-key', ADMIN_KEY)
+        .expect(200)
+        .then((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.cleared).toBe(0);
+        });
+    });
+  });
+
   describe('GET / (panel HTML)', () => {
     it('returns HTML when authorized', async () => {
       await request(app)
@@ -341,6 +373,8 @@ describe('admin panel', () => {
           expect(res.text).toContain('AutoBlog Admin');
           expect(res.text).toContain('Refresh');
           expect(res.text).toContain('Clear cache');
+          expect(res.text).toContain('SEO analysis cache');
+          expect(res.text).toContain('Clear all SEO cache');
         });
     });
   });

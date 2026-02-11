@@ -264,6 +264,28 @@ router.delete('/cache/all', async (req, res) => {
 });
 
 /**
+ * DELETE /api/v1/admin-panel/seo-cache
+ * Clear all SEO analysis cache (comprehensive_seo_analyses). Next analyses use latest prompts.
+ */
+router.delete('/seo-cache', async (req, res) => {
+  try {
+    const countResult = await db.query('SELECT COUNT(*) AS c FROM comprehensive_seo_analyses');
+    const before = parseInt(countResult.rows?.[0]?.c ?? 0, 10);
+    const result = await db.query('DELETE FROM comprehensive_seo_analyses RETURNING id');
+    const cleared = result.rowCount ?? 0;
+    res.json({
+      success: true,
+      message: cleared > 0 ? `Cleared ${cleared} SEO analysis cache entry(ies).` : 'No SEO cache entries to clear.',
+      cleared,
+      before
+    });
+  } catch (err) {
+    console.error('Admin seo-cache clear error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to clear SEO cache' });
+  }
+});
+
+/**
  * GET /api/v1/admin-panel/cache?url=...
  * View cache entry for a given URL (website analysis cache).
  */
@@ -431,6 +453,16 @@ function adminPanelHtml() {
   </section>
 
   <section>
+    <h2>SEO analysis cache</h2>
+    <p style="margin: 0 0 0.75rem; color: #a1a1aa; font-size: 0.9rem;">Cached comprehensive SEO analyses. Clear to force new analyses to use the latest prompts.</p>
+    <div class="row">
+      <span id="seo-cache-count" style="color: #a1a1aa;">—</span>
+      <button class="btn-danger" id="clear-seo-cache">Clear all SEO cache</button>
+    </div>
+    <div id="seo-cache-msg" class="msg" style="display: none;"></div>
+  </section>
+
+  <section>
     <h2>Cached URLs (website analysis)</h2>
     <div class="row">
       <button class="btn-primary" id="load-cache-urls">Load list</button>
@@ -555,6 +587,8 @@ function adminPanelHtml() {
             options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
           });
         }
+        var seoEl = document.getElementById('seo-cache-count');
+        if (seoEl) seoEl.textContent = (db.tables && db.tables.comprehensive_seo_analyses != null) ? db.tables.comprehensive_seo_analyses + ' cached analyses' : '—';
       } catch (e) {
         cardsEl.innerHTML = '';
         document.getElementById('stats-error').textContent = 'Error: ' + e.message;
@@ -563,6 +597,25 @@ function adminPanelHtml() {
     }
     document.getElementById('refresh-stats').onclick = loadStats;
     loadStats();
+
+    document.getElementById('clear-seo-cache').onclick = async () => {
+      if (!confirm('Clear all SEO analysis cache? Next analyses will use the latest prompts.')) return;
+      var msgEl = document.getElementById('seo-cache-msg');
+      msgEl.style.display = 'block';
+      msgEl.className = 'msg info';
+      msgEl.textContent = 'Clearing…';
+      try {
+        var r = await fetch(base + '/seo-cache', { method: 'DELETE', headers: headers(), credentials: 'same-origin' });
+        checkAuth(r);
+        var data = await r.json();
+        msgEl.className = 'msg ' + (r.ok ? 'success' : 'error');
+        msgEl.textContent = r.ok ? (data.message || 'Cleared') : (data.error || data.message || r.status);
+        if (r.ok) loadStats();
+      } catch (e) {
+        msgEl.className = 'msg error';
+        msgEl.textContent = 'Error: ' + e.message;
+      }
+    };
 
     function showCacheMsg(msg, type) {
       const el = document.getElementById('cache-msg');

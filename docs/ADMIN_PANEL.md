@@ -26,7 +26,11 @@ Simple administration panel for application statistics and DB cache management.
    - **Clear all**: `DELETE /api/v1/admin-panel/cache/all` — clears all website analysis cache.
    - **By URL**: View/clear cache for a single URL (unchanged).
 
-4. **Cache by URL (single)**
+4. **SEO analysis cache**
+   - **Count**: Shown in overview (from stats) and in the "SEO analysis cache" section.
+   - **Clear all**: `DELETE /api/v1/admin-panel/seo-cache` — deletes all rows in `comprehensive_seo_analyses`. Next SEO analyses use the latest prompts.
+
+5. **Cache by URL (single)**
    - **View**: See cached website analysis entries for a given URL (organizations keyed by `website_url`).
    - **Clear**: Remove website analysis cache for a given URL so the next analysis runs from scratch.
 
@@ -36,6 +40,7 @@ Simple administration panel for application statistics and DB cache management.
 - `GET /api/v1/admin-panel/jobs/recent?limit=25` — Recent jobs list
 - `GET /api/v1/admin-panel/cache/urls` — List all cached website URLs
 - `DELETE /api/v1/admin-panel/cache/all` — Clear all website analysis cache
+- `DELETE /api/v1/admin-panel/seo-cache` — Clear all SEO analysis cache
 - `GET /api/v1/admin-panel/cache?url=<url>` — List cache entries for URL
 - `DELETE /api/v1/admin-panel/cache?url=<url>` — Clear cache for URL
 
