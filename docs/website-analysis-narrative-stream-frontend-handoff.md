@@ -28,9 +28,13 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 | `connected`        | Right after opening           | Confirm connection; `data.jobId`. |
 | `analysis-status-update` | Analysis status / scraping observation | Append to Moment 1 text; show typing cursor. |
 | `transition`       | Move to analysis phase        | Fade scraping, show divider, prepare for Moment 2. |
-| `analysis-chunk`   | Word/phrase of analysis       | Append to Moment 2 text; typing effect. |
-| `narrative-complete` | Full analysis narrative done | Transition to Moment 3 (audiences from main stream). |
+| `analysis-chunk`   | Word/phrase of **opening narrative** | Append to Moment 2 opening text; typing effect. Short (1–2 sentences, ~140 chars). |
+| `insight-card`     | One insight card (after opening) | Append card to Moment 2; show as card UI. Multiple cards in sequence. |
+| `business-profile` | Business summary for display  | Optional: show PowerPoint-style profile. |
+| `narrative-complete` | Opening + all cards done     | Transition to Moment 3 (audiences from main stream). |
 | `complete`         | Job succeeded or failed       | Close stream. |
+
+**Event order (Moment 2):** `transition` → `analysis-chunk` (word-by-word, short opening) → `insight-card` (one per card, 4–6 total) → `narrative-complete`.
 
 ### Payload shapes
 
@@ -46,7 +50,21 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 
 **analysis-chunk**
 ```ts
-{ content: string }  // Word or whitespace
+{ content: string }  // Word or whitespace — short opening (1–2 sentences, max ~140 chars)
+```
+
+**insight-card**
+```ts
+{ content: string }  // JSON string of one card: { category, heading, body, takeaway }
+```
+Parse `data.content` as JSON. Card shape:
+```ts
+{ category: string; heading: string; body: string; takeaway: string }
+```
+
+**business-profile** (optional)
+```ts
+{ content: string }  // JSON string of business profile object
 ```
 
 **narrative-complete**
@@ -64,7 +82,10 @@ All event `data` is JSON. Parse `event.data` and switch on the **event type**.
 ## 3. Three moments flow
 
 1. **Moment 1 — Analysis status:** Receive `analysis-status-update` events. Append to a single "thinking" block with typing cursor.
-2. **Moment 2 — Analysis narrative:** On `transition`, switch to analysis view. Append `analysis-chunk` events word-by-word.
+2. **Moment 2 — Analysis narrative + cards:** On `transition`, switch to analysis view.
+   - Append `analysis-chunk` events word-by-word (short opening statement, 1–2 sentences).
+   - Then append each `insight-card`: parse `content` as JSON and render as a card (category, heading, body, takeaway). Typically 4–6 cards.
+   - Optionally handle `business-profile` for a summary block.
 3. **Moment 3 — Audiences:** On `narrative-complete`, transition to audience cards. Audiences come from the **main stream** (`GET /jobs/:jobId/stream`) — `audience-complete`, `audiences-result`, etc.
 
 ---
@@ -83,7 +104,8 @@ const url = `${API_BASE}/api/v1/jobs/${jobId}/narrative-stream?token=${encodeURI
 const es = new EventSource(url);
 
 let scrapingNarrative = '';
-let analysisNarrative = '';
+let analysisOpening = '';   // Short opening (1–2 sentences)
+let insightCards = [];      // Array of { category, heading, body, takeaway }
 let currentMoment = 'scraping'; // 'scraping' | 'transition' | 'analysis' | 'audiences'
 
 es.addEventListener('connected', (e) => {
@@ -104,8 +126,25 @@ es.addEventListener('transition', () => {
 
 es.addEventListener('analysis-chunk', (e) => {
   const data = JSON.parse(e.data);
-  setAnalysisNarrative((prev) => prev + (data.content || ''));
+  setAnalysisOpening((prev) => prev + (data.content || ''));
   setCurrentMoment('analysis');
+});
+
+es.addEventListener('insight-card', (e) => {
+  const data = JSON.parse(e.data);
+  try {
+    const card = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+    setInsightCards((prev) => [...prev, card]);
+  } catch (_) {}
+  setCurrentMoment('analysis');
+});
+
+es.addEventListener('business-profile', (e) => {
+  const data = JSON.parse(e.data);
+  try {
+    const profile = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+    setBusinessProfile(profile);
+  } catch (_) {}
 });
 
 es.addEventListener('narrative-complete', () => {
@@ -121,6 +160,8 @@ es.addEventListener('error', () => {
   // Fallback: poll GET /jobs/:jobId/status
 });
 ```
+
+**Moment 2 UI:** Show `analysisOpening` as the typed opening line, then render `insightCards` as cards (e.g. category as label, heading as title, body and takeaway as content).
 
 ---
 
