@@ -1,4 +1,4 @@
-# Create or update the staging → main PR when staging is updated.
+# Create or update the staging → main PR whenever something is merged into (or pushed to) staging.
 # Skips the create/update job when an open staging→main PR already exists (so it does not run on that PR).
 # Also runnable manually: Actions → Promote staging to production → Run workflow.
 
@@ -8,12 +8,6 @@ on:
   push:
     branches:
       - staging
-    paths:
-      - 'src/**'
-      - 'public/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'vercel.json'
   workflow_dispatch:
     inputs:
       confirm:
