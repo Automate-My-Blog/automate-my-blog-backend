@@ -12,18 +12,30 @@ Simple administration panel for application statistics and DB cache management.
 
 ## Features
 
-1. **Application & DB stats**
-   - Node version, env, Redis status
-   - Table row counts (users, organizations, projects, blog_posts, jobs, organization_intelligence, audiences, cta_analysis, website_pages, comprehensive_seo_analyses, leads)
-   - Platform metrics from `platform_metrics_summary` view (if present)
+1. **Overview (stats + charts)**
+   - **Stat cards**: Node version, Redis status, DB size, total jobs.
+   - **Charts** (Chart.js): Job queue by status (queued / running / succeeded / failed); table row counts (horizontal bar).
+   - Stats also include table counts and `platform_metrics_summary` when available.
 
-2. **Cache by URL**
+2. **Job queue**
+   - **Summary**: In stats, `db.jobSummary.byStatus` and `db.jobSummary.byType`, plus doughnut chart.
+   - **Recent jobs**: `GET /api/v1/admin-panel/jobs/recent?limit=25` — table of last N jobs (type, status, created_at, error snippet). Panel has “Load recent jobs”.
+
+3. **Cached URLs (website analysis)**
+   - **List**: `GET /api/v1/admin-panel/cache/urls` — all orgs with `last_analyzed_at` set; panel shows table with “Clear” per row.
+   - **Clear all**: `DELETE /api/v1/admin-panel/cache/all` — clears all website analysis cache.
+   - **By URL**: View/clear cache for a single URL (unchanged).
+
+4. **Cache by URL (single)**
    - **View**: See cached website analysis entries for a given URL (organizations keyed by `website_url`).
-   - **Clear**: Remove website analysis cache for a given URL so the next analysis runs from scratch. This deletes related `organization_intelligence`, `cta_analysis`, `website_pages`, and `audiences` rows and sets `organizations.last_analyzed_at = NULL`.
+   - **Clear**: Remove website analysis cache for a given URL so the next analysis runs from scratch.
 
 ## API (same auth)
 
-- `GET /api/v1/admin-panel/stats` — JSON stats
+- `GET /api/v1/admin-panel/stats` — JSON stats (app, db.tables, db.sizeBytes, db.jobSummary, db.platformMetrics)
+- `GET /api/v1/admin-panel/jobs/recent?limit=25` — Recent jobs list
+- `GET /api/v1/admin-panel/cache/urls` — List all cached website URLs
+- `DELETE /api/v1/admin-panel/cache/all` — Clear all website analysis cache
 - `GET /api/v1/admin-panel/cache?url=<url>` — List cache entries for URL
 - `DELETE /api/v1/admin-panel/cache?url=<url>` — Clear cache for URL
 
