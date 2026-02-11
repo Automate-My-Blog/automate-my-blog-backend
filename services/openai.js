@@ -2074,13 +2074,18 @@ EXAMPLES OF GOOD DIVERSITY (for a business consulting firm):
 ✅ GOOD: [Startup founders in tech (20-35), Mid-market CEOs in manufacturing (45-60), Freelance consultants building practice (30-50), Corporate executives transitioning to entrepreneurship (40-55)]
 ❌ BAD: [Small business owners wanting to grow, Small business owners seeking expansion, Small business owners looking to scale, Business owners trying to improve]
 
+FORMAT FOR targetSegment.demographics:
+- Write a short noun phrase that names WHO the audience is (role, type, or segment), suitable as a card headline.
+- GOOD: "Tech industry professionals exploring startup investments", "Female tech founders seeking inclusive VCs", "Startup accelerators seeking portfolio partnerships", "First-time mothers aged 25-35 with pregnancy anxiety"
+- BAD: Comma-separated lists of activities in -ing form (e.g. "Reading tech news, following influencers, exploring options"). Do NOT use present-participle lists.
+
 Generate scenarios as JSON array:
 
 [
   {
     "customerProblem": "Specific problem driving search behavior",
     "targetSegment": {
-      "demographics": "Natural language description (e.g., 'First-time mothers aged 25-35 experiencing high pregnancy anxiety')",
+      "demographics": "Short noun phrase naming who they are (e.g. 'Tech founders seeking seed funding'), NOT a list of -ing activities",
       "psychographics": "Emotional state, urgency level, decision-making context",
       "searchBehavior": "When/how they search (crisis-driven vs planned)"
     },
@@ -2188,6 +2193,7 @@ ${webSearchData}
 ${keywordData}${existingAudiencesText}
 
 CRITICAL: ${qualityNote}
+demographics: Write a short noun phrase naming WHO the audience is (e.g. "Tech founders seeking seed funding"). Do NOT use comma-separated -ing activity lists like "Reading X, following Y".
 Generate scenarios as JSON array: [ { "customerProblem": "...", "targetSegment": { "demographics": "...", "psychographics": "...", "searchBehavior": "..." }, "businessValue": { "searchVolume": "...", "competition": "...", "conversionPotential": "...", "priority": 1 }, "customerLanguage": [], "seoKeywords": [], "conversionPath": "...", "contentIdeas": [] }, ... ]
 Return only audiences with strong business potential. Order by priority.`
           }
@@ -2297,6 +2303,7 @@ ${webSearchData}
 ${keywordData}${existingAudiencesText}
 
 CRITICAL: ${qualityNote}
+demographics: Write a short noun phrase naming WHO the audience is (e.g. "Tech founders seeking seed funding"). Do NOT use comma-separated -ing activity lists like "Reading X, following Y".
 Generate scenarios as JSON array: [ { "customerProblem": "...", "targetSegment": { "demographics": "...", "psychographics": "...", "searchBehavior": "..." }, "businessValue": { "searchVolume": "...", "competition": "...", "conversionPotential": "...", "priority": 1 }, "customerLanguage": [], "seoKeywords": [], "conversionPath": "...", "contentIdeas": [] }, ... ]
 Return only audiences with strong business potential. Order by priority.`
         }
