@@ -108,40 +108,50 @@ export async function generateAudienceNarration(params) {
     businessType,
     orgDescription,
     analysisData,
-    audiences
+    audiences,
+    previousNarration
   } = params;
 
-  const audienceProblems = audiences
-    ?.map(a => a.problem)
-    .filter(Boolean)
-    .slice(0, 3) || [];
+  // Build rich audience context with concrete metrics (excluding profit data)
+  const audienceContext = audiences
+    ?.map((a, i) => {
+      const convScore = a.conversion_score || 0;
+      const convDisplay = convScore > 0 ? `${convScore}/100 conv` : '';
+
+      return `${i + 1}. ${a.target_segment}
+   Problem: ${a.customer_problem || 'N/A'}${convDisplay ? `\n   Score: ${convDisplay}` : ''}`;
+    })
+    .join('\n') || 'No audiences available';
 
   console.log('📊 [NARRATION] Audience context:', {
     businessName,
     businessType,
     audienceCount: audiences?.length || 0,
-    problemCount: audienceProblems.length,
-    hasAnalysisData: !!analysisData
+    hasAnalysisData: !!analysisData,
+    hasPreviousNarration: !!previousNarration
   });
 
-  const prompt = `You are a business consultant. This is PART 2 of your presentation (continuing from analysis findings).
+  const prompt = `You are a business consultant. This is PART 2 of your presentation.
 
 Business: ${businessName} (${businessType || 'Not specified'})
+Previous narration: "${previousNarration || 'Analysis complete'}"
 
 Audience Segments Found (${audiences?.length || 0}):
-${audienceProblems.map((p, i) => `${i + 1}. ${p}`).join('\n')}
+${audienceContext}
 
 Write the next statement (1-2 sentences, max 130 chars) that:
-- Introduces the ${audiences?.length || 0} audience segments you discovered
-- Explains WHY they fit the target market (shared characteristics or behaviors)
+- Continues naturally from previous narration
+- Introduces the ${audiences?.length || 0} segments with SPECIFIC context:
+  * Include conversion scores when available
+  * Explain WHY they fit (search behavior, pain points, value alignment)
+  * Reference concrete metrics and specific problems
 - Asks which one to focus on
-- NO quotes, NO exclamation marks, NO flowery words
-- Keep the same consultant perspective as Part 1
+- NO quotes, NO exclamation marks, maintain consultant tone
 
-WRONG: "I found 5 audiences struggling with X, Y, Z" (just lists problems)
-RIGHT: "I found ${audiences?.length || 0} distinct audiences that fit your target market because they both [specific shared trait] and [specific behavior]. Which one should we focus on?"
+WRONG: "I found audiences struggling with challenges" (generic, no specifics)
+RIGHT: "I found 3 audiences: Safety Managers post-incident (92/100 conv), Operations Managers prevention (78/100), Compliance Officers audit prep. Which should we focus on?"
 
-Direct and factual. This continues your presentation and leads to showing topics next.`;
+Be data-driven and specific about their problems and fit.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -188,7 +198,8 @@ export async function generateTopicNarration(params) {
     businessName,
     businessType,
     orgDescription,
-    selectedAudience
+    selectedAudience,
+    previousNarration
   } = params;
 
   const audience = selectedAudience;
@@ -196,30 +207,38 @@ export async function generateTopicNarration(params) {
   const problem = audience?.problem || 'content challenges';
   const pitch = audience?.pitch || null;
 
+  // Extract conversion data (excluding profit)
+  const convScore = audience?.conversion_score || 0;
+  const convDisplay = convScore > 0 ? `${convScore}/100 conv` : '';
+
   console.log('📊 [NARRATION] Topic context:', {
     businessName,
     businessType,
     audienceSegment,
     hasProblem: !!problem,
     hasPitch: !!pitch,
-    hasValue: !!audience?.value
+    hasValue: !!audience?.business_value,
+    hasConversionScore: !!convScore,
+    hasPreviousNarration: !!previousNarration
   });
 
   const prompt = `You are a business consultant. This is PART 3 (final) of your presentation.
 
-They selected: ${audienceSegment}
-Their problem: ${problem}
+Previous narration: "${previousNarration || 'Audience selected'}"
+
+Selected Audience: ${audienceSegment}${convDisplay ? ` (${convDisplay})` : ''}
+- Problem: ${problem}
 
 Write the final statement (1-2 sentences, max 120 chars) that:
-- Acknowledges their audience choice briefly
-- Introduces topic recommendations with specific REASONS they'll drive results
-- NOT generic phrases like "content challenges" or "help with"
-- Explain WHY (e.g., "high search volume", "addresses pain point", "drives conversions")
+- Continues naturally from previous narration
+- Introduces topics that address their specific pain point
+- Mentions search volume or conversion potential if relevant
+- Shows reasoning for why these topics will drive results
 - NO quotes, NO exclamation marks
 - Maintain same professional tone from Parts 1 & 2
 
-WRONG: "Here are topics to address content challenges" (generic, no reasoning)
-RIGHT: "For ${audienceSegment}, here are blog ideas that should drive results because they [specific reason like "target high-volume searches"] and [specific reason like "address their main pain point"]. Which one should we write?"
+WRONG: "Here are topics for your audience" (no reasoning, generic)
+RIGHT: "For Safety Managers (92/100 conv), these topics target incident prevention searches (4.2k/mo), directly address their post-incident reporting needs. Which should we write?"
 
 Direct and factual. This completes your 3-part presentation.`;
 
