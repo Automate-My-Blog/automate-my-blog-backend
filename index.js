@@ -45,6 +45,7 @@ import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
 import { registerStreamRoute } from './routes/stream.js';
+import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse } from './lib/errors.js';
@@ -221,6 +222,19 @@ app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 
 // Founder Email Routes (Admin only - should add auth middleware)
 app.use(founderEmailRoutes);
+
+// Admin panel: stats and cache management (super_admin JWT or ADMIN_API_KEY)
+app.use('/api/v1/admin-panel', authService.optionalAuthMiddleware.bind(authService), requireAdmin, adminPanelRouter);
+// Admin login page (public): same shell as /admin so login + redirect works
+app.get('/admin/login', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(adminLoginHtml());
+});
+// Admin shell (public): client checks sessionStorage for token; if present fetches panel with Bearer token and renders it
+app.get('/admin', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(adminShellHtml());
+});
 
 // PWA manifest — public, no auth (fixes 401 when frontend or proxy requests /manifest.json from backend origin).
 app.get('/manifest.json', (req, res) => {
