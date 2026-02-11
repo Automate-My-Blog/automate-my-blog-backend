@@ -1,29 +1,33 @@
-# Vercel: Control Which Branches Build
+# Vercel: Only Build main and staging
 
-We only want Vercel to build for specific branches (e.g. `main` and `staging`). When the build is skipped or fails for other branches/PRs, the PR can show "Vercel — Deployment has failed" and block merge, so we use **Ignore Build Step** to skip builds we don’t need.
+We only want Vercel to build **main** and **staging**. PRs and all other branches should **not** build (saves time and avoids "Vercel — Deployment has failed" blocking merges). Use **Ignore Build Step** in the Vercel project so only those two branches run a build.
 
 ## Setup (one-time)
 
 1. Open [Vercel Dashboard](https://vercel.com) → your project.
 2. Go to **Settings** → **Git**.
 3. Under **Build & Development Settings**, find **Ignore Build Step**.
-4. Use one of these:
+4. Set the command to use the script in this repo (recommended):
+
+   ```bash
+   bash scripts/vercel-ignore-build.sh
+   ```
+
+   That script builds only when `VERCEL_GIT_COMMIT_REF` is `main` or `staging`; all other branches and PRs skip (exit 0 = skip, exit 1 = build).
+
+   **Inline alternative (same behavior):**
+   ```bash
+   if [ "$VERCEL_GIT_COMMIT_REF" == "main" ] || [ "$VERCEL_GIT_COMMIT_REF" == "staging" ]; then exit 1; else exit 0; fi
+   ```
 
    **Only production (`main`) builds:**
    ```bash
    if [ "$VERCEL_ENV" == "production" ]; then exit 1; else exit 0; fi
    ```
 
-   **Both `main` and `staging` build; all other branches/PRs skip:**
-   ```bash
-   if [ "$VERCEL_GIT_COMMIT_REF" == "main" ] || [ "$VERCEL_GIT_COMMIT_REF" == "staging" ]; then exit 1; else exit 0; fi
-   ```
-
-   Exit 1 = build runs. Exit 0 = build is skipped.
-
 5. Save.
 
-PRs and other branches will skip the build unless they match the condition above. Only the branches you allow (e.g. `main` and optionally `staging`) will build and deploy.
+Only **main** and **staging** will build and deploy. PRs and other branches will skip the build.
 
 ## Alternative
 

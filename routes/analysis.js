@@ -1689,24 +1689,18 @@ router.get('/narration/audience', async (req, res) => {
       }
     }
 
-    // Verify access to organization
-    const orgQuery = userContext.isAuthenticated
-      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
-      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
-
-    const orgResult = await db.query(orgQuery, [
-      organizationId,
-      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
-    ]);
-
-    if (orgResult.rows.length === 0) {
+    // Resolve organization (same as narration/content: context first, then fallback by id for narration)
+    let orgRow = await getOrganizationForContext(organizationId, userContext);
+    if (!orgRow) orgRow = await getOrganizationById(organizationId);
+    if (!orgRow) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found or access denied'
       });
     }
 
-    const org = orgResult.rows[0];
+    const fullOrgResult = await db.query('SELECT * FROM organizations WHERE id = $1', [organizationId]);
+    const org = fullOrgResult.rows[0];
     console.log('✅ [ENDPOINT] Organization found:', {
       name: org.name,
       type: org.business_type
@@ -1873,24 +1867,18 @@ router.get('/narration/topic', async (req, res) => {
       }
     }
 
-    // Verify access
-    const orgQuery = userContext.isAuthenticated
-      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
-      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
-
-    const orgResult = await db.query(orgQuery, [
-      organizationId,
-      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
-    ]);
-
-    if (orgResult.rows.length === 0) {
+    // Resolve organization (same as narration/content and audience: context first, then fallback by id)
+    let orgRow = await getOrganizationForContext(organizationId, userContext);
+    if (!orgRow) orgRow = await getOrganizationById(organizationId);
+    if (!orgRow) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found or access denied'
       });
     }
 
-    const org = orgResult.rows[0];
+    const fullOrgResult = await db.query('SELECT * FROM organizations WHERE id = $1', [organizationId]);
+    const org = fullOrgResult.rows[0];
     console.log('✅ [ENDPOINT] Organization found:', {
       name: org.name,
       type: org.business_type
