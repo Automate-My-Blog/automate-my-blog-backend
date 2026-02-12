@@ -29,7 +29,11 @@ After the first website analysis, you can show handles from `GET …/social-hand
 ## 3. API reference
 
 Base path: **`/api/v1/organizations`**  
-All endpoints require **authenticated user** (`Authorization: Bearer <JWT>`).  
+Auth: **JWT or session** (same as analysis/jobs):
+- **Logged in:** `Authorization: Bearer <JWT>`
+- **Anonymous funnel:** `x-session-id: <sessionId>` (org must be linked to this session from website analysis)
+
+If neither is provided, the API returns **401** with message `Provide Authorization header or x-session-id.`  
 `organizationId` is the organization UUID (e.g. from website analysis result).
 
 ---
