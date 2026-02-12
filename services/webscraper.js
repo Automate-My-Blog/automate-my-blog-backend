@@ -168,6 +168,7 @@ export class WebScraperService {
               internalLinks: extracted.internalLinks || [],
               externalLinks: [],
               ctas: extracted.ctas || [],
+              socialHandles: extracted.socialHandles || {},
               extractionMethod: 'cheerio_fast_path'
             };
             return this.cleanContent(content);
@@ -392,6 +393,11 @@ export class WebScraperService {
           url
         };
       }, url);
+
+      // Extract social handles from full HTML (reuse Cheerio parsing)
+      const html = await page.content();
+      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
+      content.socialHandles = extractedFromHtml.socialHandles || {};
 
       // Extract CTAs using inline extraction logic
       this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
@@ -782,6 +788,11 @@ export class WebScraperService {
         };
       }, url);
 
+      // Extract social handles from full HTML (reuse Cheerio parsing)
+      const html = await page.content();
+      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
+      content.socialHandles = extractedFromHtml.socialHandles || {};
+
       // Extract CTAs using inline extraction logic
       this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
       console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Playwright scraper');
@@ -927,13 +938,266 @@ export class WebScraperService {
   }
 
   /**
+   * Parse a URL and return { platform, handle } if it's a known social profile URL, else null.
+   * Supports: Twitter/X, LinkedIn, Facebook, Instagram, YouTube, TikTok, GitHub, Reddit, Pinterest,
+   * Medium, Substack, Mastodon, Threads, Bluesky, Tumblr, Vimeo, Dribbble, Behance, SoundCloud,
+   * Twitch, Telegram, Patreon, Linktree, Snapchat, Ko-fi, Buy Me a Coffee, Discord.
+   * @param {string} href - Absolute or relative URL
+   * @param {string} baseUrl - Page base URL for resolving relative hrefs
+   * @returns {{ platform: string, handle: string } | null}
+   */
+  _parseSocialHandle(href, baseUrl) {
+    if (!href || typeof href !== 'string') return null;
+    let absolute;
+    let host = '';
+    try {
+      const u = new URL(href, baseUrl || 'https://example.com');
+      absolute = u.href;
+      host = u.hostname.toLowerCase();
+    } catch (e) {
+      return null;
+    }
+    const lower = absolute.toLowerCase();
+    // Twitter/X: twitter.com/User, x.com/User (host must be twitter.com or x.com)
+    if ((host === 'twitter.com' || host === 'x.com')) {
+      const m = absolute.match(/(?:twitter\.com|x\.com)\/([^/?]+)/i);
+      if (m && m[1] && !['intent', 'share', 'home', 'search', 'hashtag'].includes(m[1].toLowerCase())) {
+        const handle = m[1].startsWith('@') ? m[1] : `@${m[1]}`;
+        return { platform: 'twitter', handle };
+      }
+    }
+    // LinkedIn: linkedin.com/company/slug or linkedin.com/in/slug
+    if (host.replace(/^www\./, '') === 'linkedin.com') {
+      const companyMatch = absolute.match(/linkedin\.com\/company\/([^/?]+)/i);
+      if (companyMatch && companyMatch[1]) return { platform: 'linkedin', handle: `company/${companyMatch[1]}` };
+      const inMatch = absolute.match(/linkedin\.com\/in\/([^/?]+)/i);
+      if (inMatch && inMatch[1]) return { platform: 'linkedin', handle: `in/${inMatch[1]}` };
+    }
+    // Facebook: facebook.com/PageName, fb.com/PageName
+    if (['facebook.com', 'www.facebook.com', 'fb.com', 'fb.me'].includes(host)) {
+      const m = absolute.match(/(?:facebook\.com|fb\.com|fb\.me)\/([^/?]+)/i);
+      if (m && m[1] && !['sharer', 'share', 'dialog', 'plugins', 'login', 'pages'].includes(m[1].toLowerCase())) {
+        return { platform: 'facebook', handle: m[1] };
+      }
+    }
+    // Instagram: instagram.com/username
+    if (host.replace(/^www\./, '') === 'instagram.com') {
+      const m = absolute.match(/instagram\.com\/([^/?]+)/i);
+      if (m && m[1] && !['p/', 'reel/', 'stories/', 'explore', 'accounts'].includes(m[1].toLowerCase())) {
+        return { platform: 'instagram', handle: m[1] };
+      }
+    }
+    // YouTube: youtube.com/c/Name, youtube.com/@handle, youtube.com/channel/ID
+    if (host.replace(/^www\./, '') === 'youtube.com') {
+      const cMatch = absolute.match(/youtube\.com\/c\/([^/?]+)/i);
+      if (cMatch && cMatch[1]) return { platform: 'youtube', handle: `c/${cMatch[1]}` };
+      const atMatch = absolute.match(/youtube\.com\/@([^/?]+)/i);
+      if (atMatch && atMatch[1]) return { platform: 'youtube', handle: `@${atMatch[1]}` };
+      const chMatch = absolute.match(/youtube\.com\/channel\/([^/?]+)/i);
+      if (chMatch && chMatch[1]) return { platform: 'youtube', handle: `channel/${chMatch[1]}` };
+    }
+    // TikTok: tiktok.com/@username
+    if (host.replace(/^www\./, '') === 'tiktok.com') {
+      const m = absolute.match(/tiktok\.com\/@([^/?]+)/i);
+      if (m && m[1]) return { platform: 'tiktok', handle: `@${m[1]}` };
+    }
+    // GitHub: github.com/username or github.com/org/repo (first path segment)
+    if (host.replace(/^www\./, '') === 'github.com') {
+      const m = absolute.match(/github\.com\/([^/?]+)/i);
+      if (m && m[1] && !['settings', 'orgs', 'search', 'login', 'signup', 'about', 'blog', 'contact', 'explore', 'topics', 'features', 'enterprise', 'pricing', 'mobile', 'site', 'brand'].includes(m[1].toLowerCase())) {
+        return { platform: 'github', handle: m[1] };
+      }
+    }
+    // Reddit: reddit.com/user/username, reddit.com/u/username
+    if (host.replace(/^www\./, '') === 'reddit.com' && (lower.includes('/user/') || lower.includes('/u/'))) {
+      const m = absolute.match(/reddit\.com\/(?:user|u)\/([^/?]+)/i);
+      if (m && m[1] && !['popular', 'all', 'mine'].includes(m[1].toLowerCase())) {
+        return { platform: 'reddit', handle: m[1] };
+      }
+    }
+    // Pinterest: pinterest.com/username/
+    if ((host === 'pinterest.com' || host === 'www.pinterest.com' || host === 'pinterest.co.uk') && lower.includes('/')) {
+      const m = absolute.match(/pinterest\.(?:com|co\.uk)\/([^/?]+)/i);
+      if (m && m[1] && !['pin', 'search', 'about', 'business', 'help', 'login', 'signup'].includes(m[1].toLowerCase())) {
+        return { platform: 'pinterest', handle: m[1] };
+      }
+    }
+    // Medium: medium.com/@username
+    if (host.replace(/^www\./, '') === 'medium.com') {
+      const atMatch = absolute.match(/medium\.com\/@([^/?]+)/i);
+      if (atMatch && atMatch[1]) return { platform: 'medium', handle: `@${atMatch[1]}` };
+      const m = absolute.match(/medium\.com\/([^/?]+)/i);
+      if (m && m[1] && !['me', 'about', 'subscribe', 'search', 'topic', 'policy', 'terms'].includes(m[1].toLowerCase())) {
+        return { platform: 'medium', handle: m[1] };
+      }
+    }
+    // Substack: substack.com/@username or username.substack.com
+    if (host === 'substack.com' && lower.includes('/@')) {
+      const m = absolute.match(/substack\.com\/@([^/?]+)/i);
+      if (m && m[1]) return { platform: 'substack', handle: `@${m[1]}` };
+    }
+    if (host.endsWith('.substack.com')) {
+      const m = host.match(/^([a-z0-9-]+)\.substack\.com$/i);
+      if (m && m[1] && m[1].length > 1) return { platform: 'substack', handle: m[1] };
+    }
+    // Mastodon: instance e.g. mastodon.social/@user, mstdn.social/@user, mas.to/@user
+    try {
+      const mastodonHost = new URL(absolute).hostname.toLowerCase();
+      if ((mastodonHost.includes('mastodon') || mastodonHost.includes('mstdn') || mastodonHost === 'mas.to') && lower.includes('/@')) {
+        const atMatch = absolute.match(/\/(@[a-z0-9_.]+)\/?$/i);
+        if (atMatch && atMatch[1]) {
+          return { platform: 'mastodon', handle: `${mastodonHost}/${atMatch[1]}` };
+        }
+      }
+    } catch (e) { /* ignore */ }
+    // Threads: threads.net/@user
+    if (host === 'threads.net') {
+      const m = absolute.match(/threads\.net\/@([^/?]+)/i);
+      if (m && m[1]) return { platform: 'threads', handle: `@${m[1]}` };
+    }
+    // Bluesky: bsky.app/profile/handle.bsky.social or bsky.app/profile/handle
+    if (host === 'bsky.app' && lower.includes('/profile/')) {
+      const m = absolute.match(/bsky\.app\/profile\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'bluesky', handle: m[1] };
+    }
+    // Tumblr: username.tumblr.com or tumblr.com/blog/username
+    if (host.endsWith('.tumblr.com')) {
+      const m = host.match(/^([a-z0-9-]+)\.tumblr\.com$/i);
+      if (m && m[1] && !['www', 'api', 'assets'].includes(m[1].toLowerCase())) {
+        return { platform: 'tumblr', handle: m[1] };
+      }
+    }
+    if (host.replace(/^www\./, '') === 'tumblr.com' && lower.includes('/blog/')) {
+      const m = absolute.match(/tumblr\.com\/blog\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'tumblr', handle: m[1] };
+    }
+    // Vimeo: vimeo.com/username or vimeo.com/user/123
+    if (host.replace(/^www\./, '') === 'vimeo.com') {
+      const m = absolute.match(/vimeo\.com\/([^/?]+)/i);
+      if (m && m[1] && !['channels', 'groups', 'album', 'videos', 'ondemand', 'help', 'blog', 'about'].includes(m[1].toLowerCase())) {
+        return { platform: 'vimeo', handle: m[1] };
+      }
+    }
+    // Dribbble: dribbble.com/username
+    if (host.replace(/^www\./, '') === 'dribbble.com') {
+      const m = absolute.match(/dribbble\.com\/([^/?]+)/i);
+      if (m && m[1] && !['shots', 'designers', 'jobs', 'about', 'contact', 'api', 'search'].includes(m[1].toLowerCase())) {
+        return { platform: 'dribbble', handle: m[1] };
+      }
+    }
+    // Behance: behance.net/username
+    if (host.replace(/^www\./, '') === 'behance.net') {
+      const m = absolute.match(/behance\.net\/([^/?]+)/i);
+      if (m && m[1] && !['gallery', 'search', 'jobs', 'adobe', 'api'].includes(m[1].toLowerCase())) {
+        return { platform: 'behance', handle: m[1] };
+      }
+    }
+    // SoundCloud: soundcloud.com/username
+    if (host.replace(/^www\./, '') === 'soundcloud.com') {
+      const m = absolute.match(/soundcloud\.com\/([^/?]+)/i);
+      if (m && m[1] && !['you', 'discover', 'stream', 'search', 'pages', 'embed', 'player', 'api'].includes(m[1].toLowerCase())) {
+        return { platform: 'soundcloud', handle: m[1] };
+      }
+    }
+    // Twitch: twitch.tv/username
+    if (host.replace(/^www\./, '') === 'twitch.tv') {
+      const m = absolute.match(/twitch\.tv\/([^/?]+)/i);
+      if (m && m[1] && !['directory', 'videos', 'search', 'p', 'settings', 'login', 'signup'].includes(m[1].toLowerCase())) {
+        return { platform: 'twitch', handle: m[1] };
+      }
+    }
+    // Telegram: t.me/username
+    if (host === 't.me') {
+      const m = absolute.match(/t\.me\/([a-z0-9_]+)/i);
+      if (m && m[1] && m[1].length > 4) return { platform: 'telegram', handle: m[1] };
+    }
+    // Patreon: patreon.com/username
+    if (host.replace(/^www\./, '') === 'patreon.com') {
+      const m = absolute.match(/patreon\.com\/([^/?]+)/i);
+      if (m && m[1] && !['home', 'login', 'signup', 'search', 'explore', 'creators', 'c'].includes(m[1].toLowerCase())) {
+        return { platform: 'patreon', handle: m[1] };
+      }
+    }
+    // Linktree: linktr.ee/username
+    if (host === 'linktr.ee') {
+      const m = absolute.match(/linktr\.ee\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'linktree', handle: m[1] };
+    }
+    // Snapchat: snapchat.com/add/username
+    if (host.replace(/^www\./, '') === 'snapchat.com' && lower.includes('/add/')) {
+      const m = absolute.match(/snapchat\.com\/add\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'snapchat', handle: m[1] };
+    }
+    // Ko-fi: ko-fi.com/username
+    if (host.replace(/^www\./, '') === 'ko-fi.com') {
+      const m = absolute.match(/ko-fi\.com\/([^/?]+)/i);
+      if (m && m[1] && !['home', 'login', 'signup', 'donate', 'shop'].includes(m[1].toLowerCase())) {
+        return { platform: 'kofi', handle: m[1] };
+      }
+    }
+    // Buy Me a Coffee: buymeacoffee.com/username
+    if (host.replace(/^www\./, '') === 'buymeacoffee.com') {
+      const m = absolute.match(/buymeacoffee\.com\/([^/?]+)/i);
+      if (m && m[1] && !['buy', 'login', 'signup', 'explore'].includes(m[1].toLowerCase())) {
+        return { platform: 'buymeacoffee', handle: m[1] };
+      }
+    }
+    // Discord: discord.com/users/id
+    if (host === 'discord.com' && lower.includes('/users/')) {
+      const m = absolute.match(/discord\.com\/users\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'discord', handle: m[1] };
+    }
+    return null;
+  }
+
+  /**
+   * Build social_handles object from array of { platform, handle }. Dedupes by platform (first wins).
+   * @param {Array<{ platform: string, handle: string }>} pairs
+   * @returns {Record<string, string[]>}
+   */
+  _buildSocialHandlesObject(pairs) {
+    const byPlatform = {};
+    const seen = new Set();
+    for (const { platform, handle } of pairs) {
+      const key = `${platform}:${handle}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!byPlatform[platform]) byPlatform[platform] = [];
+      byPlatform[platform].push(handle);
+    }
+    return byPlatform;
+  }
+
+  /**
    * Shared HTML → content + CTAs extraction (Cheerio). Used by scrapeWithCheerio and scrapeWithBrowserService.
    * @param {string} html - Raw HTML
    * @param {string} url - Page URL (for internal links and context)
-   * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object> }}
+   * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object>, socialHandles: object }}
    */
   _extractContentAndCTAsFromHTML(html, url) {
     const $ = cheerio.load(html);
+
+    // Collect social from meta and JSON-LD before removing script tags
+    const earlySocialPairs = [];
+    const twitterCreator = $('meta[name="twitter:creator"]').attr('content');
+    if (twitterCreator && typeof twitterCreator === 'string') {
+      const handle = twitterCreator.trim().startsWith('@') ? twitterCreator.trim() : `@${twitterCreator.trim()}`;
+      if (handle.length > 1) earlySocialPairs.push({ platform: 'twitter', handle });
+    }
+    $('script[type="application/ld+json"]').each((_i, el) => {
+      const text = $(el).html();
+      if (!text) return;
+      try {
+        const data = JSON.parse(text);
+        const sameAs = Array.isArray(data.sameAs) ? data.sameAs : (data['@graph'] && Array.isArray(data['@graph']) ? data['@graph'].flatMap(g => Array.isArray(g.sameAs) ? g.sameAs : []) : []);
+        sameAs.forEach(link => {
+          if (typeof link !== 'string') return;
+          const social = this._parseSocialHandle(link, url);
+          if (social) earlySocialPairs.push(social);
+        });
+      } catch (e) { /* ignore invalid JSON */ }
+    });
+
     $('script, style, .cookie-banner, .popup, .modal, .advertisement, .social-share, .comments').remove();
 
     const title = $('title').text().trim() || '';
@@ -981,17 +1245,23 @@ export class WebScraperService {
       domain = new URL(url).hostname;
     } catch (e) { /* ignore */ }
     const internalLinks = [];
+    const socialPairs = [];
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
       const linkText = $(el).text().trim();
-      if (!href || !linkText) return;
+      if (!href) return;
       try {
         const linkUrl = new URL(href, url);
         if (linkUrl.hostname === domain || linkUrl.hostname.replace('www.', '') === domain.replace('www.', '')) {
-          internalLinks.push({ url: linkUrl.href, text: linkText, context: 'content' });
+          if (linkText) internalLinks.push({ url: linkUrl.href, text: linkText, context: 'content' });
+        } else {
+          const social = this._parseSocialHandle(href, url);
+          if (social) socialPairs.push(social);
         }
       } catch (err) { /* ignore */ }
     });
+    socialPairs.push(...earlySocialPairs);
+    const socialHandles = this._buildSocialHandlesObject(socialPairs);
 
     const ctas = [];
     const ctaSelectors = [
@@ -1016,7 +1286,7 @@ export class WebScraperService {
       });
     });
 
-    return { title, metaDescription, content: mainContent, headings, internalLinks, ctas };
+    return { title, metaDescription, content: mainContent, headings, internalLinks, socialHandles, ctas };
   }
 
   /**
@@ -1068,6 +1338,7 @@ export class WebScraperService {
         internalLinks: extracted.internalLinks || [],
         externalLinks: [],
         ctas: extracted.ctas || [],
+        socialHandles: extracted.socialHandles || {},
         extractionMethod: 'browserless'
       };
 
@@ -1117,10 +1388,11 @@ export class WebScraperService {
         internalLinks: extracted.internalLinks || [],
         externalLinks: [],
         ctas: extracted.ctas || [],
+        socialHandles: extracted.socialHandles || {},
         extractionMethod: 'cheerio_enhanced'
       };
 
-      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${(extracted.internalLinks || []).length} internal links, ${(extracted.ctas || []).length} CTAs`);
+      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${(extracted.internalLinks || []).length} internal links, ${(extracted.ctas || []).length} CTAs, ${Object.keys(extracted.socialHandles || {}).length} social platforms`);
       return this.cleanContent(content);
     } catch (error) {
       console.error('Enhanced Cheerio extraction failed:', error);
@@ -2944,6 +3216,7 @@ export class WebScraperService {
       internalLinks: content.internalLinks || [],
       externalLinks: content.externalLinks || [],
       ctas: content.ctas || [],
+      socialHandles: content.socialHandles || {},
       extractionMethod: content.extractionMethod || 'unknown',
       scrapedAt: new Date().toISOString()
     };
