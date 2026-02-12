@@ -3,7 +3,7 @@
 This document describes the **full onboarding funnel**: from entering a website URL through website analysis, audience selection, topic selection, and blog post generation. Use it to implement or refactor the guided funnel UI and to wire each step to the correct APIs and streams.
 
 **Related docs:**  
-[website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) · [website-analysis-narrative-stream-frontend-handoff.md](./website-analysis-narrative-stream-frontend-handoff.md) · [narration-stream-frontend-handoff.md](./narration-stream-frontend-handoff.md) · [topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md) · [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) · [frontend-job-queue-handoff.md](./frontend-job-queue-handoff.md) · [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md) · [issue-261-backend-implementation.md](./issue-261-backend-implementation.md)
+[website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) · [website-analysis-narrative-stream-frontend-handoff.md](./website-analysis-narrative-stream-frontend-handoff.md) · [narration-stream-frontend-handoff.md](./narration-stream-frontend-handoff.md) · [topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md) · [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) · [frontend-job-queue-handoff.md](./frontend-job-queue-handoff.md) · [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md) · [voice-adaptation-frontend-handoff.md](./voice-adaptation-frontend-handoff.md) · [issue-261-backend-implementation.md](./issue-261-backend-implementation.md)
 
 ---
 
@@ -340,5 +340,6 @@ For **EventSource** (all SSE GETs), auth is **only via query**: `?token=<JWT>` o
 | [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) | Content-generation job and blog-result / complete. |
 | [frontend-job-queue-handoff.md](./frontend-job-queue-handoff.md) | Job create, poll status, retry, cancel. |
 | [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md) | JWT vs sessionId for SSE. |
+| [voice-adaptation-frontend-handoff.md](./voice-adaptation-frontend-handoff.md) | Voice samples upload, profile, and "your voice vs generic" comparison. |
 | [job-stream-sse.md](./job-stream-sse.md) | Full job stream event schema. |
 | [issue-261-backend-implementation.md](./issue-261-backend-implementation.md) | Backend summary for guided funnel (confirm, cleaned-edit, narration, icons). |
