@@ -190,7 +190,7 @@ app.use('/api/v1/tweets', authService.optionalAuthMiddleware.bind(authService), 
 app.use('/api/v1/youtube-videos', authService.optionalAuthMiddleware.bind(authService), youtubeVideosRoutes);
 app.use('/api/v1/news-articles', authService.optionalAuthMiddleware.bind(authService), newsArticlesRoutes);
 app.use('/api/v1/trending-topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
-app.use('/api/v1/organizations', authService.authMiddleware.bind(authService), organizationRoutes);
+app.use('/api/v1/organizations', authService.optionalAuthMiddleware.bind(authService), organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
 // Stripe routes - webhook has NO auth (signature verified), other endpoints require auth

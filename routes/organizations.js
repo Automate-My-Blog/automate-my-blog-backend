@@ -4,27 +4,62 @@ import { normalizeCTA } from '../utils/cta-normalizer.js';
 
 const router = Router();
 
+/** Extract user context (JWT or session) for optional-auth routes. Same pattern as analysis. */
+function extractUserContext(req) {
+  const sessionId = req.headers['x-session-id'] || req.body?.session_id || req.query?.sessionId || null;
+  if (req.user?.userId) {
+    return { isAuthenticated: true, userId: req.user.userId, sessionId: sessionId || null };
+  }
+  return { isAuthenticated: false, userId: null, sessionId: sessionId || null };
+}
+
+/** Require at least session or auth; return error response or null. */
+function validateUserContext(context) {
+  if (!context.isAuthenticated && !context.sessionId) {
+    return { status: 401, body: { success: false, error: 'Authentication or session required', message: 'Provide Authorization header or x-session-id.' } };
+  }
+  return null;
+}
+
+/** Verify organization access (owner or session). Returns org row or null. */
+async function getOrganizationForContext(organizationId, userContext) {
+  if (!organizationId) return null;
+  if (userContext.isAuthenticated) {
+    const r = await db.query('SELECT id FROM organizations WHERE id = $1 AND owner_user_id = $2', [organizationId, userContext.userId]);
+    return r.rows[0] || null;
+  }
+  if (userContext.sessionId) {
+    const r = await db.query('SELECT id FROM organizations WHERE id = $1 AND session_id = $2', [organizationId, userContext.sessionId]);
+    return r.rows[0] || null;
+  }
+  return null;
+}
+
 /**
  * GET /api/v1/organizations/:organizationId/social-handles
  * Get discovered or manually set social media handles for the organization.
+ * Requires JWT or x-session-id; org must be owned by user or linked to session.
  */
 router.get('/:organizationId/social-handles', async (req, res) => {
   try {
     const { organizationId } = req.params;
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(validationError.status).json(validationError.body);
+
+    const org = await getOrganizationForContext(organizationId, userContext);
+    if (!org) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found',
+        message: 'The requested organization does not exist or you do not have access'
+      });
+    }
 
     const orgCheck = await db.query(
       'SELECT id, social_handles FROM organizations WHERE id = $1',
       [organizationId]
     );
-
-    if (orgCheck.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Organization not found',
-        message: 'The requested organization does not exist'
-      });
-    }
-
     const socialHandles = orgCheck.rows[0].social_handles || {};
 
     res.json({
@@ -49,20 +84,20 @@ router.get('/:organizationId/social-handles', async (req, res) => {
 router.patch('/:organizationId/social-handles', async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const { social_handles: bodyHandles } = req.body;
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(validationError.status).json(validationError.body);
 
-    const orgCheck = await db.query(
-      'SELECT id FROM organizations WHERE id = $1',
-      [organizationId]
-    );
-
-    if (orgCheck.rows.length === 0) {
+    const org = await getOrganizationForContext(organizationId, userContext);
+    if (!org) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found',
-        message: 'The requested organization does not exist'
+        message: 'The requested organization does not exist or you do not have access'
       });
     }
+
+    const { social_handles: bodyHandles } = req.body;
 
     if (bodyHandles !== undefined && (typeof bodyHandles !== 'object' || bodyHandles === null || Array.isArray(bodyHandles))) {
       return res.status(400).json({
@@ -116,21 +151,21 @@ router.patch('/:organizationId/social-handles', async (req, res) => {
 router.post('/:organizationId/refresh-social-voice', async (req, res) => {
   try {
     const { organizationId } = req.params;
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(validationError.status).json(validationError.body);
 
-    const orgCheck = await db.query(
-      'SELECT id, website_url FROM organizations WHERE id = $1',
-      [organizationId]
-    );
-
-    if (orgCheck.rows.length === 0) {
+    const org = await getOrganizationForContext(organizationId, userContext);
+    if (!org) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found',
-        message: 'The requested organization does not exist'
+        message: 'The requested organization does not exist or you do not have access'
       });
     }
 
-    const websiteUrl = orgCheck.rows[0].website_url;
+    const orgRow = await db.query('SELECT id, website_url FROM organizations WHERE id = $1', [organizationId]);
+    const websiteUrl = orgRow.rows[0]?.website_url;
     if (!websiteUrl) {
       return res.status(400).json({
         success: false,
@@ -171,22 +206,21 @@ router.post('/:organizationId/refresh-social-voice', async (req, res) => {
  * GET /api/v1/organizations/:organizationId/ctas
  * Get CTAs for an organization
  * Returns top CTAs ranked by conversion potential for use in topic preview and content generation
+ * Requires JWT or x-session-id; org must be owned by user or linked to session.
  */
 router.get('/:organizationId/ctas', async (req, res) => {
   try {
     const { organizationId } = req.params;
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(validationError.status).json(validationError.body);
 
-    // Verify organization exists
-    const orgCheck = await db.query(
-      'SELECT id, website_url FROM organizations WHERE id = $1',
-      [organizationId]
-    );
-
-    if (orgCheck.rows.length === 0) {
+    const org = await getOrganizationForContext(organizationId, userContext);
+    if (!org) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found',
-        message: 'The requested organization does not exist'
+        message: 'The requested organization does not exist or you do not have access'
       });
     }
 
@@ -265,27 +299,26 @@ router.get('/:organizationId/ctas', async (req, res) => {
  * POST /api/v1/organizations/:organizationId/ctas/manual
  * Manually add CTAs for an organization
  * Used when website scraping didn't find enough CTAs
+ * Requires JWT or x-session-id; org must be owned by user or linked to session.
  */
 router.post('/:organizationId/ctas/manual', async (req, res) => {
   try {
     const { organizationId } = req.params;
-    const { ctas } = req.body;
+    const userContext = extractUserContext(req);
+    const validationError = validateUserContext(userContext);
+    if (validationError) return res.status(validationError.status).json(validationError.body);
 
-    // Verify organization exists
-    const orgCheck = await db.query(
-      'SELECT id, website_url FROM organizations WHERE id = $1',
-      [organizationId]
-    );
-
-    if (orgCheck.rows.length === 0) {
+    const org = await getOrganizationForContext(organizationId, userContext);
+    if (!org) {
       return res.status(404).json({
         success: false,
         error: 'Organization not found',
-        message: 'The requested organization does not exist'
+        message: 'The requested organization does not exist or you do not have access'
       });
     }
 
-    const websiteUrl = orgCheck.rows[0].website_url;
+    const orgRow = await db.query('SELECT id, website_url FROM organizations WHERE id = $1', [organizationId]);
+    const websiteUrl = orgRow.rows[0]?.website_url;
 
     // Validate input
     if (!Array.isArray(ctas) || ctas.length === 0) {
