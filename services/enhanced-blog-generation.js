@@ -138,12 +138,27 @@ OUTPUT: Return valid JSON. Put the "content" key first so the post body can stre
         websiteData.internal_links = linkResult.rows;
       }
 
+      // Voice adaptation: aggregated profile from uploaded samples (table from migration 037)
+      let voiceProfile = null;
+      try {
+        const voiceResult = await db.query(
+          'SELECT id, organization_id, style, vocabulary, structure, formatting, sample_count, total_word_count, confidence_score, updated_at FROM aggregated_voice_profiles WHERE organization_id = $1',
+          [organizationId]
+        );
+        if (voiceResult.rows.length > 0) {
+          voiceProfile = voiceResult.rows[0];
+        }
+      } catch (e) {
+        if (e?.code !== '42P01') console.warn('Voice profile load skipped:', e?.message || e);
+      }
+
       console.log('✅ [CTA DEBUG] Content Gen: Organization context loaded:', {
         organizationId,
         hasWebsiteData: Object.keys(websiteData).length > 0,
         websiteDataCTACount: websiteData?.ctas?.length || 0,
         websiteDataCTAs: websiteData?.ctas || [],
-        completenessScore: availability.completeness_score || 0
+        completenessScore: availability.completeness_score || 0,
+        hasVoiceProfile: !!voiceProfile
       });
 
       return {
@@ -151,6 +166,7 @@ OUTPUT: Return valid JSON. Put the "content" key first so the post body can stre
         settings,
         manualData,
         websiteData,
+        voiceProfile,
         hasManualFallbacks: Object.keys(manualData).length > 0,
         hasWebsiteData: Object.keys(websiteData).length > 0,
         completenessScore: availability.completeness_score || 0
@@ -1546,11 +1562,28 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
    * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
    */
   buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions = '', previousBoxTypes = [], realTweetUrls = [], requestCtas = []) {
-    const { availability, settings, manualData, websiteData, completenessScore } = organizationContext;
+    const { availability, settings, manualData, websiteData, voiceProfile, completenessScore } = organizationContext;
     const normalizedRequestCtas = this.normalizeRequestCtas(requestCtas);
 
     // Build context sections based on available data
     let contextSections = [];
+
+    // Voice & style from uploaded samples (before brand voice; only when confidence >= 50)
+    const confidence = voiceProfile?.confidence_score != null ? Number(voiceProfile.confidence_score) : 0;
+    if (voiceProfile && confidence >= 50) {
+      const style = voiceProfile.style && typeof voiceProfile.style === 'object' ? voiceProfile.style : {};
+      const vocabulary = voiceProfile.vocabulary && typeof voiceProfile.vocabulary === 'object' ? voiceProfile.vocabulary : {};
+      const structure = voiceProfile.structure && typeof voiceProfile.structure === 'object' ? voiceProfile.structure : {};
+      const formatting = voiceProfile.formatting && typeof voiceProfile.formatting === 'object' ? voiceProfile.formatting : {};
+      const voiceSection = `VOICE & STYLE (from your uploaded samples — match this precisely):
+- Writing style: ${JSON.stringify(style)}
+- Vocabulary & tone: ${JSON.stringify(vocabulary)}
+- Structure: ${JSON.stringify(structure)}
+- Formatting: ${JSON.stringify(formatting)}
+
+Match this writing style PRECISELY so the post feels like it was written by the same person.`;
+      contextSections.push(voiceSection);
+    }
 
     // Brand voice and tone
     let brandContext = '';

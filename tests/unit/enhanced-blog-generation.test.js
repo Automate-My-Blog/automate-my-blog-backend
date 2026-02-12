@@ -138,4 +138,56 @@ describe('enhanced-blog-generation', () => {
       expect(prompt).not.toContain('AVAILABLE CTAS');
     });
   });
+
+  describe('buildEnhancedPrompt with voice profile', () => {
+    const minimalContext = {
+      availability: { has_cta_data: false, has_blog_content: false, has_internal_links: false },
+      settings: {},
+      manualData: {},
+      websiteData: {},
+      completenessScore: 0
+    };
+    const topic = { title: 'Test', subheader: '' };
+    const businessInfo = { businessType: 'B2B', targetAudience: 'SMB', brandVoice: 'pro' };
+
+    it('includes VOICE & STYLE section before BRAND VOICE when voiceProfile and confidence >= 50', () => {
+      const contextWithVoice = {
+        ...minimalContext,
+        voiceProfile: {
+          style: { voice_perspective: 'first', sentence_length: 'medium' },
+          vocabulary: { formality_level: 'professional' },
+          structure: {},
+          formatting: {},
+          confidence_score: 60
+        }
+      };
+      const prompt = service.buildEnhancedPrompt(topic, businessInfo, contextWithVoice, '', [], [], []);
+      expect(prompt).toContain('VOICE & STYLE (from your uploaded samples');
+      expect(prompt).toContain('Match this writing style PRECISELY');
+      expect(prompt).toContain('BRAND VOICE');
+      const voicePos = prompt.indexOf('VOICE & STYLE');
+      const brandPos = prompt.indexOf('BRAND VOICE');
+      expect(voicePos).toBeLessThan(brandPos);
+    });
+
+    it('omits VOICE & STYLE section when confidence_score < 50', () => {
+      const contextLowConfidence = {
+        ...minimalContext,
+        voiceProfile: {
+          style: {},
+          vocabulary: {},
+          structure: {},
+          formatting: {},
+          confidence_score: 40
+        }
+      };
+      const prompt = service.buildEnhancedPrompt(topic, businessInfo, contextLowConfidence, '', [], [], []);
+      expect(prompt).not.toContain('VOICE & STYLE (from your uploaded samples');
+    });
+
+    it('omits VOICE & STYLE section when voiceProfile is null', () => {
+      const prompt = service.buildEnhancedPrompt(topic, businessInfo, minimalContext, '', [], [], []);
+      expect(prompt).not.toContain('VOICE & STYLE (from your uploaded samples');
+    });
+  });
 });
