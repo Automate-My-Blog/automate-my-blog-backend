@@ -15,6 +15,10 @@ A **deliberately distinctive** voice so generated content is easy to compare:
 
 When voice adaptation is working, generated blogs should sound like The Captain. When it's off or generic, they won't.
 
+**Example outputs (same topic, for comparison):**
+- `blog-with-voice.md` — with voice adaptation (Captain persona)
+- `blog-without-voice.md` — without voice (generic tone)
+
 ## Supported source types and files
 
 | sourceType     | File                    | Format | Notes                    |
@@ -54,6 +58,36 @@ node fixtures/voice-workflow-test/verify-fixtures.js
 ```
 
 This runs the real file extractors on each fixture and prints word counts. All should succeed.
+
+## Run full workflow
+
+### Against live staging (API)
+
+Requires staging base URL and auth (email+password or JWT). Worker must be running on staging so `analyze_voice_sample` jobs run.
+
+Staging base URL: `https://automate-my-blog-backend-env-staging-automate-my-blog.vercel.app`
+
+```bash
+BASE_URL=https://automate-my-blog-backend-env-staging-automate-my-blog.vercel.app \
+STAGING_TEST_EMAIL=you@example.com \
+STAGING_TEST_PASSWORD=yourpassword \
+node fixtures/voice-workflow-test/run-full-workflow.js
+```
+
+Or with a JWT: `BASE_URL=... STAGING_JWT=eyJ... node fixtures/voice-workflow-test/run-full-workflow.js`
+
+The script: logs in (or uses JWT), uploads all Captain fixtures, polls until analyses complete, fetches the aggregated profile, and checks that context includes voice when `useVoiceProfile=true`.
+
+### Local (DB + OpenAI, no HTTP/Redis)
+
+Runs extractors, inserts samples, calls the voice-analyzer service, and checks the aggregated profile. No server or worker needed.
+
+```bash
+DATABASE_URL=postgresql://... OPENAI_API_KEY=sk-... \
+node fixtures/voice-workflow-test/run-full-workflow-local.js
+```
+
+Creates a temporary org and samples, runs analysis, prints profile, then deletes the test org.
 
 ## File types accepted by API
 
