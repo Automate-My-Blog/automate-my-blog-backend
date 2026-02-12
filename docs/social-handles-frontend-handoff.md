@@ -137,14 +137,35 @@ If no social links are found:
 
 ## 4. Data shape (social_handles)
 
-| Platform  | Example key   | Example value(s)        | Notes |
-|-----------|---------------|-------------------------|--------|
-| Twitter/X | `twitter`     | `["@username"]`         | Leading `@` optional in storage. |
-| LinkedIn  | `linkedin`    | `["company/slug"]`      | Company pages only. |
-| Facebook  | `facebook`    | `["PageName"]`          | Page username or ID. |
-| Instagram | `instagram`   | `["username"]`          | No `@` in value. |
-| YouTube   | `youtube`     | `["@handle"]`, `["c/Name"]`, or `["channel/ID"]` | Channel handle or ID. |
-| TikTok    | `tiktok`      | `["@username"]`         | |
+| Platform       | Example key     | Example value(s)        | Notes |
+|----------------|-----------------|-------------------------|--------|
+| Twitter/X      | `twitter`       | `["@username"]`         | Leading `@` optional in storage. |
+| LinkedIn       | `linkedin`      | `["company/slug"]`, `["in/profile-slug"]` | Company or personal profile. |
+| Facebook       | `facebook`      | `["PageName"]`          | Page username or ID. |
+| Instagram      | `instagram`     | `["username"]`          | No `@` in value. |
+| YouTube        | `youtube`       | `["@handle"]`, `["c/Name"]`, or `["channel/ID"]` | Channel handle or ID. |
+| TikTok         | `tiktok`        | `["@username"]`         | |
+| GitHub         | `github`        | `["username"]`          | User or org login. |
+| Reddit         | `reddit`        | `["username"]`          | From /user/ or /u/ URLs. |
+| Pinterest      | `pinterest`     | `["username"]`          | |
+| Medium         | `medium`        | `["@username"]` or `["publication"]` | |
+| Substack       | `substack`      | `["@username"]` or `["blogname"]` | blogname from subdomain. |
+| Mastodon       | `mastodon`      | `["instance.social/@user"]` | Instance + handle. |
+| Threads        | `threads`       | `["@username"]`         | Meta’s Threads. |
+| Bluesky        | `bluesky`       | `["handle.bsky.social"]`| |
+| Tumblr         | `tumblr`        | `["blogname"]`          | |
+| Vimeo          | `vimeo`         | `["username"]`          | |
+| Dribbble       | `dribbble`      | `["username"]`          | |
+| Behance        | `behance`       | `["username"]`          | |
+| SoundCloud     | `soundcloud`    | `["username"]`          | |
+| Twitch         | `twitch`        | `["username"]`          | |
+| Telegram       | `telegram`      | `["username"]`          | From t.me links. |
+| Patreon        | `patreon`       | `["username"]`          | |
+| Linktree       | `linktree`      | `["username"]`          | linktr.ee. |
+| Snapchat       | `snapchat`      | `["username"]`          | From snapchat.com/add/. |
+| Ko-fi          | `kofi`          | `["username"]`          | ko-fi.com. |
+| Buy Me a Coffee| `buymeacoffee`  | `["username"]`          | |
+| Discord        | `discord`       | `["userId"]`            | From discord.com/users/ (numeric ID). |
 
 Frontend can display per-platform and allow add/remove per platform; when calling PATCH, send the full `social_handles` object you want stored.
 
