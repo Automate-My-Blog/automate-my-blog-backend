@@ -9,7 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
 
 const QUEUE_NAME = 'amb-jobs';
-const JOB_TYPES = ['website_analysis', 'content_generation'];
+const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample'];
 
 /** Allowed job status values (matches DB constraint). */
 export const JOB_STATUSES = Object.freeze(['queued', 'running', 'succeeded', 'failed']);
@@ -129,7 +129,7 @@ export class UserNotFoundError extends Error {
  * does not exist in DB (e.g. JWT for deleted user), we fall back to session-only when
  * sessionId is present so anonymous flow still works; otherwise throw UserNotFoundError.
  *
- * @param {string} type - 'website_analysis' | 'content_generation'
+ * @param {string} type - 'website_analysis' | 'content_generation' | 'analyze_voice_sample'
  * @param {object} input - Job payload (stored for retry)
  * @param {object} context - { userId?, sessionId?, tenantId? }
  * @returns {Promise<{ jobId: string }>}
@@ -164,6 +164,22 @@ export async function createJob(type, input, context = {}) {
   await queue.add(type, { jobId }, { jobId });
 
   return { jobId };
+}
+
+/**
+ * Create a voice sample analysis job. Call after inserting a voice_samples row.
+ * @param {string} voiceSampleId - UUID of voice_samples.id
+ * @param {string} organizationId - UUID of organization (tenant_id)
+ * @param {string} userId - UUID of user (required for voice jobs)
+ * @returns {Promise<{ jobId: string }>}
+ */
+export async function createVoiceAnalysisJob(voiceSampleId, organizationId, userId) {
+  if (!userId) throw new Error('userId is required for voice analysis job');
+  return createJob(
+    'analyze_voice_sample',
+    { voiceSampleId, organizationId },
+    { userId, tenantId: organizationId }
+  );
 }
 
 /**
