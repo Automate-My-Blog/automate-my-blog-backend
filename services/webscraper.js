@@ -168,6 +168,7 @@ export class WebScraperService {
               internalLinks: extracted.internalLinks || [],
               externalLinks: [],
               ctas: extracted.ctas || [],
+              socialHandles: extracted.socialHandles || {},
               extractionMethod: 'cheerio_fast_path'
             };
             return this.cleanContent(content);
@@ -392,6 +393,11 @@ export class WebScraperService {
           url
         };
       }, url);
+
+      // Extract social handles from full HTML (reuse Cheerio parsing)
+      const html = await page.content();
+      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
+      content.socialHandles = extractedFromHtml.socialHandles || {};
 
       // Extract CTAs using inline extraction logic
       this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
@@ -782,6 +788,11 @@ export class WebScraperService {
         };
       }, url);
 
+      // Extract social handles from full HTML (reuse Cheerio parsing)
+      const html = await page.content();
+      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
+      content.socialHandles = extractedFromHtml.socialHandles || {};
+
       // Extract CTAs using inline extraction logic
       this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
       console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Playwright scraper');
@@ -927,10 +938,88 @@ export class WebScraperService {
   }
 
   /**
+   * Parse a URL and return { platform, handle } if it's a known social profile URL, else null.
+   * Handles: Twitter/X, LinkedIn company, Facebook, Instagram, YouTube (c/@/channel), TikTok.
+   * @param {string} href - Absolute or relative URL
+   * @param {string} baseUrl - Page base URL for resolving relative hrefs
+   * @returns {{ platform: string, handle: string } | null}
+   */
+  _parseSocialHandle(href, baseUrl) {
+    if (!href || typeof href !== 'string') return null;
+    let absolute;
+    try {
+      absolute = new URL(href, baseUrl || 'https://example.com').href;
+    } catch (e) {
+      return null;
+    }
+    const lower = absolute.toLowerCase();
+    // Twitter/X: twitter.com/User, x.com/User
+    if (lower.includes('twitter.com/') || lower.includes('x.com/')) {
+      const m = absolute.match(/(?:twitter\.com|x\.com)\/([^/?]+)/i);
+      if (m && m[1] && !['intent', 'share', 'home', 'search', 'hashtag'].includes(m[1].toLowerCase())) {
+        const handle = m[1].startsWith('@') ? m[1] : `@${m[1]}`;
+        return { platform: 'twitter', handle };
+      }
+    }
+    // LinkedIn: linkedin.com/company/slug
+    if (lower.includes('linkedin.com/company/')) {
+      const m = absolute.match(/linkedin\.com\/company\/([^/?]+)/i);
+      if (m && m[1]) return { platform: 'linkedin', handle: `company/${m[1]}` };
+    }
+    // Facebook: facebook.com/PageName, fb.com/PageName
+    if (lower.includes('facebook.com/') || lower.includes('fb.com/') || lower.includes('fb.me/')) {
+      const m = absolute.match(/(?:facebook\.com|fb\.com|fb\.me)\/([^/?]+)/i);
+      if (m && m[1] && !['sharer', 'share', 'dialog', 'plugins', 'login', 'pages'].includes(m[1].toLowerCase())) {
+        return { platform: 'facebook', handle: m[1] };
+      }
+    }
+    // Instagram: instagram.com/username
+    if (lower.includes('instagram.com/')) {
+      const m = absolute.match(/instagram\.com\/([^/?]+)/i);
+      if (m && m[1] && !['p/', 'reel/', 'stories/', 'explore', 'accounts'].includes(m[1].toLowerCase())) {
+        return { platform: 'instagram', handle: m[1] };
+      }
+    }
+    // YouTube: youtube.com/c/Name, youtube.com/@handle, youtube.com/channel/ID
+    if (lower.includes('youtube.com/')) {
+      const cMatch = absolute.match(/youtube\.com\/c\/([^/?]+)/i);
+      if (cMatch && cMatch[1]) return { platform: 'youtube', handle: `c/${cMatch[1]}` };
+      const atMatch = absolute.match(/youtube\.com\/@([^/?]+)/i);
+      if (atMatch && atMatch[1]) return { platform: 'youtube', handle: `@${atMatch[1]}` };
+      const chMatch = absolute.match(/youtube\.com\/channel\/([^/?]+)/i);
+      if (chMatch && chMatch[1]) return { platform: 'youtube', handle: `channel/${chMatch[1]}` };
+    }
+    // TikTok: tiktok.com/@username
+    if (lower.includes('tiktok.com/')) {
+      const m = absolute.match(/tiktok\.com\/@([^/?]+)/i);
+      if (m && m[1]) return { platform: 'tiktok', handle: `@${m[1]}` };
+    }
+    return null;
+  }
+
+  /**
+   * Build social_handles object from array of { platform, handle }. Dedupes by platform (first wins).
+   * @param {Array<{ platform: string, handle: string }>} pairs
+   * @returns {Record<string, string[]>}
+   */
+  _buildSocialHandlesObject(pairs) {
+    const byPlatform = {};
+    const seen = new Set();
+    for (const { platform, handle } of pairs) {
+      const key = `${platform}:${handle}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (!byPlatform[platform]) byPlatform[platform] = [];
+      byPlatform[platform].push(handle);
+    }
+    return byPlatform;
+  }
+
+  /**
    * Shared HTML → content + CTAs extraction (Cheerio). Used by scrapeWithCheerio and scrapeWithBrowserService.
    * @param {string} html - Raw HTML
    * @param {string} url - Page URL (for internal links and context)
-   * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object> }}
+   * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object>, socialHandles: object }}
    */
   _extractContentAndCTAsFromHTML(html, url) {
     const $ = cheerio.load(html);
@@ -981,17 +1070,22 @@ export class WebScraperService {
       domain = new URL(url).hostname;
     } catch (e) { /* ignore */ }
     const internalLinks = [];
+    const socialPairs = [];
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
       const linkText = $(el).text().trim();
-      if (!href || !linkText) return;
+      if (!href) return;
       try {
         const linkUrl = new URL(href, url);
         if (linkUrl.hostname === domain || linkUrl.hostname.replace('www.', '') === domain.replace('www.', '')) {
-          internalLinks.push({ url: linkUrl.href, text: linkText, context: 'content' });
+          if (linkText) internalLinks.push({ url: linkUrl.href, text: linkText, context: 'content' });
+        } else {
+          const social = this._parseSocialHandle(href, url);
+          if (social) socialPairs.push(social);
         }
       } catch (err) { /* ignore */ }
     });
+    const socialHandles = this._buildSocialHandlesObject(socialPairs);
 
     const ctas = [];
     const ctaSelectors = [
@@ -1016,7 +1110,7 @@ export class WebScraperService {
       });
     });
 
-    return { title, metaDescription, content: mainContent, headings, internalLinks, ctas };
+    return { title, metaDescription, content: mainContent, headings, internalLinks, socialHandles, ctas };
   }
 
   /**
@@ -1068,6 +1162,7 @@ export class WebScraperService {
         internalLinks: extracted.internalLinks || [],
         externalLinks: [],
         ctas: extracted.ctas || [],
+        socialHandles: extracted.socialHandles || {},
         extractionMethod: 'browserless'
       };
 
@@ -1117,10 +1212,11 @@ export class WebScraperService {
         internalLinks: extracted.internalLinks || [],
         externalLinks: [],
         ctas: extracted.ctas || [],
+        socialHandles: extracted.socialHandles || {},
         extractionMethod: 'cheerio_enhanced'
       };
 
-      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${(extracted.internalLinks || []).length} internal links, ${(extracted.ctas || []).length} CTAs`);
+      console.log(`📊 Cheerio extraction results: ${wordCount} words, ${(extracted.internalLinks || []).length} internal links, ${(extracted.ctas || []).length} CTAs, ${Object.keys(extracted.socialHandles || {}).length} social platforms`);
       return this.cleanContent(content);
     } catch (error) {
       console.error('Enhanced Cheerio extraction failed:', error);
@@ -2944,6 +3040,7 @@ export class WebScraperService {
       internalLinks: content.internalLinks || [],
       externalLinks: content.externalLinks || [],
       ctas: content.ctas || [],
+      socialHandles: content.socialHandles || {},
       extractionMethod: content.extractionMethod || 'unknown',
       scrapedAt: new Date().toISOString()
     };
