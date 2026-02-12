@@ -112,14 +112,18 @@ export async function generateAudienceNarration(params) {
     previousNarration
   } = params;
 
-  // Build rich audience context with concrete metrics (excluding profit data)
+  // Build rich audience context with search volume, competition, and problems
   const audienceContext = audiences
     ?.map((a, i) => {
-      const convScore = a.conversion_score || 0;
-      const convDisplay = convScore > 0 ? `${convScore}/100 conv` : '';
+      // Extract business value data (search volume, competition)
+      const businessValue = a.business_value || {};
+      const searchVolume = businessValue.searchVolume || businessValue.search_volume || 'Unknown';
+      const competition = businessValue.competition || 'Unknown';
 
       return `${i + 1}. ${a.target_segment}
-   Problem: ${a.customer_problem || 'N/A'}${convDisplay ? `\n   Score: ${convDisplay}` : ''}`;
+   Problem: ${a.customer_problem || 'N/A'}
+   Search Volume: ${searchVolume}/month
+   Competition: ${competition}`;
     })
     .join('\n') || 'No audiences available';
 
@@ -139,19 +143,20 @@ Previous narration: "${previousNarration || 'Analysis complete'}"
 Audience Segments Found (${audiences?.length || 0}):
 ${audienceContext}
 
-Write the next statement (1-2 sentences, max 130 chars) that:
+Write the next statement (1-2 sentences, max 140 chars) that:
 - Continues naturally from previous narration
-- Introduces the ${audiences?.length || 0} segments with SPECIFIC context:
-  * Include conversion scores when available
-  * Explain WHY they fit (search behavior, pain points, value alignment)
-  * Reference concrete metrics and specific problems
+- Introduces the ${audiences?.length || 0} segments with SPECIFIC data:
+  * Mention what they're searching for / struggling with (their specific problem)
+  * Include search volume (e.g., "2.5k searches/month")
+  * Note competition level (Low/Medium/High)
+  * Explain WHY they fit based on search behavior and pain points
 - Asks which one to focus on
-- NO quotes, NO exclamation marks, maintain consultant tone
+- NO quotes, NO exclamation marks, NO conversion scores, maintain consultant tone
 
-WRONG: "I found audiences struggling with challenges" (generic, no specifics)
-RIGHT: "I found 3 audiences: Safety Managers post-incident (92/100 conv), Operations Managers prevention (78/100), Compliance Officers audit prep. Which should we focus on?"
+WRONG: "I found audiences with challenges (85/100 conv)" (generic, has scores)
+RIGHT: "I found 3 audiences: Safety Managers searching for incident prevention tools (4.2k/mo, Low competition), Operations Managers needing compliance software (2.8k/mo, Medium), Compliance Officers seeking audit prep (1.5k/mo, High). Which should we prioritize?"
 
-Be data-driven and specific about their problems and fit.`;
+Be data-driven and specific about search behavior, volumes, and competition.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -160,7 +165,7 @@ Be data-driven and specific about their problems and fit.`;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
+      max_tokens: 130,
       temperature: 0.7,
     });
 
@@ -207,9 +212,10 @@ export async function generateTopicNarration(params) {
   const problem = audience?.problem || 'content challenges';
   const pitch = audience?.pitch || null;
 
-  // Extract conversion data (excluding profit)
-  const convScore = audience?.conversion_score || 0;
-  const convDisplay = convScore > 0 ? `${convScore}/100 conv` : '';
+  // Extract search volume and competition from business_value
+  const businessValue = audience?.business_value || {};
+  const searchVolume = businessValue.searchVolume || businessValue.search_volume || 'Unknown';
+  const competition = businessValue.competition || 'Unknown';
 
   console.log('📊 [NARRATION] Topic context:', {
     businessName,
@@ -218,7 +224,8 @@ export async function generateTopicNarration(params) {
     hasProblem: !!problem,
     hasPitch: !!pitch,
     hasValue: !!audience?.business_value,
-    hasConversionScore: !!convScore,
+    searchVolume,
+    competition,
     hasPreviousNarration: !!previousNarration
   });
 
@@ -226,21 +233,23 @@ export async function generateTopicNarration(params) {
 
 Previous narration: "${previousNarration || 'Audience selected'}"
 
-Selected Audience: ${audienceSegment}${convDisplay ? ` (${convDisplay})` : ''}
+Selected Audience: ${audienceSegment}
 - Problem: ${problem}
+- Search Volume: ${searchVolume}/month
+- Competition: ${competition}
 
-Write the final statement (1-2 sentences, max 120 chars) that:
+Write the final statement (1-2 sentences, max 130 chars) that:
 - Continues naturally from previous narration
 - Introduces topics that address their specific pain point
-- Mentions search volume or conversion potential if relevant
-- Shows reasoning for why these topics will drive results
-- NO quotes, NO exclamation marks
+- Mentions search volume (e.g., "4.2k/mo searches") and competition level
+- Shows reasoning for why these topics will drive results based on search behavior
+- NO quotes, NO exclamation marks, NO conversion scores
 - Maintain same professional tone from Parts 1 & 2
 
-WRONG: "Here are topics for your audience" (no reasoning, generic)
-RIGHT: "For Safety Managers (92/100 conv), these topics target incident prevention searches (4.2k/mo), directly address their post-incident reporting needs. Which should we write?"
+WRONG: "Here are topics for your audience (92/100 conv)" (has scores, no search data)
+RIGHT: "For Safety Managers, these topics target incident prevention searches (4.2k/mo, Low competition), directly addressing their post-incident reporting needs. Which should we write?"
 
-Direct and factual. This completes your 3-part presentation.`;
+Direct and factual with search volume and competition data. This completes your 3-part presentation.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -249,7 +258,7 @@ Direct and factual. This completes your 3-part presentation.`;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 100,
+      max_tokens: 120,
       temperature: 0.7,
     });
 
