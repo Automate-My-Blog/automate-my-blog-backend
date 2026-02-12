@@ -45,6 +45,7 @@ import strategyRoutes from './routes/strategies.js';
 import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
+import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
 import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
@@ -179,6 +180,7 @@ app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), u
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
+app.use('/api/v1/voice-samples', authService.authMiddleware.bind(authService), voiceSamplesRoutes);
 app.use('/api/v1/stream', registerStreamRoute(authService));
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
