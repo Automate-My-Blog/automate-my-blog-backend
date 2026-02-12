@@ -156,7 +156,8 @@ router.patch('/:organizationId/social-handles', async (req, res) => {
 
 /**
  * POST /api/v1/organizations/:organizationId/refresh-social-voice
- * Re-run discovery of social handles from the organization's website and persist them.
+ * Re-run discovery of social handles from the organization's website, persist them,
+ * then ingest content from social (e.g. YouTube) and run voice analysis when possible.
  */
 router.post('/:organizationId/refresh-social-voice', async (req, res) => {
   try {
@@ -174,7 +175,7 @@ router.post('/:organizationId/refresh-social-voice', async (req, res) => {
       });
     }
 
-    const orgRow = await db.query('SELECT id, website_url FROM organizations WHERE id = $1', [organizationId]);
+    const orgRow = await db.query('SELECT id, website_url, social_handles FROM organizations WHERE id = $1', [organizationId]);
     const websiteUrl = orgRow.rows[0]?.website_url;
     if (!websiteUrl) {
       return res.status(400).json({
@@ -186,21 +187,59 @@ router.post('/:organizationId/refresh-social-voice', async (req, res) => {
 
     const webScraperService = (await import('../services/webscraper.js')).default;
     const scraped = await webScraperService.scrapeWebsite(websiteUrl);
-    const socialHandles = scraped?.socialHandles || {};
+    let socialHandles = scraped?.socialHandles || {};
 
     if (Object.keys(socialHandles).length > 0) {
       await db.query(
         'UPDATE organizations SET social_handles = $1, updated_at = NOW() WHERE id = $2',
         [JSON.stringify(socialHandles), organizationId]
       );
+    } else {
+      socialHandles = orgRow.rows[0]?.social_handles || {};
     }
+
+    let voiceAnalyzed = false;
+    const {
+      ingestSocialContentForOrganization,
+      hasEnoughContentForVoice,
+      analyzeVoiceFromSocialCorpus,
+      persistSocialVoiceAnalysis
+    } = await import('../services/social-voice-ingestion.js');
+
+    const { corpus, wordCount, platformsUsed } = await ingestSocialContentForOrganization({
+      organizationId,
+      socialHandles: Object.keys(socialHandles).length > 0 ? socialHandles : undefined
+    });
+
+    if (hasEnoughContentForVoice(wordCount) && corpus) {
+      const analysis = await analyzeVoiceFromSocialCorpus(corpus);
+      const meta = analysis._meta || {};
+      await persistSocialVoiceAnalysis(organizationId, {
+        platforms_used: platformsUsed,
+        corpus_word_count: wordCount,
+        tone_analysis: analysis.tone_analysis,
+        style_patterns: analysis.style_patterns,
+        brand_voice_keywords: analysis.brand_voice_keywords,
+        ai_model_used: meta.ai_model_used,
+        analysis_duration_ms: meta.analysis_duration_ms
+      });
+      voiceAnalyzed = true;
+    }
+
+    const discoveryMessage = Object.keys(socialHandles).length > 0
+      ? `Found and saved ${Object.keys(socialHandles).length} platform(s).`
+      : 'No social handles found on the website.';
+    const voiceMessage = voiceAnalyzed
+      ? ` Ingested ${wordCount} words from ${platformsUsed.join(', ')} and updated social voice analysis.`
+      : '';
 
     res.json({
       success: true,
       social_handles: socialHandles,
-      message: Object.keys(socialHandles).length > 0
-        ? `Found and saved ${Object.keys(socialHandles).length} platform(s).`
-        : 'No social handles found on the website.'
+      message: discoveryMessage + voiceMessage,
+      voice_analyzed: voiceAnalyzed,
+      corpus_word_count: wordCount,
+      platforms_used: platformsUsed
     });
   } catch (error) {
     console.error('Error refreshing social handles:', error);

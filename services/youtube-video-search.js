@@ -114,6 +114,111 @@ export class YouTubeVideoSearchService {
   }
 
   /**
+   * Fetch recent video titles and descriptions from a channel by handle (for social voice corpus).
+   * Handles: @username, c/name, or channel/UC... ID.
+   * @param {string} handle - Channel handle (e.g. "@acme", "c/name", "channel/UC...")
+   * @param {number} maxItems - Max recent videos to include (default 20)
+   * @returns {Promise<Array<{ title: string, description: string }>>}
+   */
+  async getChannelContentByHandle(handle, maxItems = 20) {
+    if (!this.apiKey) return [];
+    if (!handle || typeof handle !== 'string') return [];
+
+    const trimmed = handle.trim();
+    try {
+      let channelId = null;
+      let uploadsPlaylistId = null;
+
+      // channel/UC... → use id directly
+      const channelIdMatch = trimmed.match(/^channel\/(UC[\w-]+)$/i);
+      if (channelIdMatch) {
+        channelId = channelIdMatch[1];
+        const chRes = await axios.get(`${this.baseUrl}/channels`, {
+          params: {
+            part: 'contentDetails',
+            id: channelId,
+            key: this.apiKey
+          },
+          headers: { Accept: 'application/json' },
+          timeout: 10000
+        });
+        uploadsPlaylistId = chRes.data?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+      } else {
+        // @handle: use forHandle (API accepts with or without @). c/name: try @name as fallback.
+        const forHandle = trimmed.startsWith('@')
+          ? trimmed
+          : trimmed.startsWith('c/')
+            ? `@${trimmed.slice(2)}`
+            : `@${trimmed}`;
+        const chRes = await axios.get(`${this.baseUrl}/channels`, {
+          params: {
+            part: 'snippet,contentDetails',
+            forHandle,
+            key: this.apiKey
+          },
+          headers: { Accept: 'application/json' },
+          timeout: 10000
+        });
+        const channel = chRes.data?.items?.[0];
+        if (!channel) {
+          console.log(`⚠️ [YOUTUBE] Channel not found for handle: ${handle}`);
+          return [];
+        }
+        channelId = channel.id;
+        uploadsPlaylistId = channel.contentDetails?.relatedPlaylists?.uploads;
+      }
+
+      if (!uploadsPlaylistId) {
+        console.log(`⚠️ [YOUTUBE] No uploads playlist for: ${handle}`);
+        return [];
+      }
+
+      const playlistRes = await axios.get(`${this.baseUrl}/playlistItems`, {
+        params: {
+          part: 'snippet',
+          playlistId: uploadsPlaylistId,
+          maxResults: Math.min(maxItems, 50),
+          key: this.apiKey
+        },
+        headers: { Accept: 'application/json' },
+        timeout: 10000
+      });
+
+      const items = playlistRes.data?.items || [];
+      const videoIds = items.map((i) => i.snippet?.resourceId?.videoId).filter(Boolean);
+      if (videoIds.length === 0) return [];
+
+      const videosRes = await axios.get(`${this.baseUrl}/videos`, {
+        params: {
+          part: 'snippet',
+          id: videoIds.join(','),
+          key: this.apiKey
+        },
+        headers: { Accept: 'application/json' },
+        timeout: 10000
+      });
+
+      const videos = (videosRes.data?.items || []).map((item) => {
+        const s = item.snippet || {};
+        return {
+          title: s.title || '',
+          description: (s.description || '').substring(0, 500)
+        };
+      });
+
+      console.log(`✅ [YOUTUBE] Fetched ${videos.length} items from channel: ${handle}`);
+      return videos;
+    } catch (error) {
+      if (error.response?.status === 403) {
+        console.warn('⚠️ [YOUTUBE] API quota exceeded or channel not found');
+      } else {
+        console.error('❌ [YOUTUBE] getChannelContentByHandle failed:', error.message);
+      }
+      return [];
+    }
+  }
+
+  /**
    * Parse ISO 8601 duration (PT1H2M30S) to human-readable
    */
   parseDuration(isoDuration) {

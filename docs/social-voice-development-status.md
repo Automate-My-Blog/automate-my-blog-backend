@@ -28,18 +28,19 @@ This document maps **current implementation** to the full plan in [brand-voice-f
 |-----------|--------|--------|
 | **1. Discover social handles** | Done | `services/webscraper.js`: `_parseSocialHandle()`, `_buildSocialHandlesObject()`, `_extractContentAndCTAsFromHTML()` collects social links from `<a href>`, `<meta name="twitter:creator">`, and JSON-LD `sameAs`. All scrape paths return `socialHandles`. Host-aware parsing. Platforms: Twitter/X, LinkedIn, Facebook, Instagram, YouTube, TikTok, GitHub, Reddit, Pinterest, Medium, Substack, Mastodon, Threads, Bluesky, Tumblr, Vimeo, Dribbble, Behance, SoundCloud, Twitch, Telegram, Patreon, Linktree, Snapchat, Ko-fi, Buy Me a Coffee, Discord. Unit tests in `tests/unit/social-handles-parser.test.js`. |
 | **2. Store social handles** | Done | Migration `036_add_organizations_social_handles.sql`: `organizations.social_handles` JSONB + GIN index. `website-analysis-pipeline.js` `persistAnalysis()` writes `social_handles` when scrape returns non-empty `socialHandles`. |
-| **6. API surface** | Done | `routes/organizations.js`: `GET /:organizationId/social-handles`, `PATCH /:organizationId/social-handles`, `POST /:organizationId/refresh-social-voice`. POST re-scrapes `website_url` and overwrites `social_handles` (discovery only; no ingestion or voice analysis yet). |
-| **7. Data flow (partial)** | Done | Website URL → scrape → extract social links → normalize handles → store in `organizations.social_handles`. Manual override via PATCH. Refresh via POST (re-run discovery). |
+| **3. Ingest content from social** | Done | `services/social-voice-ingestion.js`: reads `social_handles`, calls YouTube Data API (channel by handle → recent video titles/descriptions) and Grok x_search (tweets by handle via `from:handle`). Returns one merged text corpus per org. |
+| **4. Derive voice from social** | Done | `analyzeVoiceFromSocialCorpus()` in `social-voice-ingestion.js`: corpus → OpenAI → `tone_analysis`, `style_patterns`, `brand_voice_keywords`. Persisted to `social_voice_analysis` (migration 037). |
+| **5. When to run (ingestion/voice)** | Done | POST refresh-social-voice runs discovery (scrape → handles) then ingestion + voice analysis when corpus has enough content (≥50 words). |
+| **6. API surface** | Done | `routes/organizations.js`: `GET /:organizationId/social-handles`, `PATCH /:organizationId/social-handles`, `POST /:organizationId/refresh-social-voice`. POST now runs discovery + ingestion + voice when applicable. |
+| **7. Data flow (partial)** | Done | Website → scrape → handles → store. Refresh: scrape → handles → ingest (YouTube) → build corpus → OpenAI voice analysis → persist to `social_voice_analysis`. Blog merge not yet done. |
+| **APIs (YouTube by handle)** | Done | `services/youtube-video-search.js`: `getChannelContentByHandle(handle)` uses channels.list (forHandle/id) + playlistItems + videos for recent titles/descriptions. |
+| **APIs (Twitter/X by handle)** | Done | `services/grok-tweet-search.js`: `getRecentTweetsByHandle(handle, maxTweets)` uses xAI Agent Tools x_search with `from:handle` to fetch recent tweets from that user. |
 
 ### Not done (next phases)
 
 | Plan item | Status | Notes |
 |-----------|--------|--------|
-| **3. Ingest content from social** | Not started | Need `social-voice-ingestion.js` (or similar): read `social_handles`, call Twitter/YouTube APIs (and optionally limited scrape), build one text corpus per org. |
-| **4. Derive voice from social** | Not started | New function: social corpus → OpenAI → `tone_analysis`, `style_patterns`, `brand_voice_keywords`. Persist (e.g. `social_voice_analysis` or merge into `content_analysis_results`). |
-| **5. When to run (ingestion/voice)** | Partial | Discovery runs in website analysis and via POST refresh. Ingestion + voice analysis not implemented; POST refresh currently only re-runs **discovery** (scrape → handles), not “fetch social content → analyze voice.” |
-| **Blog generation merge** | Not started | `getOrganizationContext` / brand-context building does not yet read social-derived voice. Will do once step 4 exists. |
-| **APIs (Twitter/YouTube by handle)** | Not started | Proposal step 3: “fetch recent tweets by handle,” “fetch channel info + recent titles/descriptions.” To be added in ingestion phase. |
+| **Blog generation merge** | Not started | `getOrganizationContext` / brand-context building does not yet read from `social_voice_analysis`. Will merge social-derived voice with website/blog voice once wired. |
 | **Optional: manual input type** | Not started | `user_manual_inputs` with `input_type = 'social_handles'` for override; optional and can stay as PATCH-only. |
 
 ---
@@ -56,22 +57,14 @@ Website URL
 
 GET/PATCH social-handles  → read/update handles
 POST refresh-social-voice → re-scrape website_url → overwrite social_handles
+  → Ingest content (YouTube + Twitter/X by handle via Grok) → build corpus
+  → If corpus ≥ 50 words: OpenAI voice analysis → persist to social_voice_analysis
 ```
 
-**Full plan (future):**
+**Remaining (future):**
 
 ```
-… (current flow) …
-
-social_handles
-  → Ingest content (APIs + optional scrape)
-  → Build “social corpus” text
-
-Social corpus
-  → OpenAI “analyze voice”
-  → tone_analysis, style_patterns, brand_voice_keywords (social)
-
-Persist social voice
+social_voice_analysis
   → getOrganizationContext() includes social voice
   → Enhanced blog generation uses combined brand context
 ```
@@ -80,20 +73,21 @@ Persist social voice
 
 ## Deliverables in this branch
 
-- **Migration:** `database/migrations/036_add_organizations_social_handles.sql`
+- **Migrations:** `036_add_organizations_social_handles.sql`, `037_social_voice_analysis.sql`
 - **Discovery:** `services/webscraper.js` (parse + extract + pass through `socialHandles`)
 - **Storage:** `services/website-analysis-pipeline.js` (persist in `persistAnalysis`)
-- **APIs:** `routes/organizations.js` (GET/PATCH social-handles, POST refresh-social-voice)
+- **Ingestion:** `services/social-voice-ingestion.js` (ingest from handles, build corpus, analyze voice, persist)
+- **YouTube by handle:** `services/youtube-video-search.js` (`getChannelContentByHandle`)
+- **APIs:** `routes/organizations.js` (GET/PATCH social-handles, POST refresh-social-voice with ingestion + voice)
 - **Docs:** [social-handles-frontend-handoff.md](./social-handles-frontend-handoff.md), this status doc
 
 ---
 
 ## Suggested next steps (post-merge)
 
-1. **Ingestion service:** Implement `services/social-voice-ingestion.js`: given `organizationId`, read `social_handles`, call Twitter API (and/or YouTube Data API) for recent posts/titles/descriptions, return one merged text corpus.
-2. **Voice-from-social:** Add function (in ingestion service or blog-analyzer) to analyze corpus with OpenAI and produce `tone_analysis`, `style_patterns`, `brand_voice_keywords`; persist to a dedicated table or merge into `content_analysis_results`.
-3. **POST refresh-social-voice behavior:** Extend so that when “refresh” is requested, it can optionally run discovery **and** ingestion + voice analysis (or add a separate “Refresh social voice analysis” endpoint).
-4. **Blog generation:** In `getOrganizationContext` (or equivalent), include social-derived voice and merge with existing website/blog/manual brand signals.
+1. **Blog generation:** In `getOrganizationContext` (or equivalent), read from `social_voice_analysis` when present and merge with existing website/blog brand signals.
+2. **Twitter by handle:** Implemented via Grok `getRecentTweetsByHandle` (x_search with from:handle).
+3. **Optional:** Cron to refresh social corpus + voice analysis periodically for orgs with `social_handles`.
 
 ---
 

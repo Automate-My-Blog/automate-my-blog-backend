@@ -204,6 +204,81 @@ export class GrokTweetSearchService {
   }
 
   /**
+   * Get recent tweets from a specific X/Twitter user by handle (for social voice corpus).
+   * Uses same Agent Tools + x_search; prompt asks for tweets FROM the user (from:handle).
+   * @param {string} handle - Twitter handle with or without @ (e.g. "acme" or "@acme")
+   * @param {number} maxTweets - Max tweets to return (default 20)
+   * @returns {Promise<Array<{ url: string, author: string, handle: string, text: string, likes?: number, retweets?: number }>>}
+   */
+  async getRecentTweetsByHandle(handle, maxTweets = 20) {
+    if (!this.apiKey) {
+      console.log('⚠️ Grok tweet search skipped - no API key');
+      return [];
+    }
+    const cleanHandle = (handle || '').trim().replace(/^@+/, '');
+    if (!cleanHandle) return [];
+
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const fromDate = sixMonthsAgo.toISOString().split('T')[0];
+
+    const prompt = `Use x_search to find the ${Math.min(maxTweets, 25)} most recent tweets FROM the X/Twitter user @${cleanHandle} (query: from:${cleanHandle}). Return ONLY this JSON, no other text:
+{"tweets":[{"url":"https://x.com/handle/status/123","author":"Full Name","handle":"handle","text":"tweet text","likes":0,"retweets":0}]}`;
+
+    try {
+      const response = await axios.post(
+        this.endpoint,
+        {
+          model: 'grok-4-1-fast',
+          input: [
+            {
+              role: 'system',
+              content: 'You are an X/Twitter search assistant. Use x_search with a from:username query to get tweets from that user. Return only JSON.'
+            },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0.2,
+          max_tokens: 4000,
+          tools: [{ type: 'x_search', from_date: fromDate }],
+          max_turns: 1
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: Number(process.env.GROK_TWEET_SEARCH_TIMEOUT_MS) || 60000
+        }
+      );
+
+      let content = null;
+      if (response.data.output?.length) {
+        const messageItem = response.data.output.find((o) => o.type === 'message');
+        const outputText = messageItem?.content?.find((c) => c.type === 'output_text');
+        if (outputText?.text) content = outputText.text;
+      }
+      if (!content && response.data.text) {
+        content = typeof response.data.text === 'string' ? response.data.text : response.data.text?.content;
+      }
+      if (!content || typeof content !== 'string') return [];
+
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return [];
+      const result = JSON.parse(jsonMatch[0]);
+      const tweets = result.tweets || [];
+      console.log(`✅ [GROK] Fetched ${tweets.length} tweets from @${cleanHandle}`);
+      return tweets;
+    } catch (error) {
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        console.warn('⏱️ Grok getRecentTweetsByHandle timed out');
+      } else {
+        console.error('❌ Grok getRecentTweetsByHandle failed:', error.message);
+      }
+      return [];
+    }
+  }
+
+  /**
    * Validate that a tweet URL exists before using it
    */
   async validateTweetExists(tweetUrl) {
