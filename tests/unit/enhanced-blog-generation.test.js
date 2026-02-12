@@ -190,4 +190,38 @@ describe('enhanced-blog-generation', () => {
       expect(prompt).not.toContain('VOICE & STYLE (from your uploaded samples');
     });
   });
+
+  describe('voice comparison (your voice vs generic)', () => {
+    it('buildEnhancedPrompt with voiceProfile null produces generic-style prompt', () => {
+      const contextWithVoice = {
+        availability: {},
+        settings: {},
+        manualData: {},
+        websiteData: {},
+        voiceProfile: { style: {}, vocabulary: {}, structure: {}, formatting: {}, confidence_score: 80 },
+        completenessScore: 50
+      };
+      const genericContext = { ...contextWithVoice, voiceProfile: null };
+      const withVoice = service.buildEnhancedPrompt(
+        { title: 'T', subheader: '' },
+        { businessType: 'B2B', targetAudience: 'SMB', brandVoice: 'pro' },
+        contextWithVoice,
+        '',
+        [],
+        [],
+        []
+      );
+      const generic = service.buildEnhancedPrompt(
+        { title: 'T', subheader: '' },
+        { businessType: 'B2B', targetAudience: 'SMB', brandVoice: 'pro' },
+        genericContext,
+        '',
+        [],
+        [],
+        []
+      );
+      expect(withVoice).toContain('VOICE & STYLE (from your uploaded samples');
+      expect(generic).not.toContain('VOICE & STYLE (from your uploaded samples');
+    });
+  });
 });

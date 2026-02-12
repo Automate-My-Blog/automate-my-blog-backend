@@ -466,17 +466,27 @@ router.post('/analyze-and-improve', async (req, res) => {
  * GET /api/v1/enhanced-blog-generation/context/:organizationId
  * Get organization context and data availability for blog generation
  */
+/**
+ * GET /api/v1/enhanced-blog-generation/context/:organizationId
+ * Query: useVoiceProfile=false — omit voice profile from data (for "generic voice" comparison UI).
+ */
 router.get('/context/:organizationId', async (req, res) => {
   try {
     const { organizationId } = req.params;
+    const useVoiceProfile = req.query.useVoiceProfile !== 'false';
 
     console.log(`📊 Loading context for organization: ${organizationId}`);
 
     const context = await enhancedBlogGenerationService.getOrganizationContext(organizationId);
 
+    const confidence = context.voiceProfile?.confidence_score != null ? Number(context.voiceProfile.confidence_score) : 0;
+    const hasUsableVoice = !!context.voiceProfile && confidence >= 50;
+
+    const data = useVoiceProfile ? context : { ...context, voiceProfile: null };
+
     res.json({
       success: true,
-      data: context,
+      data,
       recommendations: enhancedBlogGenerationService.generateQualityRecommendations(context),
       metadata: {
         dataCompleteness: context.completenessScore,
@@ -485,7 +495,14 @@ router.get('/context/:organizationId', async (req, res) => {
         expectedQualityRange: {
           min: Math.max(60, context.completenessScore - 10),
           max: Math.min(95, context.completenessScore + 20)
-        }
+        },
+        voiceComparisonSupported: hasUsableVoice,
+        voiceProfileSummary: hasUsableVoice
+          ? {
+              confidenceScore: confidence,
+              sampleCount: context.voiceProfile?.sample_count ?? null
+            }
+          : null
       }
     });
 

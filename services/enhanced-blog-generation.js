@@ -2161,6 +2161,12 @@ Full JSON structure (content first, then metadata):
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       console.log(`📊 Previous post used ${previousBoxTypes.length} highlight box types:`, previousBoxTypes);
 
+      // Support "your voice" vs "generic voice" comparison: omit voice profile from prompt when useVoiceProfile is false
+      const useVoiceProfile = opts.useVoiceProfile !== false;
+      const promptContext = useVoiceProfile
+        ? organizationContext
+        : { ...organizationContext, voiceProfile: null };
+
       // Get preloaded tweets and create placeholders with embedded data
       const tweetPlaceholders = (topic.preloadedTweets || []).map(tweet => {
         const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
@@ -2170,7 +2176,7 @@ Full JSON structure (content first, then metadata):
 
       // Build enhanced prompt WITH tweet placeholders (OpenAI will insert them during generation)
       const requestCtas = this.normalizeRequestCtas(opts.ctas);
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, promptContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
       console.log('🧠 Calling OpenAI with enhanced prompt...');
       console.log('🧠 [CTA DEBUG] Generation: Sending prompt to OpenAI:', {
@@ -2347,6 +2353,11 @@ Full JSON structure (content first, then metadata):
         enhancementLevel: organizationContext.completenessScore > 60 ? 'high' : 
                          organizationContext.completenessScore > 30 ? 'medium' : 'basic'
       };
+
+      // Voice comparison: tell frontend whether this output used the user's voice profile (for "your voice" vs "generic voice" UI)
+      const confidence = organizationContext.voiceProfile?.confidence_score != null ? Number(organizationContext.voiceProfile.confidence_score) : 0;
+      blogData.voiceAdaptationUsed = useVoiceProfile && !!organizationContext.voiceProfile && confidence >= 50;
+      blogData.voiceProfileConfidence = blogData.voiceAdaptationUsed ? confidence : null;
 
       // Add generation metadata
       blogData.generationMetadata = {
@@ -2617,13 +2628,16 @@ Full JSON structure (content first, then metadata):
       if (options.preloadedVideos?.length) topic = { ...topic, preloadedVideos: options.preloadedVideos };
 
       const organizationContext = await this.getOrganizationContext(organizationId);
+      const useVoiceProfile = options.useVoiceProfile !== false;
+      const promptContext = useVoiceProfile ? organizationContext : { ...organizationContext, voiceProfile: null };
+
       const previousBoxTypes = await this.getPreviousPostHighlightBoxTypes(organizationId);
       const tweetPlaceholders = (topic.preloadedTweets || []).map((tweet) => {
         const encodedData = Buffer.from(JSON.stringify(tweet)).toString('base64');
         return `![TWEET:${tweet.url}::DATA::${encodedData}]`;
       });
       const requestCtas = this.normalizeRequestCtas(options.ctas);
-      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, organizationContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
+      const enhancedPrompt = this.buildEnhancedPrompt(topic, businessInfo, promptContext, additionalInstructions, previousBoxTypes, tweetPlaceholders, requestCtas);
 
       const streamingSystemPrompt = `${EnhancedBlogGenerationService.BLOG_GENERATION_SYSTEM_PROMPT}\n\nSTREAMING: Your response is streamed; only the "content" field is sent to the preview. Output the "content" key first. The content value must be raw markdown with line breaks: use \\n in JSON after the # title, after each ## or ### heading, and a blank line between paragraphs so the preview renders as # Title, ## Section, and separate <p> blocks.`;
       const stream = await this.openai.chat.completions.create({
@@ -2668,6 +2682,9 @@ Full JSON structure (content first, then metadata):
         hasManualInputs: organizationContext.hasManualFallbacks,
         enhancementLevel: organizationContext.completenessScore > 60 ? 'high' : organizationContext.completenessScore > 30 ? 'medium' : 'basic'
       };
+      const confidence = organizationContext.voiceProfile?.confidence_score != null ? Number(organizationContext.voiceProfile.confidence_score) : 0;
+      blogData.voiceAdaptationUsed = useVoiceProfile && !!organizationContext.voiceProfile && confidence >= 50;
+      blogData.voiceProfileConfidence = blogData.voiceAdaptationUsed ? confidence : null;
       // Include request CTAs in stream result so frontend receives the CTAs used for this generation
       if (requestCtas.length > 0) {
         blogData.ctas = requestCtas.map((c) => ({
@@ -2717,13 +2734,13 @@ Full JSON structure (content first, then metadata):
         console.log(`📺 [VIDEO] Attached ${options.preloadedVideos.length} pre-fetched videos to topic`);
       }
 
-      // Generate the blog post content
+      // Generate the blog post content (useVoiceProfile: false = "generic voice" for comparison UI)
       const blogData = await this.generateEnhancedBlogPost(
         topic,
         businessInfo,
         organizationId,
         options.additionalInstructions || '',
-        { ctas: options.ctas }
+        { ctas: options.ctas, useVoiceProfile: options.useVoiceProfile }
       );
       if (typeof onPartialResult === 'function') {
         onPartialResult('blog-result', {
