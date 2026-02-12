@@ -2,6 +2,8 @@
 
 The backend supports generating two variants of the same post so the UI can show a **visual comparison** of "your voice" (adapted) vs "generic voice" (default AI).
 
+**Full integration:** [voice-adaptation-frontend-handoff.md](./voice-adaptation-frontend-handoff.md) — upload samples, list, profile, context, and comparison UI.
+
 ## How it works
 
 1. **With voice (default)**  
