@@ -274,24 +274,12 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
   if (!webScraperService.isValidUrl(url)) throw new Error('Invalid URL format');
 
-  /** Start existing-audiences query early so it overlaps with scrape + analyze (faster). */
-  let existingAudiencesPromise = null;
-  if (userId || sessionId) {
-    const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
-    const queryParams = userId ? [userId] : [sessionId];
-    existingAudiencesPromise = db
-      .query(
-        `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
-        queryParams
-      )
-      .then((r) => r.rows)
-      .catch((err) => {
-        console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', err.message);
-        return [];
-      });
-  } else {
-    existingAudiencesPromise = Promise.resolve([]);
-  }
+  /**
+   * REMOVED: Early existing-audiences query moved to after we have organizationId.
+   * For a NEW website analysis, we should generate a fresh set of 4-5 audiences.
+   * Incremental audiences (1-2 additional) only make sense for RE-analyzing the SAME organization.
+   */
+  let existingAudiencesPromise = Promise.resolve([]);
 
   /** Yield to event loop so each progress update is published in its own tick (avoids frontend receiving all at once). */
   const yieldTick = () => new Promise((r) => setImmediate(r));
@@ -384,12 +372,12 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // 2. Scenarios backfill — generate audiences/pitches/images if missing
     if (scenarios.length === 0 && analysis) {
       try {
-        const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
-        const queryParams = userId ? [userId] : [sessionId];
+        // Query existing audiences scoped to THIS organization only
         const existingRows = await db.query(
-          `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
-          queryParams
+          `SELECT target_segment, customer_problem FROM audiences WHERE organization_id = $1 ORDER BY created_at DESC`,
+          [orgId]
         ).then((r) => r.rows).catch(() => []);
+        console.log(`📊 Cache backfill: Found ${existingRows.length} existing audiences for org ${orgId}`);
         let newScenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingRows);
         const businessContext = {
           businessType: analysis.businessType,
@@ -430,13 +418,14 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
             const s = scenarios[i];
             const targetSegment = s.targetSegment || { demographics: '', psychographics: '', searchBehavior: '' };
             const businessValue = s.businessValue || {};
-            await db.query(
+            const result = await db.query(
               `INSERT INTO audiences (
                 user_id, session_id, organization_intelligence_id,
                 target_segment, customer_problem, customer_language, conversion_path,
                 business_value, priority, pitch, image_url,
                 projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+              RETURNING id`,
               [
                 userId || null,
                 userId ? null : (sessionId || null),
@@ -455,6 +444,42 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
                 s.projected_profit_high ?? null
               ]
             );
+
+            const audienceId = result.rows[0].id;
+
+            // Insert seoKeywords into seo_keywords table
+            if (s.seoKeywords && Array.isArray(s.seoKeywords) && s.seoKeywords.length > 0) {
+              console.log(`📊 Inserting ${s.seoKeywords.length} keywords for audience ${audienceId}`);
+
+              const keywordInserts = s.seoKeywords.map(async (kw) => {
+                // Handle both old string format and new object format
+                const keywordData = typeof kw === 'string'
+                  ? { keyword: kw, searchVolume: null, competition: null, relevanceScore: null }
+                  : {
+                      keyword: kw.keyword,
+                      searchVolume: kw.searchVolume || null,
+                      competition: kw.competition || null,
+                      relevanceScore: kw.relevanceScore || null
+                    };
+
+                return db.query(`
+                  INSERT INTO seo_keywords (
+                    user_id, session_id, audience_id, keyword, search_volume, competition, relevance_score
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                `, [
+                  userId || null,
+                  userId ? null : (sessionId || null),
+                  audienceId,
+                  keywordData.keyword,
+                  keywordData.searchVolume,
+                  keywordData.competition,
+                  keywordData.relevanceScore
+                ]);
+              });
+
+              await Promise.all(keywordInserts);
+              console.log(`✅ Inserted ${s.seoKeywords.length} keywords for audience ${audienceId}`);
+            }
           }
         }
       } catch (e) {
@@ -879,10 +904,25 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     });
   }
 
-  // Use existing-audiences result from query started at pipeline start (overlaps with analyze)
-  const existingAudiences = await existingAudiencesPromise;
-  if (existingAudiences.length > 0) {
-    console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
+  // Query existing audiences scoped to THIS organization (not all user/session audiences)
+  // This enables incremental analysis when RE-analyzing the same website
+  let existingAudiences = [];
+  try {
+    const whereConditions = ['organization_id = $1'];
+    const queryParams = [organizationId];
+    const result = await db.query(
+      `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
+      queryParams
+    );
+    existingAudiences = result.rows;
+    if (existingAudiences.length > 0) {
+      console.log(`📊 Found ${existingAudiences.length} existing audiences for ${organizationId} (incremental analysis)`);
+    } else {
+      console.log(`📊 No existing audiences for ${organizationId} (fresh analysis, generating 4-5)`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Failed to query existing audiences, continuing with fresh generation:', err.message);
+    existingAudiences = [];
   }
 
   await report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });
@@ -972,13 +1012,14 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
         const s = scenarios[i];
         const targetSegment = s.targetSegment || { demographics: '', psychographics: '', searchBehavior: '' };
         const businessValue = s.businessValue || {};
-        await db.query(
+        const result = await db.query(
           `INSERT INTO audiences (
             user_id, session_id, organization_intelligence_id,
             target_segment, customer_problem, customer_language, conversion_path,
             business_value, priority, pitch, image_url,
             projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          RETURNING id`,
           [
             userId || null,
             userId ? null : (sessionId || null),
@@ -997,6 +1038,42 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
             s.projected_profit_high ?? null
           ]
         );
+
+        const audienceId = result.rows[0].id;
+
+        // Insert seoKeywords into seo_keywords table
+        if (s.seoKeywords && Array.isArray(s.seoKeywords) && s.seoKeywords.length > 0) {
+          console.log(`📊 Inserting ${s.seoKeywords.length} keywords for audience ${audienceId}`);
+
+          const keywordInserts = s.seoKeywords.map(async (kw) => {
+            // Handle both old string format and new object format
+            const keywordData = typeof kw === 'string'
+              ? { keyword: kw, searchVolume: null, competition: null, relevanceScore: null }
+              : {
+                  keyword: kw.keyword,
+                  searchVolume: kw.searchVolume || null,
+                  competition: kw.competition || null,
+                  relevanceScore: kw.relevanceScore || null
+                };
+
+            return db.query(`
+              INSERT INTO seo_keywords (
+                user_id, session_id, audience_id, keyword, search_volume, competition, relevance_score
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `, [
+              userId || null,
+              userId ? null : (sessionId || null),
+              audienceId,
+              keywordData.keyword,
+              keywordData.searchVolume,
+              keywordData.competition,
+              keywordData.relevanceScore
+            ]);
+          });
+
+          await Promise.all(keywordInserts);
+          console.log(`✅ Inserted ${s.seoKeywords.length} keywords for audience ${audienceId}`);
+        }
       }
       console.log(`📊 Persisted ${scenarios.length} audience strategies to database`);
     } catch (persistErr) {

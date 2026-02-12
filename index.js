@@ -41,6 +41,7 @@ import emailTestRoutes from './routes/email-test.js';
 import schedulerRoutes from './routes/scheduler.js';
 import emailPreferencesRoutes from './routes/email-preferences.js';
 import founderEmailRoutes from './routes/founderEmails.js';
+import strategyRoutes from './routes/strategies.js';
 import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
@@ -206,6 +207,9 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
+// Strategy pitch generation routes (handles auth via query params for SSE compatibility)
+app.use('/api/v1/strategies', strategyRoutes);
+// Strategy subscription management routes (require header-based auth)
 app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), strategySubscriptionRoutes);
 
 // Analytics routes - all require authentication

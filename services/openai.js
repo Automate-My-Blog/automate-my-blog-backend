@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import analyticsService from './analytics.js';
 import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/index.js';
 import streamManager from './stream-manager.js';
+import strategyEnrichment from './strategy-enrichment.js';
 
 dotenv.config();
 
@@ -2090,13 +2091,28 @@ Generate scenarios as JSON array:
       "searchBehavior": "When/how they search (crisis-driven vs planned)"
     },
     "businessValue": {
-      "searchVolume": "e.g., 'High - 3,500/month'",
-      "competition": "Low/Medium/High with gaps",
-      "conversionPotential": "High/Medium/Low",
+      "searchVolumeNumeric": 3500,
+      "searchVolumeLabel": "High",
+      "competitionLevel": "medium",
+      "conversionPotential": 0.35,
+      "dataConfidence": "estimated",
       "priority": 1
     },
     "customerLanguage": ["search phrase 1", "search phrase 2"],
-    "seoKeywords": ["keyword 1", "keyword 2", "keyword 3"],
+    "seoKeywords": [
+      {
+        "keyword": "primary keyword phrase",
+        "searchVolume": 2300,
+        "competition": "low",
+        "relevanceScore": 0.85
+      },
+      {
+        "keyword": "secondary keyword phrase",
+        "searchVolume": 1200,
+        "competition": "medium",
+        "relevanceScore": 0.78
+      }
+    ],
     "conversionPath": "How content leads to business goal",
     "contentIdeas": [
       {
@@ -2107,6 +2123,16 @@ Generate scenarios as JSON array:
     ]
   }
 ]
+
+IMPORTANT - DATA FORMAT REQUIREMENTS:
+- searchVolumeNumeric: INTEGER monthly searches (e.g., 3500, 15000) - use your best estimate from market research
+- searchVolumeLabel: Display label - "Low" (0-1K), "Medium" (1K-10K), "High" (10K+)
+- competitionLevel: LOWERCASE string - must be "low", "medium", or "high"
+- conversionPotential: DECIMAL between 0 and 1 (e.g., 0.35 = 35% conversion potential)
+- dataConfidence: Always set to "estimated" (numbers are AI estimates based on web research)
+- seoKeywords: ARRAY OF OBJECTS with numeric searchVolume for each keyword
+- keyword competition: LOWERCASE - must be "low", "medium", or "high"
+- relevanceScore: DECIMAL between 0 and 1 (how relevant to customer problem)
 
 Return only audiences with strong business potential. If no strong additional audiences exist, return an empty array []. Each scenario must target DIFFERENT demographics from existing audiences. Order by priority (highest value first).`
           }
@@ -2512,6 +2538,162 @@ Use their specific emotional state and urgency to justify rates. Plain text only
     } catch (error) {
       console.warn('⚠️ Failed to extract profit metrics from pitch:', error.message);
       return metrics;
+    }
+  }
+
+  /**
+   * Generate streaming pitch for a strategy (why it's valuable)
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {AsyncIterable<string>} - Async iterable yielding text chunks
+   */
+  async *generateStrategyPitch(strategyData) {
+    try {
+      console.log('🎯 Generating strategy pitch for:', strategyData.id);
+
+      // ENRICH DATA - Extract numbers from structured data and aggregate keywords
+      const enrichedStrategy = await strategyEnrichment.enrichStrategyData(strategyData);
+      const enriched = enrichedStrategy.enrichedData;
+
+      const demographics = enriched.demographics;
+
+      // Build top keywords list
+      const keywordsList = enriched.topKeywords.length > 0
+        ? enriched.topKeywords.slice(0, 5).map(k => `"${k}"`).join(', ')
+        : 'customer problem-focused keywords';
+
+      // Build CONCRETE prompt with parsed numbers and transparency
+      const prompt = `As an AI marketing consultant, provide a data-driven analysis of why "${demographics}" is a valuable audience for content creation.
+
+**MARKET DATA (AI-Estimated):**
+- Estimated monthly searches: ${enriched.searchVolume.toLocaleString()} searches
+- Competition level: ${enriched.competitionLabel}
+- Target keywords (${enriched.keywordCount} identified): ${keywordsList}
+- Customer problem: "${enriched.customerProblem}"
+
+**STRATEGIC POSITIONING:**
+${enriched.uniqueAngle}
+
+**BUSINESS METRICS (Projected):**
+- Estimated monthly leads: ${enriched.estimatedLeadsPerMonth} (based on ${(enriched.estimatedCTR * 100).toFixed(1)}% CTR × ${(enriched.conversionPotential * 100).toFixed(0)}% conversion)
+- Customer acquisition cost: ~$${enriched.projectedCAC}
+- Projected monthly profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}
+- ROI multiple: ${enriched.roiMultipleLow}x to ${enriched.roiMultipleHigh}x return
+
+**YOUR TASK:**
+Write 2-3 compelling paragraphs in first person ("I identified...") explaining:
+
+1. **Market Opportunity** - Use the SPECIFIC numbers above to explain market size. Reference the estimated ${enriched.searchVolume.toLocaleString()} monthly searches and ${enriched.competitionLabel.toLowerCase()}.
+
+2. **Strategic Approach** - Explain how focusing on "${enriched.customerProblem}" for ${demographics} creates competitive advantage. Reference the ${enriched.keywordCount} target keywords.
+
+3. **Expected Results** - Show the ROI calculation:
+   - ${enriched.searchVolume.toLocaleString()} searches × ${(enriched.estimatedCTR * 100).toFixed(1)}% CTR = ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks/month
+   - ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks × ${(enriched.conversionPotential * 100).toFixed(0)}% conversion = ${enriched.estimatedLeadsPerMonth} leads/month
+   - With ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI, this strategy pays for itself quickly
+
+CRITICAL: Be SPECIFIC with numbers. These are AI estimates based on market research, so present them as projections, not guarantees. Use exact figures provided.`;
+
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+        temperature: 0.6,
+        max_tokens: 700
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          yield content;
+        }
+      }
+
+      console.log('✅ Strategy pitch generation complete');
+    } catch (error) {
+      console.error('❌ Failed to generate strategy pitch:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate streaming pricing rationale for a strategy
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {AsyncIterable<string>} - Async iterable yielding text chunks
+   */
+  async *generatePricingRationale(strategyData) {
+    try {
+      console.log('💰 Generating pricing rationale for:', strategyData.id);
+
+      // ENRICH DATA - Extract numbers from structured data and calculate ROI
+      const enrichedStrategy = await strategyEnrichment.enrichStrategyData(strategyData);
+      const enriched = enrichedStrategy.enrichedData;
+
+      const monthlyPrice = strategyData.pricing_monthly || 39.99;
+
+      // Calculate cost per search
+      const costPerThousandSearches = enriched.searchVolume > 0
+        ? ((monthlyPrice / enriched.searchVolume) * 1000).toFixed(2)
+        : 'N/A';
+
+      // Calculate cost per lead
+      const costPerLead = enriched.estimatedLeadsPerMonth > 0
+        ? (monthlyPrice / enriched.estimatedLeadsPerMonth).toFixed(2)
+        : 'N/A';
+
+      // Calculate payback time in weeks
+      const avgMonthlyProfit = (enriched.profitRangeLow + enriched.profitRangeHigh) / 2;
+      const weeksToPayback = avgMonthlyProfit > 0
+        ? Math.round((monthlyPrice / avgMonthlyProfit) * 4)
+        : 'N/A';
+
+      const prompt = `Explain the pricing rationale for this content strategy subscription in first person (as the AI consultant).
+
+**PRICING:**
+- Monthly subscription: $${monthlyPrice}
+- Annual cost: $${(monthlyPrice * 12).toFixed(2)}/year
+
+**VALUE METRICS (AI-Estimated):**
+- Market size: ${enriched.searchVolume.toLocaleString()} monthly searches
+- Estimated leads: ${enriched.estimatedLeadsPerMonth} leads/month
+- Cost per 1,000 searches: $${costPerThousandSearches}
+- Cost per lead: $${costPerLead} (vs ~$${enriched.projectedCAC} industry CAC)
+- Projected profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month
+- ROI multiple: ${enriched.roiMultipleLow}x to ${enriched.roiMultipleHigh}x return
+
+**YOUR TASK:**
+Write 2 concise paragraphs explaining:
+
+1. **Value Calculation** - Show the math clearly:
+   - "$${monthlyPrice}/month ÷ ${enriched.searchVolume.toLocaleString()} searches = $${costPerThousandSearches} per 1K searches"
+   - "With ${enriched.estimatedLeadsPerMonth} estimated leads, cost per lead = $${costPerLead}"
+   - Compare to typical industry CAC of $${enriched.projectedCAC}
+
+2. **ROI Justification** - Use SPECIFIC numbers:
+   - "${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI means the subscription pays for itself in ~${weeksToPayback} weeks"
+   - Reference the projected $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()} monthly profit
+   - Emphasize value of positioning in ${enriched.competitionLabel.toLowerCase()} market
+
+IMPORTANT: These are AI-estimated projections based on market research. Present as potential outcomes, not guarantees. Use exact figures provided.`;
+
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+        temperature: 0.5,
+        max_tokens: 500
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          yield content;
+        }
+      }
+
+      console.log('✅ Pricing rationale generation complete');
+    } catch (error) {
+      console.error('❌ Failed to generate pricing rationale:', error);
+      throw error;
     }
   }
 }
