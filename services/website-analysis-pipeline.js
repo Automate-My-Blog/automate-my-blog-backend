@@ -274,24 +274,12 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
   if (!webScraperService.isValidUrl(url)) throw new Error('Invalid URL format');
 
-  /** Start existing-audiences query early so it overlaps with scrape + analyze (faster). */
-  let existingAudiencesPromise = null;
-  if (userId || sessionId) {
-    const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
-    const queryParams = userId ? [userId] : [sessionId];
-    existingAudiencesPromise = db
-      .query(
-        `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
-        queryParams
-      )
-      .then((r) => r.rows)
-      .catch((err) => {
-        console.warn('⚠️ Failed to query existing audiences, continuing without deduplication:', err.message);
-        return [];
-      });
-  } else {
-    existingAudiencesPromise = Promise.resolve([]);
-  }
+  /**
+   * REMOVED: Early existing-audiences query moved to after we have organizationId.
+   * For a NEW website analysis, we should generate a fresh set of 4-5 audiences.
+   * Incremental audiences (1-2 additional) only make sense for RE-analyzing the SAME organization.
+   */
+  let existingAudiencesPromise = Promise.resolve([]);
 
   /** Yield to event loop so each progress update is published in its own tick (avoids frontend receiving all at once). */
   const yieldTick = () => new Promise((r) => setImmediate(r));
@@ -384,12 +372,12 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // 2. Scenarios backfill — generate audiences/pitches/images if missing
     if (scenarios.length === 0 && analysis) {
       try {
-        const whereConditions = userId ? ['user_id = $1'] : ['session_id = $1'];
-        const queryParams = userId ? [userId] : [sessionId];
+        // Query existing audiences scoped to THIS organization only
         const existingRows = await db.query(
-          `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
-          queryParams
+          `SELECT target_segment, customer_problem FROM audiences WHERE organization_id = $1 ORDER BY created_at DESC`,
+          [orgId]
         ).then((r) => r.rows).catch(() => []);
+        console.log(`📊 Cache backfill: Found ${existingRows.length} existing audiences for org ${orgId}`);
         let newScenarios = await openaiService.generateAudienceScenarios(analysis, '', '', existingRows);
         const businessContext = {
           businessType: analysis.businessType,
@@ -879,10 +867,25 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     });
   }
 
-  // Use existing-audiences result from query started at pipeline start (overlaps with analyze)
-  const existingAudiences = await existingAudiencesPromise;
-  if (existingAudiences.length > 0) {
-    console.log(`📊 Found ${existingAudiences.length} existing audiences for deduplication`);
+  // Query existing audiences scoped to THIS organization (not all user/session audiences)
+  // This enables incremental analysis when RE-analyzing the same website
+  let existingAudiences = [];
+  try {
+    const whereConditions = ['organization_id = $1'];
+    const queryParams = [organizationId];
+    const result = await db.query(
+      `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
+      queryParams
+    );
+    existingAudiences = result.rows;
+    if (existingAudiences.length > 0) {
+      console.log(`📊 Found ${existingAudiences.length} existing audiences for ${organizationId} (incremental analysis)`);
+    } else {
+      console.log(`📊 No existing audiences for ${organizationId} (fresh analysis, generating 4-5)`);
+    }
+  } catch (err) {
+    console.warn('⚠️ Failed to query existing audiences, continuing with fresh generation:', err.message);
+    existingAudiences = [];
   }
 
   await report(1, PROGRESS_STEPS[1], 0, 45, { phase: PROGRESS_PHASES[1][0] });

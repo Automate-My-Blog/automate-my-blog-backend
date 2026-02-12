@@ -143,20 +143,21 @@ Previous narration: "${previousNarration || 'Analysis complete'}"
 Audience Segments Found (${audiences?.length || 0}):
 ${audienceContext}
 
-Write the next statement (1-2 sentences, max 140 chars) that:
+Write a concise introduction (2-3 sentences, max 200 chars) that:
 - Continues naturally from previous narration
-- Introduces the ${audiences?.length || 0} segments with SPECIFIC data:
-  * Mention what they're searching for / struggling with (their specific problem)
-  * Include search volume (e.g., "2.5k searches/month")
-  * Note competition level (Low/Medium/High)
-  * Explain WHY they fit based on search behavior and pain points
-- Asks which one to focus on
+- Introduces ${audiences?.length || 0} segments by SUMMARIZING the key pattern:
+  * What types of people/problems they represent (e.g., "small businesses to startups seeking growth")
+  * Overall search interest level (High, Medium, or Low based on the data)
+  * General competition range (Low, Medium, or High)
+- Then asks which one to focus on
 - NO quotes, NO exclamation marks, NO conversion scores, maintain consultant tone
+- Do NOT list all audiences individually - summarize the overall opportunity
+- Do NOT make up specific explanations about WHO is competing or WHY - just state the levels
 
-WRONG: "I found audiences with challenges (85/100 conv)" (generic, has scores)
-RIGHT: "I found 3 audiences: Safety Managers searching for incident prevention tools (4.2k/mo, Low competition), Operations Managers needing compliance software (2.8k/mo, Medium), Compliance Officers seeking audit prep (1.5k/mo, High). Which should we prioritize?"
+WRONG: "Competition is low to medium from generic blogs creating opportunities" - making up WHO competes
+RIGHT: "I found 5 audiences from small businesses to startups seeking growth, with high search interest and low to medium competition. Which should we focus on?"
 
-Be data-driven and specific about search behavior, volumes, and competition.`;
+Be concise and factual. Only use the data provided - don't infer or explain competition sources.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -165,7 +166,7 @@ Be data-driven and specific about search behavior, volumes, and competition.`;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 130,
+      max_tokens: 200,
       temperature: 0.7,
     });
 
@@ -235,21 +236,23 @@ Previous narration: "${previousNarration || 'Audience selected'}"
 
 Selected Audience: ${audienceSegment}
 - Problem: ${problem}
-- Search Volume: ${searchVolume}/month
+- Search Volume: ${searchVolume}
 - Competition: ${competition}
 
-Write the final statement (1-2 sentences, max 130 chars) that:
+Write the final statement (2-3 sentences, max 180 chars) that:
 - Continues naturally from previous narration
 - Introduces topics that address their specific pain point
-- Mentions search volume (e.g., "4.2k/mo searches") and competition level
-- Shows reasoning for why these topics will drive results based on search behavior
+- Mentions the search volume level (High, Medium, or Low)
+- States the competition level (Low, Medium, or High)
+- Shows these topics will help attract their target audience
 - NO quotes, NO exclamation marks, NO conversion scores
 - Maintain same professional tone from Parts 1 & 2
+- Do NOT make up explanations about WHO is competing or WHY there's opportunity
 
-WRONG: "Here are topics for your audience (92/100 conv)" (has scores, no search data)
-RIGHT: "For Safety Managers, these topics target incident prevention searches (4.2k/mo, Low competition), directly addressing their post-incident reporting needs. Which should we write?"
+WRONG: "Topics face low competition from generic blogs creating opportunities" - making up competitors
+RIGHT: "For Safety Managers, topics on incident prevention show high search volume with medium competition, directly addressing their reporting needs."
 
-Direct and factual with search volume and competition data. This completes your 3-part presentation.`;
+Be concise and factual. Only use the provided data. This completes your 3-part presentation.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -258,7 +261,7 @@ Direct and factual with search volume and competition data. This completes your 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 120,
+      max_tokens: 180,
       temperature: 0.7,
     });
 
