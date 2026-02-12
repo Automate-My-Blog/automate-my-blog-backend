@@ -21,7 +21,11 @@ function validateUserContext(context) {
   return null;
 }
 
-/** Verify organization access (owner or session). Returns org row or null. */
+/**
+ * Verify organization access (owner or session). Returns org row or null.
+ * If request has sessionId and org exists with session_id IS NULL, we bind the org to this session
+ * so funnel users can access orgs created before session_id was persisted (or from job that didn't pass session).
+ */
 async function getOrganizationForContext(organizationId, userContext) {
   if (!organizationId) return null;
   if (userContext.isAuthenticated) {
@@ -29,8 +33,14 @@ async function getOrganizationForContext(organizationId, userContext) {
     return r.rows[0] || null;
   }
   if (userContext.sessionId) {
-    const r = await db.query('SELECT id FROM organizations WHERE id = $1 AND session_id = $2', [organizationId, userContext.sessionId]);
-    return r.rows[0] || null;
+    let r = await db.query('SELECT id FROM organizations WHERE id = $1 AND session_id = $2', [organizationId, userContext.sessionId]);
+    if (r.rows[0]) return r.rows[0];
+    const unbound = await db.query('SELECT id FROM organizations WHERE id = $1 AND session_id IS NULL AND owner_user_id IS NULL', [organizationId]);
+    if (unbound.rows[0]) {
+      await db.query('UPDATE organizations SET session_id = $1, updated_at = NOW() WHERE id = $2 AND session_id IS NULL', [userContext.sessionId, organizationId]);
+      return unbound.rows[0];
+    }
+    return null;
   }
   return null;
 }
