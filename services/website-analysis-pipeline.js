@@ -232,6 +232,15 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
     storedCTAs = top.rows;
   }
 
+  // Persist discovered social handles (from website links) when present
+  const socialHandles = scrapedContent?.socialHandles;
+  if (socialHandles && typeof socialHandles === 'object' && Object.keys(socialHandles).length > 0) {
+    await db.query(
+      `UPDATE organizations SET social_handles = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify(socialHandles), organizationId]
+    );
+  }
+
   return { organizationId, storedCTAs };
 }
 

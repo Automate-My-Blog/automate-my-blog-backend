@@ -5,6 +5,169 @@ import { normalizeCTA } from '../utils/cta-normalizer.js';
 const router = Router();
 
 /**
+ * GET /api/v1/organizations/:organizationId/social-handles
+ * Get discovered or manually set social media handles for the organization.
+ */
+router.get('/:organizationId/social-handles', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    const orgCheck = await db.query(
+      'SELECT id, social_handles FROM organizations WHERE id = $1',
+      [organizationId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found',
+        message: 'The requested organization does not exist'
+      });
+    }
+
+    const socialHandles = orgCheck.rows[0].social_handles || {};
+
+    res.json({
+      success: true,
+      social_handles: socialHandles
+    });
+  } catch (error) {
+    console.error('Error fetching organization social handles:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch social handles',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/v1/organizations/:organizationId/social-handles
+ * Set or override social media handles (e.g. from manual input).
+ * Body: { "social_handles": { "twitter": ["@handle"], "linkedin": ["company/slug"], ... } }
+ */
+router.patch('/:organizationId/social-handles', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+    const { social_handles: bodyHandles } = req.body;
+
+    const orgCheck = await db.query(
+      'SELECT id FROM organizations WHERE id = $1',
+      [organizationId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found',
+        message: 'The requested organization does not exist'
+      });
+    }
+
+    if (bodyHandles !== undefined && (typeof bodyHandles !== 'object' || bodyHandles === null || Array.isArray(bodyHandles))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid input',
+        message: 'social_handles must be an object with platform keys and array-of-strings values (e.g. { "twitter": ["@acme"] })'
+      });
+    }
+
+    const socialHandles = bodyHandles || {};
+    for (const key of Object.keys(socialHandles)) {
+      if (!Array.isArray(socialHandles[key])) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid input',
+          message: `social_handles.${key} must be an array of strings`
+        });
+      }
+      if (socialHandles[key].some(v => typeof v !== 'string')) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid input',
+          message: `social_handles.${key} must contain only strings`
+        });
+      }
+    }
+
+    await db.query(
+      'UPDATE organizations SET social_handles = $1, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(socialHandles), organizationId]
+    );
+
+    res.json({
+      success: true,
+      social_handles: socialHandles
+    });
+  } catch (error) {
+    console.error('Error updating organization social handles:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update social handles',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/v1/organizations/:organizationId/refresh-social-voice
+ * Re-run discovery of social handles from the organization's website and persist them.
+ */
+router.post('/:organizationId/refresh-social-voice', async (req, res) => {
+  try {
+    const { organizationId } = req.params;
+
+    const orgCheck = await db.query(
+      'SELECT id, website_url FROM organizations WHERE id = $1',
+      [organizationId]
+    );
+
+    if (orgCheck.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Organization not found',
+        message: 'The requested organization does not exist'
+      });
+    }
+
+    const websiteUrl = orgCheck.rows[0].website_url;
+    if (!websiteUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'No website URL',
+        message: 'Organization has no website_url set. Set a website before refreshing social handles.'
+      });
+    }
+
+    const webScraperService = (await import('../services/webscraper.js')).default;
+    const scraped = await webScraperService.scrapeWebsite(websiteUrl);
+    const socialHandles = scraped?.socialHandles || {};
+
+    if (Object.keys(socialHandles).length > 0) {
+      await db.query(
+        'UPDATE organizations SET social_handles = $1, updated_at = NOW() WHERE id = $2',
+        [JSON.stringify(socialHandles), organizationId]
+      );
+    }
+
+    res.json({
+      success: true,
+      social_handles: socialHandles,
+      message: Object.keys(socialHandles).length > 0
+        ? `Found and saved ${Object.keys(socialHandles).length} platform(s).`
+        : 'No social handles found on the website.'
+    });
+  } catch (error) {
+    console.error('Error refreshing social handles:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh social handles',
+      message: error.message
+    });
+  }
+});
+
+/**
  * GET /api/v1/organizations/:organizationId/ctas
  * Get CTAs for an organization
  * Returns top CTAs ranked by conversion potential for use in topic preview and content generation
