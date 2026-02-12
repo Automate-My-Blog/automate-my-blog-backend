@@ -22,6 +22,14 @@ describe.skipIf(!hasDb)('integration voice adaptation schema', () => {
   beforeAll(async () => {
     const mod = await import('../../services/database.js');
     db = mod.default;
+    // Create a test organization (CI has no seed data; session_id satisfies org constraint without users)
+    const slug = 'voice-schema-test-' + Math.random().toString(36).slice(2, 12);
+    const sessionId = 'test-session-' + Math.random().toString(36).slice(2, 12);
+    const res = await db.query(
+      `INSERT INTO organizations (name, slug, session_id) VALUES ($1, $2, $3) RETURNING id`,
+      ['Voice schema test org', slug, sessionId]
+    );
+    orgId = res.rows[0].id;
   });
 
   it('voice_samples and aggregated_voice_profiles tables exist', async () => {
@@ -84,12 +92,6 @@ describe.skipIf(!hasDb)('integration voice adaptation schema', () => {
   });
 
   it('insert voice_sample and aggregated_voice_profile, update_organization_data_availability returns has_voice_samples', async () => {
-    const orgRes = await db.query(
-      `SELECT id FROM organizations ORDER BY created_at DESC LIMIT 1`
-    );
-    expect(orgRes.rows.length).toBeGreaterThan(0);
-    orgId = orgRes.rows[0].id;
-
     const insertSample = await db.query(
       `INSERT INTO voice_samples (
          organization_id, source_type, raw_content, word_count,
@@ -124,27 +126,19 @@ describe.skipIf(!hasDb)('integration voice adaptation schema', () => {
   });
 
   it('rejects invalid source_type on voice_samples', async () => {
-    const orgRes = await db.query('SELECT id FROM organizations LIMIT 1');
-    const oid = orgRes.rows[0].id;
     await expect(
       db.query(
         `INSERT INTO voice_samples (organization_id, source_type, raw_content, word_count)
          VALUES ($1, 'invalid_type', 'x', 1)`,
-        [oid]
+        [orgId]
       )
     ).rejects.toMatchObject({ code: '23514' });
   });
 
   afterAll(async () => {
     if (!db) return;
-    if (sampleId) {
-      await db.query('DELETE FROM voice_samples WHERE id = $1', [sampleId]).catch(() => {});
-    }
-    if (profileId) {
-      await db.query('DELETE FROM aggregated_voice_profiles WHERE id = $1', [profileId]).catch(() => {});
-    }
     if (orgId) {
-      await db.query('SELECT update_organization_data_availability($1)', [orgId]).catch(() => {});
+      await db.query('DELETE FROM organizations WHERE id = $1', [orgId]).catch(() => {});
     }
   });
 });
