@@ -1,12 +1,17 @@
 /**
  * Job queue service (BullMQ + Redis)
  * Create jobs, get status, retry, cancel. Worker updates DB directly.
+ *
+ * Allowed state transitions:
+ * - Retry: only when status === 'failed' → reset to queued and re-enqueue.
+ * - Cancel: only when status in ('queued', 'running') → set cancelled_at; worker marks failed.
  */
 
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const QUEUE_NAME = 'amb-jobs';
 const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample'];
@@ -15,9 +20,9 @@ const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_samp
 export const JOB_STATUSES = Object.freeze(['queued', 'running', 'succeeded', 'failed']);
 
 /** Only failed jobs can be retried. */
-const RETRIABLE_STATUS = 'failed';
+export const RETRIABLE_STATUS = 'failed';
 /** Only queued or running jobs can be cancelled (worker checks cancelled_at). */
-const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
+export const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
 
 let _connection = null;
 let _queue = null;
@@ -74,13 +79,17 @@ function getQueue() {
 function ensureRedis() {
   const raw = process.env.REDIS_URL;
   const url = normalizeRedisUrl(raw);
-  if (!url) throw new Error('REDIS_URL is required for job queue');
+  if (!url) {
+    throw new ServiceUnavailableError('REDIS_URL is required for job queue');
+  }
   if (!isRedisUrlValid(url)) {
-    throw new Error(
+    throw new ServiceUnavailableError(
       'REDIS_URL must be a full TCP URL (e.g. rediss://default:token@host.upstash.io:6379), not a path or empty host'
     );
   }
-  if (!getConnection()) throw new Error('REDIS_URL is required for job queue');
+  if (!getConnection()) {
+    throw new ServiceUnavailableError('REDIS_URL is required for job queue');
+  }
 }
 
 /**
@@ -200,9 +209,7 @@ export async function retryJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
   if (row.status !== RETRIABLE_STATUS) {
-    const err = new Error('Job is not in failed state');
-    err.statusCode = 400;
-    throw err;
+    throw new InvariantViolation('Job is not in failed state', 400);
   }
 
   await db.query(
@@ -226,9 +233,7 @@ export async function cancelJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
   if (!CANCELLABLE_STATUSES.includes(row.status)) {
-    const err = new Error('Job is not cancellable');
-    err.statusCode = 400;
-    throw err;
+    throw new InvariantViolation('Job is not cancellable', 400);
   }
 
   await db.query(
