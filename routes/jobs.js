@@ -86,7 +86,6 @@ function sendJobError(res, e, defaultMessage = 'Internal error') {
       message: 'User not found; token may be for a deleted or invalid user'
     });
   }
-<<<<<<< HEAD
   if (e instanceof ServiceUnavailableError || isRedisUnavailableError(e)) {
     return res.status(503).json({
       success: false,
@@ -94,7 +93,6 @@ function sendJobError(res, e, defaultMessage = 'Internal error') {
       message: e.message || 'Job queue is not configured (REDIS_URL required)'
     });
   }
-<<<<<<< HEAD
   if (e instanceof InvariantViolation || isBadRequestError(e)) {
     const statusCode = e instanceof InvariantViolation && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 400;
     return res.status(statusCode).json({
