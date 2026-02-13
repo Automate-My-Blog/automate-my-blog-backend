@@ -34,7 +34,18 @@ async function getJobStatusWithRetry(jobId, ctx) {
 
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
-  const sessionId = req.headers['x-session-id'] || req.body?.sessionId || req.query?.sessionId || null;
+  const rawSessionId =
+    req.headers['x-session-id'] ||
+    req.body?.sessionId ||
+    req.query?.sessionId ||
+    req.query?.sessionid ||
+    null;
+  const sessionId =
+    rawSessionId == null
+      ? null
+      : (Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId)
+        .toString()
+        .trim() || null;
   if (!userId && req.query?.token) {
     try {
       const decoded = authService.verifyToken(String(req.query.token).trim());
