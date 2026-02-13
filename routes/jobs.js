@@ -64,23 +64,35 @@ router.get('/', (req, res) => {
   res.json({ ok: true, message: 'Jobs API', endpoints: ['POST /website-analysis', 'POST /content-generation', 'GET /:jobId/status', 'GET /:jobId/stream', 'GET /:jobId/narrative-stream', 'POST /:jobId/retry', 'POST /:jobId/cancel'] });
 });
 
+function isUserNotFoundError(e) {
+  return e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey');
+}
+
+function isRedisUnavailableError(e) {
+  return e.message?.includes('REDIS_URL');
+}
+
+function isBadRequestError(e) {
+  return e.statusCode === 400;
+}
+
 /** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
 function sendJobError(res, e, defaultMessage = 'Internal error') {
-  if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
+  if (isUserNotFoundError(e)) {
     return res.status(401).json({
       success: false,
       error: 'Unauthorized',
       message: 'User not found; token may be for a deleted or invalid user'
     });
   }
-  if (e.message?.includes('REDIS_URL')) {
+  if (isRedisUnavailableError(e)) {
     return res.status(503).json({
       success: false,
       error: 'Service unavailable',
       message: e.message || 'Job queue is not configured (REDIS_URL required)'
     });
   }
-  if (e.statusCode === 400) {
+  if (isBadRequestError(e)) {
     return res.status(400).json({
       success: false,
       error: 'Bad request',

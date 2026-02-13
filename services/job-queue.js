@@ -84,18 +84,16 @@ function ensureRedis() {
 }
 
 /**
- * Ownership: user_id match XOR session_id match. 404 if no match.
+ * Ownership: caller has access if they match by user_id or by session_id. 404 if no match.
  */
 async function getJobForAccess(jobId, { userId, sessionId }) {
-  const q = await db.query(
-    `SELECT * FROM jobs WHERE id = $1`,
-    [jobId]
-  );
+  const q = await db.query(`SELECT * FROM jobs WHERE id = $1`, [jobId]);
   const row = q.rows[0];
   if (!row) return null;
-  const ownByUser = userId && row.user_id && row.user_id === userId;
-  const ownBySession = sessionId && row.session_id && row.session_id === sessionId;
-  if (!ownByUser && !ownBySession) return null;
+  const ownByUser = userId != null && row.user_id === userId;
+  const ownBySession = sessionId != null && row.session_id === sessionId;
+  const hasAccess = ownByUser || ownBySession;
+  if (!hasAccess) return null;
   return row;
 }
 
