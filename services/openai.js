@@ -2580,18 +2580,22 @@ ${enriched.uniqueAngle}
 - ROI multiple: ${enriched.roiMultipleLow}x to ${enriched.roiMultipleHigh}x return
 
 **YOUR TASK:**
-Write 2-3 compelling paragraphs in first person ("I identified...") explaining:
+Write a concise, scannable strategy overview in this EXACT format:
 
-1. **Market Opportunity** - Use the SPECIFIC numbers above to explain market size. Reference the estimated ${enriched.searchVolume.toLocaleString()} monthly searches and ${enriched.competitionLabel.toLowerCase()}.
+**SUMMARY:** [Write 1-2 sentences in first person explaining why this audience is valuable. Include the ${enriched.searchVolume.toLocaleString()} monthly searches figure and ${enriched.competitionLabel.toLowerCase()} competition level.]
 
-2. **Strategic Approach** - Explain how focusing on "${enriched.customerProblem}" for ${demographics} creates competitive advantage. Reference the ${enriched.keywordCount} target keywords.
+**KEY INSIGHTS:**
+• [Market Opportunity insight with specific search volume number]
+• [Strategic Approach insight mentioning the ${enriched.keywordCount} target keywords and customer problem]
+• [ROI calculation: ${enriched.searchVolume.toLocaleString()} searches → ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks → ${enriched.estimatedLeadsPerMonth} leads/month]
+• [Profit projection: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month with ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI]
 
-3. **Expected Results** - Show the ROI calculation:
-   - ${enriched.searchVolume.toLocaleString()} searches × ${(enriched.estimatedCTR * 100).toFixed(1)}% CTR = ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks/month
-   - ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks × ${(enriched.conversionPotential * 100).toFixed(0)}% conversion = ${enriched.estimatedLeadsPerMonth} leads/month
-   - With ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI, this strategy pays for itself quickly
-
-CRITICAL: Be SPECIFIC with numbers. These are AI estimates based on market research, so present them as projections, not guarantees. Use exact figures provided.`;
+CRITICAL REQUIREMENTS:
+- Use EXACT format with "**SUMMARY:**" and "**KEY INSIGHTS:**" headers
+- Include ALL specific numbers provided above
+- Maximum 4-5 bullet points
+- Each bullet should be ONE concise sentence
+- Present as projections/estimates, not guarantees`;
 
       const stream = await openai.chat.completions.create({
         model: 'gpt-4o',
