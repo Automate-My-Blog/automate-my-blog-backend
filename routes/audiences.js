@@ -791,6 +791,8 @@ router.get('/', async (req, res) => {
       pitch: row.pitch,
       topics_count: parseInt(row.topics_count),
       keywords_count: parseInt(row.keywords_count),
+      content_calendar_generated_at: row.content_calendar_generated_at,
+      has_content_calendar: Array.isArray(row.content_ideas) && row.content_ideas.length > 0,
       created_at: row.created_at
     }));
 
@@ -873,6 +875,10 @@ router.get('/:id', async (req, res) => {
       ORDER BY relevance_score DESC
     `, [id]);
 
+    const contentIdeas = audience.content_ideas != null
+      ? (typeof audience.content_ideas === 'string' ? (() => { try { return JSON.parse(audience.content_ideas); } catch { return null; } })() : audience.content_ideas)
+      : null;
+
     res.json({
       success: true,
       audience: {
@@ -884,6 +890,8 @@ router.get('/:id', async (req, res) => {
         business_value: safeParse(audience.business_value, 'business_value_get', audience.id),
         priority: audience.priority,
         pitch: audience.pitch,
+        content_ideas: contentIdeas,
+        content_calendar_generated_at: audience.content_calendar_generated_at,
         created_at: audience.created_at,
         updated_at: audience.updated_at,
         topics: topicsResult.rows,

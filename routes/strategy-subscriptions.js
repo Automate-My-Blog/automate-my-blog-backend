@@ -12,6 +12,54 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
  */
 
 /**
+ * GET /api/v1/strategies/content-calendar
+ * Return unified 30-day content calendar across all subscribed strategies (Issue #270).
+ * Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD (optional, defaults to next 30 days)
+ */
+router.get('/content-calendar', async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+  }
+  try {
+    const userId = req.user.userId;
+
+    const result = await db.query(
+      `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
+              a.content_calendar_generated_at, sp.created_at as subscribed_at
+       FROM strategy_purchases sp
+       JOIN audiences a ON a.id = sp.strategy_id
+       WHERE sp.user_id = $1 AND sp.status = 'active'
+       ORDER BY sp.created_at DESC`,
+      [userId]
+    );
+
+    const strategies = result.rows.map((row) => {
+      const contentIdeas = row.content_ideas != null
+        ? (typeof row.content_ideas === 'string' ? (() => { try { return JSON.parse(row.content_ideas); } catch { return []; } })() : row.content_ideas)
+        : [];
+      const segment = typeof row.target_segment === 'string' ? (() => { try { return JSON.parse(row.target_segment); } catch { return {}; } })() : (row.target_segment || {});
+      return {
+        strategyId: row.strategy_id,
+        targetSegment: segment,
+        customerProblem: row.customer_problem,
+        contentIdeas: Array.isArray(contentIdeas) ? contentIdeas : [],
+        contentCalendarGeneratedAt: row.content_calendar_generated_at,
+        subscribedAt: row.subscribed_at
+      };
+    });
+
+    res.json({
+      success: true,
+      strategies,
+      totalStrategies: strategies.length
+    });
+  } catch (error) {
+    console.error('Error fetching content calendar:', error);
+    res.status(500).json({ error: 'Failed to fetch content calendar', message: error.message });
+  }
+});
+
+/**
  * GET /api/v1/strategies/:id/pricing
  * Calculate and return pricing for a specific strategy
  */

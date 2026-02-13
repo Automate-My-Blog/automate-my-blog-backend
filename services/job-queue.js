@@ -14,7 +14,7 @@ import db from './database.js';
 import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const QUEUE_NAME = 'amb-jobs';
-const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample'];
+const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample', 'content_calendar'];
 
 /** Only failed jobs can be retried. */
 export const RETRIABLE_STATUS = 'failed';
@@ -169,6 +169,30 @@ export async function createJob(type, input, context = {}) {
   await queue.add(type, { jobId }, { jobId });
 
   return { jobId };
+}
+
+/**
+ * Create a content calendar generation job. Call after strategy purchase (individual or bundle).
+ * @param {string[]} strategyIds - Array of audience IDs (strategy_id = audiences.id)
+ * @param {string} userId - UUID of user (required)
+ * @returns {Promise<{ jobId: string }|null>} jobId if enqueued, null if Redis unavailable
+ */
+export async function createContentCalendarJob(strategyIds, userId) {
+  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) {
+    throw new Error('userId and non-empty strategyIds are required');
+  }
+  const u = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (!u.rows.length) throw new UserNotFoundError(userId);
+
+  try {
+    return await createJob('content_calendar', { strategyIds }, { userId });
+  } catch (e) {
+    if (e instanceof ServiceUnavailableError || e?.message?.includes('REDIS')) {
+      console.warn('[job-queue] Redis unavailable, skipping content_calendar job:', e?.message);
+      return null;
+    }
+    throw e;
+  }
 }
 
 /**

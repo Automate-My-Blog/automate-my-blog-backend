@@ -120,6 +120,35 @@ describe('job-queue', () => {
     });
   });
 
+  describe('createContentCalendarJob', () => {
+    it('creates content_calendar job with strategyIds', async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [{ id: 'u1' }] }) // createContentCalendarJob user check
+        .mockResolvedValueOnce({ rows: [{ id: 'u1' }] }) // createJob user check
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // INSERT
+      const result = await jobQueue.createContentCalendarJob(['strat-1', 'strat-2'], 'u1');
+      expect(result).not.toBeNull();
+      expect(result.jobId).toBeDefined();
+      expect(mockAdd).toHaveBeenCalledWith('content_calendar', { jobId: result.jobId }, { jobId: result.jobId });
+      const insertCall = vi.mocked(db.query).mock.calls.find((c) => c[0].includes('INSERT INTO jobs'));
+      const params = insertCall[1];
+      const input = JSON.parse(params[5]);
+      expect(input.strategyIds).toEqual(['strat-1', 'strat-2']);
+    });
+
+    it('throws when strategyIds empty', async () => {
+      await expect(
+        jobQueue.createContentCalendarJob([], 'u1')
+      ).rejects.toThrow('non-empty strategyIds');
+    });
+
+    it('throws when userId missing', async () => {
+      await expect(
+        jobQueue.createContentCalendarJob(['s1'], null)
+      ).rejects.toThrow('userId');
+    });
+  });
+
   describe('getJobStatus', () => {
     it('returns null when job not found', async () => {
       vi.mocked(db.query).mockResolvedValue({ rows: [] });
