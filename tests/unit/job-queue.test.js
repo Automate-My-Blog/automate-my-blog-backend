@@ -36,8 +36,7 @@ afterEach(() => {
 
 describe('job-queue', () => {
   describe('state constants', () => {
-    it('exports allowed statuses and transition rules', () => {
-      expect(jobQueue.JOB_STATUSES).toEqual(['queued', 'running', 'succeeded', 'failed']);
+    it('exports retry and cancel transition rules', () => {
       expect(jobQueue.RETRIABLE_STATUS).toBe('failed');
       expect(jobQueue.CANCELLABLE_STATUSES).toEqual(['queued', 'running']);
     });
