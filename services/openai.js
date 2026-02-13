@@ -2646,34 +2646,47 @@ CRITICAL: Be SPECIFIC with numbers. These are AI estimates based on market resea
         ? Math.round((monthlyPrice / avgMonthlyProfit) * 4)
         : 'N/A';
 
-      const prompt = `Explain the pricing rationale for this content strategy subscription in first person (as the AI consultant).
+      // Check if we have valid metrics to present
+      const hasValidMetrics = enriched.searchVolume > 0 && enriched.estimatedLeadsPerMonth > 0;
 
-**PRICING:**
-- Monthly subscription: $${monthlyPrice}
-- Annual cost: $${(monthlyPrice * 12).toFixed(2)}/year
+      let prompt;
 
-**VALUE METRICS (AI-Estimated):**
-- Market size: ${enriched.searchVolume.toLocaleString()} monthly searches
-- Estimated leads: ${enriched.estimatedLeadsPerMonth} leads/month
-- Cost per 1,000 searches: $${costPerThousandSearches}
+      if (hasValidMetrics) {
+        // Full detailed prompt with metrics
+        prompt = `Write a concise pricing justification (3-4 bullet points max) for this $${monthlyPrice}/month content strategy subscription.
+
+**AVAILABLE METRICS:**
 - Cost per lead: $${costPerLead} (vs ~$${enriched.projectedCAC} industry CAC)
 - Projected profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month
-- ROI multiple: ${enriched.roiMultipleLow}x to ${enriched.roiMultipleHigh}x return
+- ROI: ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x return
+- Payback: ~${weeksToPayback} weeks
+- Market: ${enriched.competitionLabel} competition
 
-**YOUR TASK:**
-Write 2 concise paragraphs explaining:
+**FORMAT:**
+• [Bullet point 1: Cost per lead vs industry CAC]
+• [Bullet point 2: ROI multiple and payback time]
+• [Bullet point 3: Profit projection]
+• [Bullet point 4: Market positioning advantage]
 
-1. **Value Calculation** - Show the math clearly:
-   - "$${monthlyPrice}/month ÷ ${enriched.searchVolume.toLocaleString()} searches = $${costPerThousandSearches} per 1K searches"
-   - "With ${enriched.estimatedLeadsPerMonth} estimated leads, cost per lead = $${costPerLead}"
-   - Compare to typical industry CAC of $${enriched.projectedCAC}
+Keep each bullet to ONE concise sentence. NO fluff, NO paragraphs, NO "As the AI consultant" language. Just crisp value statements.`;
+      } else {
+        // Simplified prompt when metrics are unavailable
+        prompt = `Write a concise pricing justification (3 bullet points max) for this $${monthlyPrice}/month content strategy subscription targeting ${enriched.demographics}.
 
-2. **ROI Justification** - Use SPECIFIC numbers:
-   - "${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI means the subscription pays for itself in ~${weeksToPayback} weeks"
-   - Reference the projected $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()} monthly profit
-   - Emphasize value of positioning in ${enriched.competitionLabel.toLowerCase()} market
+**FOCUS ON:**
+- Strategic value of consistent content for SEO
+- Cost-effective compared to hiring writers or agencies
+- Competitive positioning in ${enriched.competitionLabel.toLowerCase()} market
 
-IMPORTANT: These are AI-estimated projections based on market research. Present as potential outcomes, not guarantees. Use exact figures provided.`;
+**FORMAT:**
+• [Bullet 1: SEO and visibility value]
+• [Bullet 2: Cost vs alternatives]
+• [Bullet 3: Competitive advantage]
+
+Keep each bullet to ONE concise sentence. NO fluff, NO "As the AI consultant" language. Just crisp value statements.`;
+      }
+
+      prompt += `\n\nIMPORTANT: Return ONLY bullet points. No introduction, no conclusion, no "AI-estimated" disclaimers. Just the bullets.`;
 
       const stream = await openai.chat.completions.create({
         model: 'gpt-4o',
