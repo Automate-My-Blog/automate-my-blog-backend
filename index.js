@@ -52,6 +52,7 @@ import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse } from './lib/errors.js';
 import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
+import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
 
 // Load environment variables
 dotenv.config();
@@ -2088,21 +2089,14 @@ app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), asyn
 // Create new blog post
 app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
-    const { title, content, topic, businessInfo, status = 'draft' } = req.body;
-
-    if (!title || !content) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'title and content are required'
-      });
-    }
+    const parsed = validateCreateBlogPostBody(req.body);
 
     const savedPost = await contentService.saveBlogPost(req.user.userId, {
-      title,
-      content,
-      topic,
-      businessInfo,
-      status
+      title: parsed.title,
+      content: parsed.content,
+      topic: parsed.topic,
+      businessInfo: parsed.businessInfo,
+      status: parsed.status
     });
 
     res.status(201).json({
@@ -2136,19 +2130,7 @@ app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), 
 app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, content, status } = req.body;
-
-    const updates = {};
-    if (title !== undefined) updates.title = title;
-    if (content !== undefined) updates.content = content;
-    if (status !== undefined) updates.status = status;
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({
-        error: 'No updates provided',
-        message: 'At least one field (title, content, status) must be provided'
-      });
-    }
+    const updates = validateUpdateBlogPostBody(req.body);
 
     const updatedPost = await contentService.updateBlogPost(id, req.user.userId, updates);
 

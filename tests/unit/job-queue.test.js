@@ -35,6 +35,14 @@ afterEach(() => {
 });
 
 describe('job-queue', () => {
+  describe('state constants', () => {
+    it('exports allowed statuses and transition rules', () => {
+      expect(jobQueue.JOB_STATUSES).toEqual(['queued', 'running', 'succeeded', 'failed']);
+      expect(jobQueue.RETRIABLE_STATUS).toBe('failed');
+      expect(jobQueue.CANCELLABLE_STATUSES).toEqual(['queued', 'running']);
+    });
+  });
+
   describe('createJob', () => {
     it('throws on invalid type', async () => {
       await expect(
@@ -50,12 +58,12 @@ describe('job-queue', () => {
       expect(db.query).not.toHaveBeenCalled();
     });
 
-    it('throws when REDIS_URL missing', async () => {
+    it('throws ServiceUnavailableError when REDIS_URL missing', async () => {
       const orig = process.env.REDIS_URL;
       delete process.env.REDIS_URL;
       await expect(
         jobQueue.createJob('website_analysis', { url: 'https://x.com' }, { sessionId: 's1' })
-      ).rejects.toThrow('REDIS_URL');
+      ).rejects.toMatchObject({ name: 'ServiceUnavailableError', message: expect.stringContaining('REDIS_URL') });
       process.env.REDIS_URL = orig;
     });
 
@@ -177,13 +185,15 @@ describe('job-queue', () => {
       expect(out).toBeNull();
     });
 
-    it('throws when job not failed', async () => {
+    it('throws InvariantViolation when job not failed', async () => {
       vi.mocked(db.query).mockResolvedValue({
         rows: [{ id: 'j1', user_id: 'u1', session_id: null, status: 'running', type: 'website_analysis' }],
       });
-      await expect(jobQueue.retryJob('j1', { userId: 'u1' })).rejects.toMatchObject(
-        { message: 'Job is not in failed state', statusCode: 400 }
-      );
+      await expect(jobQueue.retryJob('j1', { userId: 'u1' })).rejects.toMatchObject({
+        name: 'InvariantViolation',
+        message: 'Job is not in failed state',
+        statusCode: 400,
+      });
     });
 
     it('updates row, enqueues, returns jobId', async () => {
@@ -206,13 +216,15 @@ describe('job-queue', () => {
       expect(out).toBeNull();
     });
 
-    it('throws when job not cancellable', async () => {
+    it('throws InvariantViolation when job not cancellable', async () => {
       vi.mocked(db.query).mockResolvedValue({
         rows: [{ id: 'j1', user_id: 'u1', session_id: null, status: 'succeeded' }],
       });
-      await expect(jobQueue.cancelJob('j1', { userId: 'u1' })).rejects.toMatchObject(
-        { message: 'Job is not cancellable', statusCode: 400 }
-      );
+      await expect(jobQueue.cancelJob('j1', { userId: 'u1' })).rejects.toMatchObject({
+        name: 'InvariantViolation',
+        message: 'Job is not cancellable',
+        statusCode: 400,
+      });
     });
 
     it('sets cancelled_at and returns { cancelled: true }', async () => {

@@ -159,14 +159,33 @@ describe('content', () => {
       expect(post.status).toBe('draft');
     });
 
-    it('throws when post not found', async () => {
+    it('throws NotFoundError when post not found', async () => {
       await expect(
         content.getBlogPost('non-existent-id', 'user-1')
-      ).rejects.toThrow('Blog post not found');
+      ).rejects.toMatchObject({ name: 'NotFoundError', message: 'Blog post not found', resource: 'blog_post' });
+    });
+
+    it('throws NotFoundError when post owned by different user', async () => {
+      const saved = await content.saveBlogPost('user-1', {
+        title: 'Mine',
+        content: 'X',
+        topic: {},
+        businessInfo: {},
+        status: 'draft',
+      });
+      await expect(
+        content.getBlogPost(saved.id, 'other-user')
+      ).rejects.toMatchObject({ name: 'NotFoundError', message: 'Blog post not found', resource: 'blog_post' });
     });
   });
 
   describe('updateBlogPost (memory)', () => {
+    it('throws NotFoundError when post not found or wrong owner', async () => {
+      await expect(
+        content.updateBlogPost('non-existent-id', 'user-1', { title: 'X' })
+      ).rejects.toMatchObject({ name: 'NotFoundError', message: 'Blog post not found', resource: 'blog_post' });
+    });
+
     it('updates title, content, status and returns updated post', async () => {
       const saved = await content.saveBlogPost('user-1', {
         title: 'Original',
@@ -189,6 +208,12 @@ describe('content', () => {
   });
 
   describe('deleteBlogPost (memory)', () => {
+    it('throws NotFoundError when post not found or wrong owner', async () => {
+      await expect(
+        content.deleteBlogPost('non-existent-id', 'user-1')
+      ).rejects.toMatchObject({ name: 'NotFoundError', message: 'Blog post not found', resource: 'blog_post' });
+    });
+
     it('removes post and returns success', async () => {
       const saved = await content.saveBlogPost('user-1', {
         title: 'To Delete',
