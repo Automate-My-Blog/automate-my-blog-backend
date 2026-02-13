@@ -862,7 +862,7 @@ router.get('/:id', async (req, res) => {
     const audience = audienceResult.rows[0];
 
     const topicsResult = await db.query(`
-      SELECT id, title, description, category
+      SELECT id, title, description, subheader, engagement_score
       FROM content_topics 
       WHERE audience_id = $1
       ORDER BY created_at DESC

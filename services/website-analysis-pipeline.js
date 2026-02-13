@@ -374,7 +374,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       try {
         // Query existing audiences scoped to THIS organization only
         const existingRows = await db.query(
-          `SELECT target_segment, customer_problem FROM audiences WHERE organization_id = $1 ORDER BY created_at DESC`,
+          `SELECT a.target_segment, a.customer_problem FROM audiences a
+           JOIN organization_intelligence oi ON oi.id = a.organization_intelligence_id AND oi.organization_id = $1
+           ORDER BY a.created_at DESC`,
           [orgId]
         ).then((r) => r.rows).catch(() => []);
         console.log(`📊 Cache backfill: Found ${existingRows.length} existing audiences for org ${orgId}`);
@@ -908,11 +910,11 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
   // This enables incremental analysis when RE-analyzing the same website
   let existingAudiences = [];
   try {
-    const whereConditions = ['organization_id = $1'];
-    const queryParams = [organizationId];
     const result = await db.query(
-      `SELECT target_segment, customer_problem FROM audiences WHERE ${whereConditions.join(' AND ')} ORDER BY created_at DESC`,
-      queryParams
+      `SELECT a.target_segment, a.customer_problem FROM audiences a
+       JOIN organization_intelligence oi ON oi.id = a.organization_intelligence_id AND oi.organization_id = $1
+       ORDER BY a.created_at DESC`,
+      [organizationId]
     );
     existingAudiences = result.rows;
     if (existingAudiences.length > 0) {

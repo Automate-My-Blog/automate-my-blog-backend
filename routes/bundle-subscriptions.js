@@ -481,8 +481,9 @@ router.get('/',  async (req, res) => {
         a.id as strategy_id,
         a.pitch,
         a.target_segment,
-        a.seo_keywords,
-        a.image_url
+        a.image_url,
+        (SELECT json_agg(json_build_object('keyword', sk.keyword, 'searchVolume', sk.search_volume, 'competition', sk.competition, 'relevanceScore', sk.relevance_score))
+         FROM seo_keywords sk WHERE sk.audience_id = a.id) as seo_keywords
       FROM strategy_purchases sp
       INNER JOIN audiences a ON sp.strategy_id = a.id
       WHERE sp.bundle_subscription_id = $1 AND sp.status = 'active'`,
