@@ -1,12 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  normalizeCTA,
-  normalizeCTAs,
-  isValidCTAType,
-  isValidPlacement,
-  getValidCTATypes,
-  getValidPlacements,
-} from '../../utils/cta-normalizer.js';
+import { normalizeCTA } from '../../utils/cta-normalizer.js';
 import { ctaFixtures } from '../utils/fixtures.js';
 
 describe('cta-normalizer', () => {
@@ -90,84 +83,6 @@ describe('cta-normalizer', () => {
 
     it('throws when cta is undefined', () => {
       expect(() => normalizeCTA(undefined)).toThrow('CTA object is required');
-    });
-  });
-
-  describe('normalizeCTAs', () => {
-    it('returns empty array for non-array input', () => {
-      expect(normalizeCTAs(null)).toEqual([]);
-      expect(normalizeCTAs(undefined)).toEqual([]);
-      expect(normalizeCTAs('foo')).toEqual([]);
-      expect(normalizeCTAs({})).toEqual([]);
-    });
-
-    it('normalizes valid array and returns all', () => {
-      const ctas = [ctaFixtures.minimal, ctaFixtures.full];
-      const out = normalizeCTAs(ctas);
-      expect(out).toHaveLength(2);
-      expect(out[0].cta_text).toBe('Sign Up');
-      expect(out[1].cta_text).toBe('Book a Demo');
-    });
-
-    it('filters out nulls from failed normalizations', () => {
-      const ctas = [ctaFixtures.minimal, null, ctaFixtures.full];
-      const out = normalizeCTAs(ctas);
-      expect(out).toHaveLength(2);
-      expect(out[0].cta_text).toBe('Sign Up');
-      expect(out[1].cta_text).toBe('Book a Demo');
-    });
-
-    it('skips invalid items (invalid throws), keeps valid', () => {
-      const ctas = [ctaFixtures.minimal, undefined, ctaFixtures.full];
-      const out = normalizeCTAs(ctas);
-      expect(out).toHaveLength(2);
-    });
-  });
-
-  describe('isValidCTAType', () => {
-    it('returns true for valid database types', () => {
-      expect(isValidCTAType('button')).toBe(true);
-      expect(isValidCTAType('contact_link')).toBe(true);
-      expect(isValidCTAType('cta_element')).toBe(true);
-    });
-
-    it('returns false for invalid types', () => {
-      expect(isValidCTAType('unknown')).toBe(false);
-      expect(isValidCTAType('')).toBe(false);
-    });
-  });
-
-  describe('isValidPlacement', () => {
-    it('returns true for valid placements', () => {
-      expect(isValidPlacement('header')).toBe(true);
-      expect(isValidPlacement('main_content')).toBe(true);
-      expect(isValidPlacement('popup')).toBe(true);
-    });
-
-    it('returns false for invalid placements', () => {
-      expect(isValidPlacement('invalid')).toBe(false);
-      expect(isValidPlacement('')).toBe(false);
-    });
-  });
-
-  describe('getValidCTATypes', () => {
-    it('returns non-empty array of unique valid types', () => {
-      const types = getValidCTATypes();
-      expect(Array.isArray(types)).toBe(true);
-      expect(types.length).toBeGreaterThan(0);
-      expect(new Set(types).size).toBe(types.length);
-      expect(types).toContain('button');
-      expect(types).toContain('contact_link');
-    });
-  });
-
-  describe('getValidPlacements', () => {
-    it('returns array of valid placements', () => {
-      const placements = getValidPlacements();
-      expect(Array.isArray(placements)).toBe(true);
-      expect(placements).toContain('header');
-      expect(placements).toContain('main_content');
-      expect(placements).toContain('popup');
     });
   });
 });

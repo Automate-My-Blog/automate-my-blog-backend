@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import analyticsService from './analytics.js';
-import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/index.js';
+import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/website-analysis.js';
 import streamManager from './stream-manager.js';
 import strategyEnrichment from './strategy-enrichment.js';
 
