@@ -49,11 +49,13 @@ router.get('/:id/pitch', async (req, res) => {
 
   console.log(`🎯 Strategy pitch request: strategyId=${id}, userId=${userId}`);
 
-  // Set up SSE headers
+  // Set up SSE headers with CORS
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || 'http://localhost:3000');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.flushHeaders?.();
 
   try {
