@@ -2,6 +2,7 @@ import express from 'express';
 import db from '../services/database.js';
 import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
+import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -15,6 +16,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
  * GET /api/v1/strategies/content-calendar
  * Return unified 30-day content calendar across all subscribed strategies (Issue #270).
  * Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD (optional, defaults to next 30 days)
+ * Query: ?testbed=1 - Calendar testbed mode: skip subscription requirement, use fixture content when empty (requires ENABLE_CALENDAR_TESTBED=1)
  */
 router.get('/content-calendar', async (req, res) => {
   if (!req.user?.userId) {
@@ -22,28 +24,47 @@ router.get('/content-calendar', async (req, res) => {
   }
   try {
     const userId = req.user.userId;
+    const testbed = isCalendarTestbed(req);
 
-    const result = await db.query(
-      `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
-              a.content_calendar_generated_at, sp.created_at as subscribed_at
-       FROM strategy_purchases sp
-       JOIN audiences a ON a.id = sp.strategy_id
-       WHERE sp.user_id = $1 AND sp.status = 'active'
-       ORDER BY sp.created_at DESC`,
-      [userId]
-    );
+    let result;
+    if (testbed) {
+      // Testbed: use subscribed strategies if any; otherwise fall back to user's audiences (no purchase required)
+      result = await db.query(
+        `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
+                a.content_calendar_generated_at, sp.created_at as subscribed_at
+         FROM audiences a
+         LEFT JOIN strategy_purchases sp ON sp.strategy_id = a.id AND sp.user_id = $1 AND sp.status = 'active'
+         WHERE a.user_id = $1
+         ORDER BY sp.created_at DESC NULLS LAST, a.created_at DESC
+         LIMIT 10`,
+        [userId]
+      );
+    } else {
+      result = await db.query(
+        `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
+                a.content_calendar_generated_at, sp.created_at as subscribed_at
+         FROM strategy_purchases sp
+         JOIN audiences a ON a.id = sp.strategy_id
+         WHERE sp.user_id = $1 AND sp.status = 'active'
+         ORDER BY sp.created_at DESC`,
+        [userId]
+      );
+    }
+
+    const fixtureIdeas = testbed ? getFixtureContentIdeas() : null;
 
     const strategies = result.rows.map((row) => {
-      const contentIdeas = row.content_ideas != null
+      let contentIdeas = row.content_ideas != null
         ? (typeof row.content_ideas === 'string' ? (() => { try { return JSON.parse(row.content_ideas); } catch { return []; } })() : row.content_ideas)
         : [];
+      contentIdeas = Array.isArray(contentIdeas) ? contentIdeas : [];
       const segment = typeof row.target_segment === 'string' ? (() => { try { return JSON.parse(row.target_segment); } catch { return {}; } })() : (row.target_segment || {});
       return {
         strategyId: row.strategy_id,
         targetSegment: segment,
         customerProblem: row.customer_problem,
-        contentIdeas: Array.isArray(contentIdeas) ? contentIdeas : [],
-        contentCalendarGeneratedAt: row.content_calendar_generated_at,
+        contentIdeas: contentIdeas.length > 0 ? contentIdeas : (fixtureIdeas || []),
+        contentCalendarGeneratedAt: contentIdeas.length > 0 ? row.content_calendar_generated_at : (testbed ? new Date().toISOString() : null),
         subscribedAt: row.subscribed_at
       };
     });
@@ -51,7 +72,8 @@ router.get('/content-calendar', async (req, res) => {
     res.json({
       success: true,
       strategies,
-      totalStrategies: strategies.length
+      totalStrategies: strategies.length,
+      ...(testbed && { _testbed: true })
     });
   } catch (error) {
     console.error('Error fetching content calendar:', error);
