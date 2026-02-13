@@ -108,40 +108,56 @@ export async function generateAudienceNarration(params) {
     businessType,
     orgDescription,
     analysisData,
-    audiences
+    audiences,
+    previousNarration
   } = params;
 
-  const audienceProblems = audiences
-    ?.map(a => a.problem)
-    .filter(Boolean)
-    .slice(0, 3) || [];
+  // Build rich audience context with search volume, competition, and problems
+  const audienceContext = audiences
+    ?.map((a, i) => {
+      // Extract business value data (search volume, competition)
+      const businessValue = a.business_value || {};
+      const searchVolume = businessValue.searchVolume || businessValue.search_volume || 'Unknown';
+      const competition = businessValue.competition || 'Unknown';
+
+      return `${i + 1}. ${a.target_segment}
+   Problem: ${a.customer_problem || 'N/A'}
+   Search Volume: ${searchVolume}/month
+   Competition: ${competition}`;
+    })
+    .join('\n') || 'No audiences available';
 
   console.log('📊 [NARRATION] Audience context:', {
     businessName,
     businessType,
     audienceCount: audiences?.length || 0,
-    problemCount: audienceProblems.length,
-    hasAnalysisData: !!analysisData
+    hasAnalysisData: !!analysisData,
+    hasPreviousNarration: !!previousNarration
   });
 
-  const prompt = `You are a business consultant. This is PART 2 of your presentation (continuing from analysis findings).
+  const prompt = `You are a business consultant. This is PART 2 of your presentation.
 
 Business: ${businessName} (${businessType || 'Not specified'})
+Previous narration: "${previousNarration || 'Analysis complete'}"
 
 Audience Segments Found (${audiences?.length || 0}):
-${audienceProblems.map((p, i) => `${i + 1}. ${p}`).join('\n')}
+${audienceContext}
 
-Write the next statement (1-2 sentences, max 130 chars) that:
-- Introduces the ${audiences?.length || 0} audience segments you discovered
-- Explains WHY they fit the target market (shared characteristics or behaviors)
-- Asks which one to focus on
-- NO quotes, NO exclamation marks, NO flowery words
-- Keep the same consultant perspective as Part 1
+Write a concise introduction (2-3 sentences, max 200 chars) that:
+- Continues naturally from previous narration
+- Introduces ${audiences?.length || 0} segments by SUMMARIZING the key pattern:
+  * What types of people/problems they represent (e.g., "small businesses to startups seeking growth")
+  * Overall search interest level (High, Medium, or Low based on the data)
+  * General competition range (Low, Medium, or High)
+- Then asks which one to focus on
+- NO quotes, NO exclamation marks, NO conversion scores, maintain consultant tone
+- Do NOT list all audiences individually - summarize the overall opportunity
+- Do NOT make up specific explanations about WHO is competing or WHY - just state the levels
 
-WRONG: "I found 5 audiences struggling with X, Y, Z" (just lists problems)
-RIGHT: "I found ${audiences?.length || 0} distinct audiences that fit your target market because they both [specific shared trait] and [specific behavior]. Which one should we focus on?"
+WRONG: "Competition is low to medium from generic blogs creating opportunities" - making up WHO competes
+RIGHT: "I found 5 audiences from small businesses to startups seeking growth, with high search interest and low to medium competition. Which should we focus on?"
 
-Direct and factual. This continues your presentation and leads to showing topics next.`;
+Be concise and factual. Only use the data provided - don't infer or explain competition sources.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -150,7 +166,7 @@ Direct and factual. This continues your presentation and leads to showing topics
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
+      max_tokens: 200,
       temperature: 0.7,
     });
 
@@ -188,7 +204,8 @@ export async function generateTopicNarration(params) {
     businessName,
     businessType,
     orgDescription,
-    selectedAudience
+    selectedAudience,
+    previousNarration
   } = params;
 
   const audience = selectedAudience;
@@ -196,32 +213,46 @@ export async function generateTopicNarration(params) {
   const problem = audience?.problem || 'content challenges';
   const pitch = audience?.pitch || null;
 
+  // Extract search volume and competition from business_value
+  const businessValue = audience?.business_value || {};
+  const searchVolume = businessValue.searchVolume || businessValue.search_volume || 'Unknown';
+  const competition = businessValue.competition || 'Unknown';
+
   console.log('📊 [NARRATION] Topic context:', {
     businessName,
     businessType,
     audienceSegment,
     hasProblem: !!problem,
     hasPitch: !!pitch,
-    hasValue: !!audience?.value
+    hasValue: !!audience?.business_value,
+    searchVolume,
+    competition,
+    hasPreviousNarration: !!previousNarration
   });
 
   const prompt = `You are a business consultant. This is PART 3 (final) of your presentation.
 
-They selected: ${audienceSegment}
-Their problem: ${problem}
+Previous narration: "${previousNarration || 'Audience selected'}"
 
-Write the final statement (1-2 sentences, max 120 chars) that:
-- Acknowledges their audience choice briefly
-- Introduces topic recommendations with specific REASONS they'll drive results
-- NOT generic phrases like "content challenges" or "help with"
-- Explain WHY (e.g., "high search volume", "addresses pain point", "drives conversions")
-- NO quotes, NO exclamation marks
+Selected Audience: ${audienceSegment}
+- Problem: ${problem}
+- Search Volume: ${searchVolume}
+- Competition: ${competition}
+
+Write the final statement (2-3 sentences, max 180 chars) that:
+- Continues naturally from previous narration
+- Introduces topics that address their specific pain point
+- Mentions the search volume level (High, Medium, or Low)
+- States the competition level (Low, Medium, or High)
+- Shows these topics will help attract their target audience
+- NO quotes, NO exclamation marks, NO conversion scores
 - Maintain same professional tone from Parts 1 & 2
+- Do NOT make up explanations about WHO is competing or WHY there's opportunity
 
-WRONG: "Here are topics to address content challenges" (generic, no reasoning)
-RIGHT: "For ${audienceSegment}, here are blog ideas that should drive results because they [specific reason like "target high-volume searches"] and [specific reason like "address their main pain point"]. Which one should we write?"
+WRONG: "Topics face low competition from generic blogs creating opportunities" - making up competitors
+RIGHT: "For Safety Managers, topics on incident prevention show high search volume with medium competition, directly addressing their reporting needs."
 
-Direct and factual. This completes your 3-part presentation.`;
+Be concise and factual. Only use the provided data. This completes your 3-part presentation.`;
 
   console.log('💬 [NARRATION] Prompt length:', prompt.length, 'characters');
 
@@ -230,7 +261,7 @@ Direct and factual. This completes your 3-part presentation.`;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 100,
+      max_tokens: 180,
       temperature: 0.7,
     });
 
