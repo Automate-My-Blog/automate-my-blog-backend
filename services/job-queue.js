@@ -16,9 +16,6 @@ import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 const QUEUE_NAME = 'amb-jobs';
 const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample'];
 
-/** Allowed job status values (matches DB constraint). */
-export const JOB_STATUSES = Object.freeze(['queued', 'running', 'succeeded', 'failed']);
-
 /** Only failed jobs can be retried. */
 export const RETRIABLE_STATUS = 'failed';
 /** Only queued or running jobs can be cancelled (worker checks cancelled_at). */
