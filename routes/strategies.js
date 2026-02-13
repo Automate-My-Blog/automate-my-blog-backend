@@ -11,6 +11,13 @@ import DatabaseAuthService from '../services/auth-database.js';
 const router = express.Router();
 const authService = new DatabaseAuthService();
 
+// In-memory cache for sample content ideas
+// Key format: sample-ideas-${strategyId}
+// Value: { ideas: string[], timestamp: number }
+// TTL: 1 week (604800000ms)
+const sampleIdeasCache = new Map();
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+
 /**
  * GET /api/v1/strategies/:id/pitch
  * Generate LLM-powered pitch and pricing rationale for a strategy
@@ -93,6 +100,120 @@ router.get('/:id/pitch', async (req, res) => {
       content: error.message || 'Failed to generate strategy pitch'
     })}\n\n`);
     res.end();
+  }
+});
+
+/**
+ * POST /api/v1/strategies/:id/sample-content-ideas
+ * Generate 3 sample content ideas as a teaser for strategies with empty content calendars
+ * Authentication: Token required via Authorization header
+ * Caching: Results cached for 1 week to reduce API costs
+ */
+router.post('/:id/sample-content-ideas', async (req, res) => {
+  const { id } = req.params;
+
+  // Validate auth token from Authorization header
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: No token provided' });
+  }
+
+  const token = authHeader.substring(7);
+  let userId = null;
+
+  try {
+    const decoded = authService.verifyToken(token);
+    userId = decoded?.userId;
+  } catch (error) {
+    console.warn('⚠️ Invalid auth token for sample ideas:', error.message);
+    return res.status(401).json({ success: false, error: 'Unauthorized: Invalid token' });
+  }
+
+  if (!userId) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Invalid user' });
+  }
+
+  console.log(`💡 Sample content ideas request: strategyId=${id}, userId=${userId}`);
+
+  try {
+    // Check cache first
+    const cacheKey = `sample-ideas-${id}`;
+    const cached = sampleIdeasCache.get(cacheKey);
+
+    if (cached) {
+      const age = Date.now() - cached.timestamp;
+      if (age < CACHE_TTL_MS) {
+        console.log(`✅ Returning cached sample ideas (age: ${Math.round(age / 3600000)}h)`);
+        return res.json({
+          success: true,
+          sampleIdeas: cached.ideas,
+          isTeaser: true,
+          totalIdeasAvailable: 30,
+          cached: true
+        });
+      } else {
+        // Cache expired, remove it
+        sampleIdeasCache.delete(cacheKey);
+        console.log('🗑️ Cache expired, regenerating sample ideas');
+      }
+    }
+
+    // Fetch strategy data from audiences table
+    const strategyQuery = 'SELECT * FROM audiences WHERE id = $1';
+    const strategyResult = await db.query(strategyQuery, [id]);
+
+    if (!strategyResult.rows || strategyResult.rows.length === 0) {
+      console.warn(`⚠️ Strategy not found: ${id}`);
+      return res.status(404).json({ success: false, error: 'Strategy not found' });
+    }
+
+    const strategyData = strategyResult.rows[0];
+    console.log(`✅ Found strategy: ${strategyData.id}`);
+
+    // Generate sample ideas using OpenAI
+    console.log('💡 Generating sample content ideas via OpenAI...');
+    const sampleIdeas = await openaiService.generateSampleContentIdeas(strategyData);
+
+    if (!sampleIdeas || !Array.isArray(sampleIdeas) || sampleIdeas.length !== 3) {
+      console.error('❌ Invalid sample ideas returned from OpenAI service');
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to generate sample ideas'
+      });
+    }
+
+    // Cache the result
+    sampleIdeasCache.set(cacheKey, {
+      ideas: sampleIdeas,
+      timestamp: Date.now()
+    });
+
+    console.log('✅ Sample ideas generated and cached successfully');
+
+    // Return response
+    res.json({
+      success: true,
+      sampleIdeas: sampleIdeas,
+      isTeaser: true,
+      totalIdeasAvailable: 30
+    });
+
+  } catch (error) {
+    console.error('❌ Sample content ideas generation error:', error);
+
+    // Return generic fallback ideas on error
+    const fallbackIdeas = [
+      'Content idea tailored to your target audience',
+      'Strategic blog post based on your keywords',
+      'SEO-optimized article for your niche'
+    ];
+
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate sample ideas',
+      sampleIdeas: fallbackIdeas,
+      fallback: true
+    });
   }
 });
 

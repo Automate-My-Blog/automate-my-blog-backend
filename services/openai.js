@@ -2696,6 +2696,134 @@ IMPORTANT: These are AI-estimated projections based on market research. Present 
       throw error;
     }
   }
+
+  /**
+   * Generate 3 sample content ideas as a teaser for strategies with empty content calendars
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {Promise<string[]>} - Array of 3 sample content idea titles
+   */
+  async generateSampleContentIdeas(strategyData) {
+    try {
+      console.log('💡 Generating sample content ideas for strategy:', strategyData.id);
+
+      // Parse strategy data to extract key information
+      const targetSegment = strategyData.target_segment || {};
+      const demographics = targetSegment.demographics || strategyData.customer_problem || 'target audience';
+      const customerProblem = strategyData.customer_problem || 'their challenges';
+
+      // Parse customer_language (stored as JSON string or array)
+      let keywords = [];
+      if (strategyData.customer_language) {
+        try {
+          keywords = typeof strategyData.customer_language === 'string'
+            ? JSON.parse(strategyData.customer_language)
+            : strategyData.customer_language;
+          if (!Array.isArray(keywords)) keywords = [];
+        } catch (e) {
+          console.warn('Failed to parse customer_language:', e.message);
+          keywords = [];
+        }
+      }
+
+      const topKeywords = keywords.slice(0, 5).join(', ') || 'relevant keywords';
+
+      // Build OpenAI prompt for 3 SEO-optimized titles
+      const prompt = `You are an SEO content strategist. Generate exactly 3 blog post titles for the following target audience and topic.
+
+**Target Audience:** ${demographics}
+**Customer Problem:** ${customerProblem}
+**Focus Keywords:** ${topKeywords}
+
+**Requirements:**
+- Create 3 SEO-optimized blog post titles
+- Each title should feel current and trend-aware
+- Use formats like "How to...", "X Ways to...", "Guide to...", "Why [current trend]..."
+- Maximum 60 characters per title for SEO optimization
+- Titles should directly address the customer problem and appeal to the target audience
+- Make them actionable and compelling
+
+**CRITICAL:** Return ONLY a valid JSON array with exactly 3 strings. No explanation, no markdown, just the JSON array.
+
+Example format:
+["Title 1 here", "Title 2 here", "Title 3 here"]`;
+
+      console.log('📤 Sending request to OpenAI for sample ideas...');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an SEO content strategist. Return only valid JSON arrays as requested.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 300
+      });
+
+      const responseText = completion.choices[0]?.message?.content?.trim();
+
+      if (!responseText) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      console.log('📥 Received response from OpenAI');
+
+      // Parse JSON response
+      let sampleIdeas;
+      try {
+        // Remove markdown code blocks if present
+        let cleanResponse = responseText.trim();
+        cleanResponse = cleanResponse.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+
+        sampleIdeas = JSON.parse(cleanResponse);
+
+        // Validate: must be array with exactly 3 strings
+        if (!Array.isArray(sampleIdeas) || sampleIdeas.length !== 3) {
+          throw new Error('Response is not an array of 3 items');
+        }
+
+        // Ensure all items are strings
+        sampleIdeas = sampleIdeas.map(idea => String(idea).trim()).filter(idea => idea.length > 0);
+
+        if (sampleIdeas.length !== 3) {
+          throw new Error('Response does not contain 3 valid strings');
+        }
+
+        console.log('✅ Successfully generated 3 sample content ideas');
+        return sampleIdeas;
+
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse OpenAI response, using fallback ideas:', parseError.message);
+        console.log('Response text:', responseText);
+
+        // Fallback: Generate generic ideas based on strategy data
+        const fallbackIdeas = [
+          `How to ${customerProblem.toLowerCase()}`,
+          `${demographics} Guide to ${keywords[0] || 'success'}`,
+          `5 Ways ${demographics} Can Overcome ${customerProblem}`
+        ];
+
+        return fallbackIdeas;
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to generate sample content ideas:', error);
+
+      // Return generic fallback ideas on any error
+      const genericIdeas = [
+        'Content idea tailored to your target audience',
+        'Strategic blog post based on your keywords',
+        'SEO-optimized article for your niche'
+      ];
+
+      return genericIdeas;
+    }
+  }
 }
 
 export default new OpenAIService();
