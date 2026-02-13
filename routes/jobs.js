@@ -45,15 +45,34 @@ function sessionIdFromUrl(req) {
   }
 }
 
+/** Get query object from URL string (fallback when req.query is empty on GET, e.g. some serverless). */
+function queryFromUrlSync(req) {
+  const url = req.originalUrl || req.url || '';
+  if (!url || typeof url !== 'string') return null;
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return Object.fromEntries(params.entries());
+  } catch {
+    return null;
+  }
+}
+
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
-  const rawSessionId =
+  // Prefer header/body, then req.query, then URL string (EventSource can only send sessionId in URL).
+  let rawSessionId =
     req.headers['x-session-id'] ||
     req.body?.sessionId ||
     req.query?.sessionId ||
     req.query?.sessionid ||
     sessionIdFromUrl(req) ||
     null;
+  if (rawSessionId == null && req.method === 'GET') {
+    const q = queryFromUrlSync(req);
+    if (q) rawSessionId = q.sessionId || q.sessionid || null;
+  }
   const sessionId =
     rawSessionId == null
       ? null
@@ -68,6 +87,10 @@ function getJobContext(req) {
         const q = url.indexOf('?');
         if (q !== -1) token = new URLSearchParams(url.slice(q)).get('token');
       } catch { /* ignore */ }
+    }
+    if (!token && req.method === 'GET') {
+      const q = queryFromUrlSync(req);
+      if (q?.token) token = q.token;
     }
     if (token) {
       try {
