@@ -237,6 +237,45 @@ async function processAnalyzeVoiceSample(jobId, input) {
   return { success: true, voiceSampleId, organizationId };
 }
 
+async function processContentCalendar(jobId, input, context) {
+  const userId = context.userId;
+  if (!userId) throw new Error('content_calendar job requires userId');
+
+  const { strategyIds } = input || {};
+  if (!Array.isArray(strategyIds) || strategyIds.length === 0) {
+    throw new Error('content_calendar job requires non-empty strategyIds in input');
+  }
+
+  await updateJobProgress(jobId, {
+    progress: 5,
+    current_step: 'Generating 30-day content calendar...',
+    estimated_seconds_remaining: 60
+  }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 5,
+    currentStep: 'Generating 30-day content calendar...',
+    estimatedTimeRemaining: 60
+  });
+
+  const { generateContentCalendarsForStrategies } = await import('../services/content-calendar-service.js');
+  const { results } = await generateContentCalendarsForStrategies(strategyIds);
+
+  const succeeded = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success);
+
+  if (failed.length > 0) {
+    console.warn(`content_calendar job: ${failed.length} strategy(ies) failed:`, failed.map((f) => f.strategyId));
+  }
+
+  return {
+    success: succeeded > 0,
+    strategyCount: strategyIds.length,
+    succeeded,
+    failed: failed.length,
+    results
+  };
+}
+
 const processor = async (bullJob) => {
   const { jobId } = bullJob.data;
   const row = await getJobRow(jobId);
@@ -286,6 +325,8 @@ const processor = async (bullJob) => {
       result = await processContentGeneration(jobId, input, context);
     } else if (row.type === 'analyze_voice_sample') {
       result = await processAnalyzeVoiceSample(jobId, input);
+    } else if (row.type === 'content_calendar') {
+      result = await processContentCalendar(jobId, input, context);
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }

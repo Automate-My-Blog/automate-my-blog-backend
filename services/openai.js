@@ -839,6 +839,92 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
   }
 
   /**
+   * Generate 30-day content calendar ideas for a strategy/audience.
+   * Used when user subscribes to a strategy (Issue #270).
+   * @param {Object} audience - Audience/strategy row: target_segment, customer_problem, business_value, conversion_path
+   * @param {Object} orgContext - { businessType, targetAudience, contentFocus, brandVoice? }
+   * @param {Array<{keyword: string, search_volume?: number}>} seoKeywords - From seo_keywords table
+   * @returns {Promise<Array<{dayNumber: number, title: string, searchIntent?: string, format?: string, keywords?: string[]}>>}
+   */
+  async generateContentCalendarIdeas(audience, orgContext = {}, seoKeywords = []) {
+    const model = process.env.OPENAI_CALENDAR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const targetSegment = typeof audience.target_segment === 'string'
+      ? (() => { try { return JSON.parse(audience.target_segment); } catch { return {}; } })()
+      : (audience.target_segment || {});
+    const demographics = targetSegment.demographics || targetSegment.psychographics || 'target audience';
+    const customerProblem = audience.customer_problem || 'content needs';
+    const businessValue = typeof audience.business_value === 'string'
+      ? (() => { try { return JSON.parse(audience.business_value); } catch { return {}; } })()
+      : (audience.business_value || {});
+    const keywordList = seoKeywords.slice(0, 15).map((k) => k.keyword || k).filter(Boolean);
+    const keywordStr = keywordList.length > 0 ? `\nSEO keywords to weave in: ${keywordList.join(', ')}` : '';
+
+    const prompt = `Generate exactly 30 unique blog post ideas for a 30-day content calendar.
+
+AUDIENCE:
+- Demographics/Target: ${demographics}
+- Customer problem: ${customerProblem}
+- Business value: ${JSON.stringify(businessValue).slice(0, 200)}
+
+ORGANIZATION CONTEXT:
+- Business type: ${orgContext.businessType || 'Business'}
+- Target audience: ${orgContext.targetAudience || 'General'}
+- Content focus: ${orgContext.contentFocus || 'Customer solutions'}
+${keywordStr}
+
+REQUIREMENTS:
+- 30 unique ideas, one per day (dayNumber 1-30)
+- Mix formats: how-to, listicle, guide, case-study, comparison, checklist
+- SEO-optimized titles (50-60 chars ideal)
+- Varied topics; no duplicates or near-duplicates
+- Align with customer problem and conversion path
+- Use natural search language people type into Google
+
+Return a JSON array only, no other text:
+[
+  {"dayNumber": 1, "title": "SEO-friendly title here", "searchIntent": "why they search", "format": "how-to", "keywords": ["key1", "key2"]},
+  {"dayNumber": 2, "title": "...", "searchIntent": "...", "format": "listicle", "keywords": []},
+  ...
+]`;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a content strategist. Return only valid JSON arrays. No markdown, no explanation.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4500
+      });
+
+      const response = completion.choices[0]?.message?.content;
+      if (!response) throw new Error('Empty OpenAI response');
+
+      let ideas = this.parseOpenAIResponse(response);
+      if (!Array.isArray(ideas)) {
+        ideas = ideas?.ideas ?? ideas?.contentIdeas ?? ideas?.calendar ?? [];
+      }
+      if (!Array.isArray(ideas) || ideas.length < 30) {
+        console.warn(`generateContentCalendarIdeas: got ${ideas?.length ?? 0} ideas, expected 30`);
+      }
+      return (ideas || []).slice(0, 30).map((item, i) => ({
+        dayNumber: item.dayNumber ?? i + 1,
+        title: item.title || `Post idea ${i + 1}`,
+        searchIntent: item.searchIntent,
+        format: item.format,
+        keywords: Array.isArray(item.keywords) ? item.keywords : []
+      }));
+    } catch (error) {
+      console.error('generateContentCalendarIdeas error:', error);
+      throw new Error(`Failed to generate content calendar: ${error.message}`);
+    }
+  }
+
+  /**
    * Generate and stream topic narrative in the background. Does not block topic stream.
    * Events: topic-chunk (per word), topic-complete-narrative.
    * @param {string} connectionId
