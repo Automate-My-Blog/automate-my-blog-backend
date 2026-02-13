@@ -9,6 +9,7 @@ import * as jobQueue from '../services/job-queue.js';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -85,15 +86,16 @@ function sendJobError(res, e, defaultMessage = 'Internal error') {
       message: 'User not found; token may be for a deleted or invalid user'
     });
   }
-  if (isRedisUnavailableError(e)) {
+  if (e instanceof ServiceUnavailableError || isRedisUnavailableError(e)) {
     return res.status(503).json({
       success: false,
       error: 'Service unavailable',
       message: e.message || 'Job queue is not configured (REDIS_URL required)'
     });
   }
-  if (isBadRequestError(e)) {
-    return res.status(400).json({
+  if (e instanceof InvariantViolation || isBadRequestError(e)) {
+    const statusCode = e instanceof InvariantViolation && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 400;
+    return res.status(statusCode).json({
       success: false,
       error: 'Bad request',
       message: e.message || 'Bad request'
