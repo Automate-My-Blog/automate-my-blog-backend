@@ -32,6 +32,19 @@ async function getJobStatusWithRetry(jobId, ctx) {
   return null;
 }
 
+/** Parse sessionId from request URL (fallback when req.query not populated, e.g. Vercel serverless). */
+function sessionIdFromUrl(req) {
+  const url = req.originalUrl || req.url || '';
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return params.get('sessionId') || params.get('sessionid') || null;
+  } catch {
+    return null;
+  }
+}
+
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
   const rawSessionId =
@@ -39,6 +52,7 @@ function getJobContext(req) {
     req.body?.sessionId ||
     req.query?.sessionId ||
     req.query?.sessionid ||
+    sessionIdFromUrl(req) ||
     null;
   const sessionId =
     rawSessionId == null
@@ -46,12 +60,22 @@ function getJobContext(req) {
       : (Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId)
         .toString()
         .trim() || null;
-  if (!userId && req.query?.token) {
-    try {
-      const decoded = authService.verifyToken(String(req.query.token).trim());
-      if (decoded?.userId) userId = decoded.userId;
-    } catch {
-      // leave userId null
+  if (!userId) {
+    let token = req.query?.token ?? null;
+    if (!token && (req.originalUrl || req.url || '').includes('token=')) {
+      try {
+        const url = req.originalUrl || req.url || '';
+        const q = url.indexOf('?');
+        if (q !== -1) token = new URLSearchParams(url.slice(q)).get('token');
+      } catch { /* ignore */ }
+    }
+    if (token) {
+      try {
+        const decoded = authService.verifyToken(String(token).trim());
+        if (decoded?.userId) userId = decoded.userId;
+      } catch {
+        // leave userId null
+      }
     }
   }
   return { userId, sessionId };
