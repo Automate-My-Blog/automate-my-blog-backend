@@ -9,6 +9,7 @@ import * as jobQueue from '../services/job-queue.js';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -64,24 +65,37 @@ router.get('/', (req, res) => {
   res.json({ ok: true, message: 'Jobs API', endpoints: ['POST /website-analysis', 'POST /content-generation', 'GET /:jobId/status', 'GET /:jobId/stream', 'GET /:jobId/narrative-stream', 'POST /:jobId/retry', 'POST /:jobId/cancel'] });
 });
 
+function isUserNotFoundError(e) {
+  return e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey');
+}
+
+function isRedisUnavailableError(e) {
+  return e.message?.includes('REDIS_URL');
+}
+
+function isBadRequestError(e) {
+  return e.statusCode === 400;
+}
+
 /** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
 function sendJobError(res, e, defaultMessage = 'Internal error') {
-  if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
+  if (isUserNotFoundError(e)) {
     return res.status(401).json({
       success: false,
       error: 'Unauthorized',
       message: 'User not found; token may be for a deleted or invalid user'
     });
   }
-  if (e.message?.includes('REDIS_URL')) {
+  if (e instanceof ServiceUnavailableError || isRedisUnavailableError(e)) {
     return res.status(503).json({
       success: false,
       error: 'Service unavailable',
       message: e.message || 'Job queue is not configured (REDIS_URL required)'
     });
   }
-  if (e.statusCode === 400) {
-    return res.status(400).json({
+  if (e instanceof InvariantViolation || isBadRequestError(e)) {
+    const statusCode = e instanceof InvariantViolation && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 400;
+    return res.status(statusCode).json({
       success: false,
       error: 'Bad request',
       message: e.message || 'Bad request'

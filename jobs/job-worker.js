@@ -1,5 +1,5 @@
 /**
- * BullMQ worker for async jobs: website_analysis, content_generation.
+ * BullMQ worker for async jobs: website_analysis, content_generation, analyze_voice_sample.
  * Run as a separate process: node jobs/job-worker.js
  * Requires REDIS_URL and DATABASE_URL.
  */
@@ -227,6 +227,16 @@ async function processContentGeneration(jobId, input, context) {
   };
 }
 
+async function processAnalyzeVoiceSample(jobId, input) {
+  const { voiceSampleId, organizationId } = input || {};
+  if (!voiceSampleId || !organizationId) {
+    throw new Error('analyze_voice_sample job requires voiceSampleId and organizationId in input');
+  }
+  const { default: voiceAnalyzerService } = await import('../services/voice-analyzer.js');
+  await voiceAnalyzerService.analyzeVoiceSample(voiceSampleId);
+  return { success: true, voiceSampleId, organizationId };
+}
+
 const processor = async (bullJob) => {
   const { jobId } = bullJob.data;
   const row = await getJobRow(jobId);
@@ -274,6 +284,8 @@ const processor = async (bullJob) => {
       result = await processWebsiteAnalysis(jobId, input, context);
     } else if (row.type === 'content_generation') {
       result = await processContentGeneration(jobId, input, context);
+    } else if (row.type === 'analyze_voice_sample') {
+      result = await processAnalyzeVoiceSample(jobId, input);
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }

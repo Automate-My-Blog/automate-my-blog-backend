@@ -45,12 +45,14 @@ import strategyRoutes from './routes/strategies.js';
 import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
+import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
 import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse } from './lib/errors.js';
 import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
+import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
 
 // Load environment variables
 dotenv.config();
@@ -87,30 +89,35 @@ const allowedOriginList = [
 const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allAllowedOrigins = [...allowedOriginList, ...extraOrigins];
 
-function corsOrigin(origin, callback) {
-  if (!origin) return callback(null, true);
-  if (allAllowedOrigins.includes(origin)) return callback(null, true);
-  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return callback(null, true);
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const u = new URL(origin);
-      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return callback(null, true);
-    } catch (_) { /* ignore */ }
-  }
-  callback(null, false);
+function isInAllowList(origin) {
+  return allAllowedOrigins.includes(origin);
 }
 
-function isOriginAllowed(origin) {
-  if (!origin) return false;
-  if (allAllowedOrigins.includes(origin)) return true;
-  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return true;
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const u = new URL(origin);
-      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
-    } catch (_) { /* ignore */ }
+function isVercelPreviewOrigin(origin) {
+  return origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'));
+}
+
+function isLocalhostInDevelopment(origin) {
+  if (process.env.NODE_ENV !== 'development') return false;
+  try {
+    const u = new URL(origin);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  } catch {
+    return false;
   }
+}
+
+/** Single source of truth for CORS origin allow. */
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (isInAllowList(origin)) return true;
+  if (isVercelPreviewOrigin(origin)) return true;
+  if (isLocalhostInDevelopment(origin)) return true;
   return false;
+}
+
+function corsOrigin(origin, callback) {
+  callback(null, isOriginAllowed(origin));
 }
 
 // Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
@@ -152,21 +159,29 @@ const limiter = rateLimit({
 
 app.use(limiter);
 
+function isStripeWebhook(req) {
+  return req.method === 'POST' && req.url === '/api/v1/stripe/webhook';
+}
+
+function isJsonSyntaxError(err) {
+  return err instanceof SyntaxError && err.status === 400 && 'body' in err;
+}
+
 // Body parsing - raw for webhook, JSON for everything else
 app.use((req, res, next) => {
-  if (req.method === 'POST' && req.url === '/api/v1/stripe/webhook') {
+  if (isStripeWebhook(req)) {
     express.raw({ type: 'application/json' })(req, res, next);
-  } else {
-    express.json({ limit: '10mb' })(req, res, (err) => {
-      if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-        return res.status(400).json({
-          error: 'Invalid JSON format',
-          message: 'The request body contains malformed JSON'
-        });
-      }
-      next(err);
-    });
+    return;
   }
+  express.json({ limit: '10mb' })(req, res, (err) => {
+    if (err && isJsonSyntaxError(err)) {
+      return res.status(400).json({
+        error: 'Invalid JSON format',
+        message: 'The request body contains malformed JSON'
+      });
+    }
+    next(err);
+  });
 });
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -179,6 +194,7 @@ app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), u
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
+app.use('/api/v1/voice-samples', authService.authMiddleware.bind(authService), voiceSamplesRoutes);
 app.use('/api/v1/stream', registerStreamRoute(authService));
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
@@ -511,23 +527,25 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
   }
 });
 
+function isInfrastructureError(error) {
+  const codes = ['28000', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', '57P01'];
+  return error?.code != null && codes.includes(String(error.code));
+}
+
 // Get current user endpoint
 app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const user = await authService.getUserById(req.user.userId);
-
     res.json({
       success: true,
       user
     });
-
   } catch (error) {
     console.error('Get user error:', error);
-    // Return 500 for infrastructure/DB errors, 404 for user-not-found
-    const isServerError = error.code === '28000' || error.code === 'ECONNREFUSED' ||
-      error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === '57P01';
-    res.status(isServerError ? 500 : 404).json({
-      error: isServerError ? 'Service unavailable' : 'User not found',
+    const statusCode = isInfrastructureError(error) ? 500 : 404;
+    const errorLabel = isInfrastructureError(error) ? 'Service unavailable' : 'User not found';
+    res.status(statusCode).json({
+      error: errorLabel,
       message: error.message
     });
   }
@@ -2071,21 +2089,14 @@ app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), asyn
 // Create new blog post
 app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
-    const { title, content, topic, businessInfo, status = 'draft' } = req.body;
-
-    if (!title || !content) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'title and content are required'
-      });
-    }
+    const parsed = validateCreateBlogPostBody(req.body);
 
     const savedPost = await contentService.saveBlogPost(req.user.userId, {
-      title,
-      content,
-      topic,
-      businessInfo,
-      status
+      title: parsed.title,
+      content: parsed.content,
+      topic: parsed.topic,
+      businessInfo: parsed.businessInfo,
+      status: parsed.status
     });
 
     res.status(201).json({
@@ -2119,19 +2130,7 @@ app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), 
 app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, content, status } = req.body;
-
-    const updates = {};
-    if (title !== undefined) updates.title = title;
-    if (content !== undefined) updates.content = content;
-    if (status !== undefined) updates.status = status;
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({
-        error: 'No updates provided',
-        message: 'At least one field (title, content, status) must be provided'
-      });
-    }
+    const updates = validateUpdateBlogPostBody(req.body);
 
     const updatedPost = await contentService.updateBlogPost(id, req.user.userId, updates);
 

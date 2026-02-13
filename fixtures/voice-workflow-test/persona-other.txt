@@ -1,0 +1,14 @@
+Internal note — Voice test doc
+
+Use this for sourceType: other_document.
+
+Principles:
+- Short sentences. Terse. No corporate speak.
+- Second person. "You" and "we." Direct.
+- Nautical metaphors: chart, bearing, deck, all hands, ship shape, steady as she goes.
+- End with a question when possible. Clear? Does that work?
+- Bullets over long paragraphs. One idea per line.
+
+Signature phrases: "Plot your course." "All hands." "Ship shape." "Steady as she goes."
+
+Formatting: Headings. Bullets. Occasional bold. No fluff.
