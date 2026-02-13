@@ -91,13 +91,14 @@ function ensureRedis() {
 
 /**
  * Ownership: caller has access if they match by user_id or by session_id. 404 if no match.
+ * Compare as strings so query/header sessionId and DB session_id (e.g. UUID) match reliably.
  */
 async function getJobForAccess(jobId, { userId, sessionId }) {
   const q = await db.query(`SELECT * FROM jobs WHERE id = $1`, [jobId]);
   const row = q.rows[0];
   if (!row) return null;
-  const ownByUser = userId != null && row.user_id === userId;
-  const ownBySession = sessionId != null && row.session_id === sessionId;
+  const ownByUser = userId != null && String(row.user_id) === String(userId);
+  const ownBySession = sessionId != null && sessionId !== '' && String(row.session_id) === String(sessionId);
   const hasAccess = ownByUser || ownBySession;
   if (!hasAccess) return null;
   return row;
