@@ -2647,37 +2647,32 @@ Use their specific emotional state and urgency to justify rates. Plain text only
         ? enriched.topKeywords.slice(0, 5).map(k => `"${k}"`).join(', ')
         : 'customer problem-focused keywords';
 
-      // Build CONCRETE prompt with parsed numbers and transparency
-      const prompt = `As an AI marketing consultant, provide a data-driven analysis of why "${demographics}" is a valuable audience for content creation.
+      // Build CONCRETE prompt with parsed numbers - BULLET FORMAT
+      const prompt = `Provide a concise analysis of this content strategy targeting "${demographics}".
 
-**MARKET DATA (AI-Estimated):**
-- Estimated monthly searches: ${enriched.searchVolume.toLocaleString()} searches
-- Competition level: ${enriched.competitionLabel}
-- Target keywords (${enriched.keywordCount} identified): ${keywordsList}
-- Customer problem: "${enriched.customerProblem}"
+**DATA:**
+- Searches: ${enriched.searchVolume.toLocaleString()}/month
+- Competition: ${enriched.competitionLabel}
+- Problem: "${enriched.customerProblem}"
+- Leads: ${enriched.estimatedLeadsPerMonth}/month
+- ROI: ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x
+- Profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month
 
-**STRATEGIC POSITIONING:**
-${enriched.uniqueAngle}
+**FORMAT (REQUIRED):**
 
-**BUSINESS METRICS (Projected):**
-- Estimated monthly leads: ${enriched.estimatedLeadsPerMonth} (based on ${(enriched.estimatedCTR * 100).toFixed(1)}% CTR × ${(enriched.conversionPotential * 100).toFixed(0)}% conversion)
-- Customer acquisition cost: ~$${enriched.projectedCAC}
-- Projected monthly profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}
-- ROI multiple: ${enriched.roiMultipleLow}x to ${enriched.roiMultipleHigh}x return
+**SUMMARY:**
+[1-2 sentence overview of the opportunity]
 
-**YOUR TASK:**
-Write 2-3 compelling paragraphs in first person ("I identified...") explaining:
+**KEY INSIGHTS:**
+• [Market opportunity insight - mention search volume and competition]
+• [Strategic approach insight - mention customer problem and positioning]
+• [ROI projection insight - mention leads, profit range, and ROI multiple]
 
-1. **Market Opportunity** - Use the SPECIFIC numbers above to explain market size. Reference the estimated ${enriched.searchVolume.toLocaleString()} monthly searches and ${enriched.competitionLabel.toLowerCase()}.
-
-2. **Strategic Approach** - Explain how focusing on "${enriched.customerProblem}" for ${demographics} creates competitive advantage. Reference the ${enriched.keywordCount} target keywords.
-
-3. **Expected Results** - Show the ROI calculation:
-   - ${enriched.searchVolume.toLocaleString()} searches × ${(enriched.estimatedCTR * 100).toFixed(1)}% CTR = ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks/month
-   - ${Math.round(enriched.searchVolume * enriched.estimatedCTR)} clicks × ${(enriched.conversionPotential * 100).toFixed(0)}% conversion = ${enriched.estimatedLeadsPerMonth} leads/month
-   - With ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x ROI, this strategy pays for itself quickly
-
-CRITICAL: Be SPECIFIC with numbers. These are AI estimates based on market research, so present them as projections, not guarantees. Use exact figures provided.`;
+CRITICAL:
+- Use the EXACT format above with headers
+- Keep bullets to ONE sentence each
+- Use SPECIFIC numbers provided
+- Present as projections, not guarantees`;
 
       const stream = await openai.chat.completions.create({
         model: 'gpt-4o',

@@ -405,6 +405,7 @@ class DatabaseAuthService {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        firstLoginAt: null, // Will be set on first login
         organizationName: organization.name,
         organizationId: organization.id,
         organizationRole: 'owner',
@@ -619,6 +620,7 @@ class DatabaseAuthService {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        firstLoginAt: user.first_login_at,
         organizationName: user.organization_name,
         organizationId: user.organization_id,
         organizationRole: user.organization_role,
@@ -704,6 +706,7 @@ class DatabaseAuthService {
           email: user.email,
           firstName: user.first_name,
           lastName: user.last_name,
+          firstLoginAt: user.first_login_at,
           organizationName: user.organization_name,
           organizationId: user.organization_id,
           organizationRole: user.organization_role,
