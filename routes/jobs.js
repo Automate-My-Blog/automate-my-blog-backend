@@ -32,26 +32,73 @@ async function getJobStatusWithRetry(jobId, ctx) {
   return null;
 }
 
+/** Parse sessionId from request URL (fallback when req.query not populated, e.g. Vercel serverless). */
+function sessionIdFromUrl(req) {
+  const url = req.originalUrl || req.url || '';
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return params.get('sessionId') || params.get('sessionid') || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Get query object from URL string (fallback when req.query is empty on GET, e.g. some serverless). */
+function queryFromUrlSync(req) {
+  const url = req.originalUrl || req.url || '';
+  if (!url || typeof url !== 'string') return null;
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return Object.fromEntries(params.entries());
+  } catch {
+    return null;
+  }
+}
+
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
-  const rawSessionId =
+  // Prefer header/body, then req.query, then URL string (EventSource can only send sessionId in URL).
+  let rawSessionId =
     req.headers['x-session-id'] ||
     req.body?.sessionId ||
     req.query?.sessionId ||
     req.query?.sessionid ||
+    sessionIdFromUrl(req) ||
     null;
+  if (rawSessionId == null && req.method === 'GET') {
+    const q = queryFromUrlSync(req);
+    if (q) rawSessionId = q.sessionId || q.sessionid || null;
+  }
   const sessionId =
     rawSessionId == null
       ? null
       : (Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId)
         .toString()
         .trim() || null;
-  if (!userId && req.query?.token) {
-    try {
-      const decoded = authService.verifyToken(String(req.query.token).trim());
-      if (decoded?.userId) userId = decoded.userId;
-    } catch {
-      // leave userId null
+  if (!userId) {
+    let token = req.query?.token ?? null;
+    if (!token && (req.originalUrl || req.url || '').includes('token=')) {
+      try {
+        const url = req.originalUrl || req.url || '';
+        const q = url.indexOf('?');
+        if (q !== -1) token = new URLSearchParams(url.slice(q)).get('token');
+      } catch { /* ignore */ }
+    }
+    if (!token && req.method === 'GET') {
+      const q = queryFromUrlSync(req);
+      if (q?.token) token = q.token;
+    }
+    if (token) {
+      try {
+        const decoded = authService.verifyToken(String(token).trim());
+        if (decoded?.userId) userId = decoded.userId;
+      } catch {
+        // leave userId null
+      }
     }
   }
   return { userId, sessionId };
