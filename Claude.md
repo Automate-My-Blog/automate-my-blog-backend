@@ -60,17 +60,17 @@ Full checklist and details: **docs/STAGING_SETUP.md**.
    Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>"
    ```
 
-5. **Push and merge to staging:**
+5. **Push and create PR to staging:**
    ```bash
    git push -u origin feature/descriptive-name
-   git checkout staging
-   git merge feature/descriptive-name
-   git push origin staging
    ```
+   Then create PR on GitHub: `feature/descriptive-name` → `staging`
 
-6. **Delete feature branch (optional, keeps it clean):**
+6. **After PR is approved and merged:**
    ```bash
-   git branch -d feature/descriptive-name
+   git checkout staging
+   git pull origin staging
+   git branch -d feature/descriptive-name  # Clean up local branch
    ```
 
 ### Exception: Large Net-New Features
@@ -90,9 +90,11 @@ For these cases:
 
 ### Key Rules
 
-- ❌ **NO direct commits to staging** without a feature branch
+- ❌ **NO direct commits to staging** - always use feature branches
+- ❌ **NO direct merges to staging** - always use Pull Requests
 - ❌ **NO bundling multiple unrelated changes** in one branch
 - ❌ **NO long-lived branches** for small changes
 - ✅ **DO create focused branches** for each logical change
-- ✅ **DO merge to staging quickly** to avoid conflicts
-- ✅ **DO keep branches up to date** with staging before merging
+- ✅ **DO create PRs to staging** for all changes (enables review + CI checks)
+- ✅ **DO merge to staging quickly** via PRs to avoid conflicts
+- ✅ **DO keep branches up to date** with staging before creating PR
