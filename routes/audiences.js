@@ -1,8 +1,24 @@
 import express from 'express';
 import db from '../services/database.js';
 import openaiService from '../services/openai.js';
+import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
 const router = express.Router();
+
+/** Parse content_ideas from DB (JSONB can be string or already-parsed array). Returns array or empty array. */
+function parseContentIdeas(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 // Safe JSON parsing to handle corrupted database records with monitoring
 const safeParse = (jsonString, fieldName, recordId) => {
@@ -783,18 +799,22 @@ router.get('/', async (req, res) => {
 
     // Using safeParse function defined at top of file
 
-    const audiences = result.rows.map(row => ({
-      id: row.id,
-      target_segment: safeParse(row.target_segment, 'target_segment', row.id),
-      customer_problem: row.customer_problem,
-      priority: row.priority,
-      pitch: row.pitch,
-      topics_count: parseInt(row.topics_count),
-      keywords_count: parseInt(row.keywords_count),
-      content_calendar_generated_at: row.content_calendar_generated_at,
-      has_content_calendar: Array.isArray(row.content_ideas) && row.content_ideas.length > 0,
-      created_at: row.created_at
-    }));
+    const testbed = isCalendarTestbed(req);
+    const audiences = result.rows.map(row => {
+      const contentIdeasArr = parseContentIdeas(row.content_ideas);
+      return {
+        id: row.id,
+        target_segment: safeParse(row.target_segment, 'target_segment', row.id),
+        customer_problem: row.customer_problem,
+        priority: row.priority,
+        pitch: row.pitch,
+        topics_count: parseInt(row.topics_count),
+        keywords_count: parseInt(row.keywords_count),
+        content_calendar_generated_at: row.content_calendar_generated_at,
+        has_content_calendar: contentIdeasArr.length > 0 || testbed,
+        created_at: row.created_at
+      };
+    });
 
     const response = {
       success: true,
@@ -875,9 +895,11 @@ router.get('/:id', async (req, res) => {
       ORDER BY relevance_score DESC
     `, [id]);
 
-    const contentIdeas = audience.content_ideas != null
-      ? (typeof audience.content_ideas === 'string' ? (() => { try { return JSON.parse(audience.content_ideas); } catch { return null; } })() : audience.content_ideas)
-      : null;
+    let contentIdeas = parseContentIdeas(audience.content_ideas);
+    const testbed = isCalendarTestbed(req);
+    if (testbed && contentIdeas.length === 0) {
+      contentIdeas = getFixtureContentIdeas();
+    }
 
     res.json({
       success: true,
@@ -890,8 +912,8 @@ router.get('/:id', async (req, res) => {
         business_value: safeParse(audience.business_value, 'business_value_get', audience.id),
         priority: audience.priority,
         pitch: audience.pitch,
-        content_ideas: contentIdeas,
-        content_calendar_generated_at: audience.content_calendar_generated_at,
+        content_ideas: contentIdeas.length > 0 ? contentIdeas : null,
+        content_calendar_generated_at: contentIdeas.length > 0 ? (audience.content_calendar_generated_at || (testbed ? new Date().toISOString() : null)) : null,
         created_at: audience.created_at,
         updated_at: audience.updated_at,
         topics: topicsResult.rows,
