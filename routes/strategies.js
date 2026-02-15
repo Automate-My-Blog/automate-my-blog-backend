@@ -239,9 +239,9 @@ router.get('/content-calendar', authService.authMiddleware.bind(authService), as
     const query = `
       SELECT DISTINCT a.*
       FROM audiences a
-      INNER JOIN strategy_subscriptions ss ON a.id = ss.strategy_id
-      WHERE ss.user_id = $1
-        AND ss.status = 'active'
+      INNER JOIN strategy_purchases sp ON a.id = sp.strategy_id
+      WHERE sp.user_id = $1
+        AND sp.status = 'active'
       ORDER BY a.created_at DESC
     `;
 
