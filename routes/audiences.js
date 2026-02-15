@@ -881,12 +881,20 @@ router.get('/:id', async (req, res) => {
 
     const audience = audienceResult.rows[0];
 
-    const topicsResult = await db.query(`
-      SELECT id, title, description, subheader, engagement_score
-      FROM content_topics 
-      WHERE audience_id = $1
-      ORDER BY created_at DESC
-    `, [id]);
+    // content_topics: select only columns in base schema (no 'category' - not in core table)
+    let topicsRows = [];
+    try {
+      const topicsResult = await db.query(`
+        SELECT id, title, description, subheader, engagement_score
+        FROM content_topics
+        WHERE audience_id = $1
+        ORDER BY created_at DESC
+      `, [id]);
+      topicsRows = topicsResult.rows;
+    } catch (topicsErr) {
+      // Schema mismatch (e.g. column "category" does not exist in some DBs)
+      console.warn('content_topics query failed, returning empty topics:', topicsErr?.message);
+    }
 
     const keywordsResult = await db.query(`
       SELECT id, keyword, search_volume, competition, relevance_score
@@ -916,7 +924,7 @@ router.get('/:id', async (req, res) => {
         content_calendar_generated_at: contentIdeas.length > 0 ? (audience.content_calendar_generated_at || (testbed ? new Date().toISOString() : null)) : null,
         created_at: audience.created_at,
         updated_at: audience.updated_at,
-        topics: topicsResult.rows,
+        topics: topicsRows,
         keywords: keywordsResult.rows
       }
     });
