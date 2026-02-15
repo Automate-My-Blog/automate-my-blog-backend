@@ -35,6 +35,13 @@ afterEach(() => {
 });
 
 describe('job-queue', () => {
+  describe('state constants', () => {
+    it('exports retry and cancel transition rules', () => {
+      expect(jobQueue.RETRIABLE_STATUS).toBe('failed');
+      expect(jobQueue.CANCELLABLE_STATUSES).toEqual(['queued', 'running']);
+    });
+  });
+
   describe('createJob', () => {
     it('throws on invalid type', async () => {
       await expect(
@@ -50,12 +57,12 @@ describe('job-queue', () => {
       expect(db.query).not.toHaveBeenCalled();
     });
 
-    it('throws when REDIS_URL missing', async () => {
+    it('throws ServiceUnavailableError when REDIS_URL missing', async () => {
       const orig = process.env.REDIS_URL;
       delete process.env.REDIS_URL;
       await expect(
         jobQueue.createJob('website_analysis', { url: 'https://x.com' }, { sessionId: 's1' })
-      ).rejects.toThrow('REDIS_URL');
+      ).rejects.toMatchObject({ name: 'ServiceUnavailableError', message: expect.stringContaining('REDIS_URL') });
       process.env.REDIS_URL = orig;
     });
 
@@ -110,6 +117,35 @@ describe('job-queue', () => {
       const [, params] = vi.mocked(db.query).mock.calls[1];
       expect(params[2]).toBe(null);
       expect(params[3]).toBe('session_anon_123');
+    });
+  });
+
+  describe('createContentCalendarJob', () => {
+    it('creates content_calendar job with strategyIds', async () => {
+      vi.mocked(db.query)
+        .mockResolvedValueOnce({ rows: [{ id: 'u1' }] }) // createContentCalendarJob user check
+        .mockResolvedValueOnce({ rows: [{ id: 'u1' }] }) // createJob user check
+        .mockResolvedValueOnce({ rows: [], rowCount: 1 }); // INSERT
+      const result = await jobQueue.createContentCalendarJob(['strat-1', 'strat-2'], 'u1');
+      expect(result).not.toBeNull();
+      expect(result.jobId).toBeDefined();
+      expect(mockAdd).toHaveBeenCalledWith('content_calendar', { jobId: result.jobId }, { jobId: result.jobId });
+      const insertCall = vi.mocked(db.query).mock.calls.find((c) => c[0].includes('INSERT INTO jobs'));
+      const params = insertCall[1];
+      const input = JSON.parse(params[5]);
+      expect(input.strategyIds).toEqual(['strat-1', 'strat-2']);
+    });
+
+    it('throws when strategyIds empty', async () => {
+      await expect(
+        jobQueue.createContentCalendarJob([], 'u1')
+      ).rejects.toThrow('non-empty strategyIds');
+    });
+
+    it('throws when userId missing', async () => {
+      await expect(
+        jobQueue.createContentCalendarJob(['s1'], null)
+      ).rejects.toThrow('userId');
     });
   });
 
@@ -177,13 +213,15 @@ describe('job-queue', () => {
       expect(out).toBeNull();
     });
 
-    it('throws when job not failed', async () => {
+    it('throws InvariantViolation when job not failed', async () => {
       vi.mocked(db.query).mockResolvedValue({
         rows: [{ id: 'j1', user_id: 'u1', session_id: null, status: 'running', type: 'website_analysis' }],
       });
-      await expect(jobQueue.retryJob('j1', { userId: 'u1' })).rejects.toMatchObject(
-        { message: 'Job is not in failed state', statusCode: 400 }
-      );
+      await expect(jobQueue.retryJob('j1', { userId: 'u1' })).rejects.toMatchObject({
+        name: 'InvariantViolation',
+        message: 'Job is not in failed state',
+        statusCode: 400,
+      });
     });
 
     it('updates row, enqueues, returns jobId', async () => {
@@ -206,13 +244,15 @@ describe('job-queue', () => {
       expect(out).toBeNull();
     });
 
-    it('throws when job not cancellable', async () => {
+    it('throws InvariantViolation when job not cancellable', async () => {
       vi.mocked(db.query).mockResolvedValue({
         rows: [{ id: 'j1', user_id: 'u1', session_id: null, status: 'succeeded' }],
       });
-      await expect(jobQueue.cancelJob('j1', { userId: 'u1' })).rejects.toMatchObject(
-        { message: 'Job is not cancellable', statusCode: 400 }
-      );
+      await expect(jobQueue.cancelJob('j1', { userId: 'u1' })).rejects.toMatchObject({
+        name: 'InvariantViolation',
+        message: 'Job is not cancellable',
+        statusCode: 400,
+      });
     });
 
     it('sets cancelled_at and returns { cancelled: true }', async () => {

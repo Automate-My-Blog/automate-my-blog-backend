@@ -154,18 +154,6 @@ export function startEmailScheduler() {
 }
 
 /**
- * Stop all scheduled jobs
- */
-export function stopEmailScheduler() {
-  console.log('🛑 Stopping email campaign scheduler...');
-  scheduledJobs.forEach(job => {
-    job.job.stop();
-  });
-  scheduledJobs = [];
-  console.log('✅ Email campaign scheduler stopped');
-}
-
-/**
  * Get status of all scheduled jobs
  */
 export function getSchedulerStatus() {
@@ -207,7 +195,6 @@ export async function runJob(jobName) {
 
 export default {
   startEmailScheduler,
-  stopEmailScheduler,
   getSchedulerStatus,
   runJob
 };

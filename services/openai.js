@@ -1,8 +1,9 @@
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import analyticsService from './analytics.js';
-import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/index.js';
+import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/website-analysis.js';
 import streamManager from './stream-manager.js';
+import strategyEnrichment from './strategy-enrichment.js';
 
 dotenv.config();
 
@@ -834,6 +835,92 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
     } catch (error) {
       console.error('OpenAI trending topics error:', error);
       throw new Error('Failed to generate trending topics with AI');
+    }
+  }
+
+  /**
+   * Generate 30-day content calendar ideas for a strategy/audience.
+   * Used when user subscribes to a strategy (Issue #270).
+   * @param {Object} audience - Audience/strategy row: target_segment, customer_problem, business_value, conversion_path
+   * @param {Object} orgContext - { businessType, targetAudience, contentFocus, brandVoice? }
+   * @param {Array<{keyword: string, search_volume?: number}>} seoKeywords - From seo_keywords table
+   * @returns {Promise<Array<{dayNumber: number, title: string, searchIntent?: string, format?: string, keywords?: string[]}>>}
+   */
+  async generateContentCalendarIdeas(audience, orgContext = {}, seoKeywords = []) {
+    const model = process.env.OPENAI_CALENDAR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    const targetSegment = typeof audience.target_segment === 'string'
+      ? (() => { try { return JSON.parse(audience.target_segment); } catch { return {}; } })()
+      : (audience.target_segment || {});
+    const demographics = targetSegment.demographics || targetSegment.psychographics || 'target audience';
+    const customerProblem = audience.customer_problem || 'content needs';
+    const businessValue = typeof audience.business_value === 'string'
+      ? (() => { try { return JSON.parse(audience.business_value); } catch { return {}; } })()
+      : (audience.business_value || {});
+    const keywordList = seoKeywords.slice(0, 15).map((k) => k.keyword || k).filter(Boolean);
+    const keywordStr = keywordList.length > 0 ? `\nSEO keywords to weave in: ${keywordList.join(', ')}` : '';
+
+    const prompt = `Generate exactly 30 unique blog post ideas for a 30-day content calendar.
+
+AUDIENCE:
+- Demographics/Target: ${demographics}
+- Customer problem: ${customerProblem}
+- Business value: ${JSON.stringify(businessValue).slice(0, 200)}
+
+ORGANIZATION CONTEXT:
+- Business type: ${orgContext.businessType || 'Business'}
+- Target audience: ${orgContext.targetAudience || 'General'}
+- Content focus: ${orgContext.contentFocus || 'Customer solutions'}
+${keywordStr}
+
+REQUIREMENTS:
+- 30 unique ideas, one per day (dayNumber 1-30)
+- Mix formats: how-to, listicle, guide, case-study, comparison, checklist
+- SEO-optimized titles (50-60 chars ideal)
+- Varied topics; no duplicates or near-duplicates
+- Align with customer problem and conversion path
+- Use natural search language people type into Google
+
+Return a JSON array only, no other text:
+[
+  {"dayNumber": 1, "title": "SEO-friendly title here", "searchIntent": "why they search", "format": "how-to", "keywords": ["key1", "key2"]},
+  {"dayNumber": 2, "title": "...", "searchIntent": "...", "format": "listicle", "keywords": []},
+  ...
+]`;
+
+    try {
+      const completion = await openai.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a content strategist. Return only valid JSON arrays. No markdown, no explanation.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4500
+      });
+
+      const response = completion.choices[0]?.message?.content;
+      if (!response) throw new Error('Empty OpenAI response');
+
+      let ideas = this.parseOpenAIResponse(response);
+      if (!Array.isArray(ideas)) {
+        ideas = ideas?.ideas ?? ideas?.contentIdeas ?? ideas?.calendar ?? [];
+      }
+      if (!Array.isArray(ideas) || ideas.length < 30) {
+        console.warn(`generateContentCalendarIdeas: got ${ideas?.length ?? 0} ideas, expected 30`);
+      }
+      return (ideas || []).slice(0, 30).map((item, i) => ({
+        dayNumber: item.dayNumber ?? i + 1,
+        title: item.title || `Post idea ${i + 1}`,
+        searchIntent: item.searchIntent,
+        format: item.format,
+        keywords: Array.isArray(item.keywords) ? item.keywords : []
+      }));
+    } catch (error) {
+      console.error('generateContentCalendarIdeas error:', error);
+      throw new Error(`Failed to generate content calendar: ${error.message}`);
     }
   }
 
@@ -2090,13 +2177,28 @@ Generate scenarios as JSON array:
       "searchBehavior": "When/how they search (crisis-driven vs planned)"
     },
     "businessValue": {
-      "searchVolume": "e.g., 'High - 3,500/month'",
-      "competition": "Low/Medium/High with gaps",
-      "conversionPotential": "High/Medium/Low",
+      "searchVolumeNumeric": 3500,
+      "searchVolumeLabel": "High",
+      "competitionLevel": "medium",
+      "conversionPotential": 0.35,
+      "dataConfidence": "estimated",
       "priority": 1
     },
     "customerLanguage": ["search phrase 1", "search phrase 2"],
-    "seoKeywords": ["keyword 1", "keyword 2", "keyword 3"],
+    "seoKeywords": [
+      {
+        "keyword": "primary keyword phrase",
+        "searchVolume": 2300,
+        "competition": "low",
+        "relevanceScore": 0.85
+      },
+      {
+        "keyword": "secondary keyword phrase",
+        "searchVolume": 1200,
+        "competition": "medium",
+        "relevanceScore": 0.78
+      }
+    ],
     "conversionPath": "How content leads to business goal",
     "contentIdeas": [
       {
@@ -2107,6 +2209,16 @@ Generate scenarios as JSON array:
     ]
   }
 ]
+
+IMPORTANT - DATA FORMAT REQUIREMENTS:
+- searchVolumeNumeric: INTEGER monthly searches (e.g., 3500, 15000) - use your best estimate from market research
+- searchVolumeLabel: Display label - "Low" (0-1K), "Medium" (1K-10K), "High" (10K+)
+- competitionLevel: LOWERCASE string - must be "low", "medium", or "high"
+- conversionPotential: DECIMAL between 0 and 1 (e.g., 0.35 = 35% conversion potential)
+- dataConfidence: Always set to "estimated" (numbers are AI estimates based on web research)
+- seoKeywords: ARRAY OF OBJECTS with numeric searchVolume for each keyword
+- keyword competition: LOWERCASE - must be "low", "medium", or "high"
+- relevanceScore: DECIMAL between 0 and 1 (how relevant to customer problem)
 
 Return only audiences with strong business potential. If no strong additional audiences exist, return an empty array []. Each scenario must target DIFFERENT demographics from existing audiences. Order by priority (highest value first).`
           }
@@ -2512,6 +2624,298 @@ Use their specific emotional state and urgency to justify rates. Plain text only
     } catch (error) {
       console.warn('⚠️ Failed to extract profit metrics from pitch:', error.message);
       return metrics;
+    }
+  }
+
+  /**
+   * Generate streaming pitch for a strategy (why it's valuable)
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {AsyncIterable<string>} - Async iterable yielding text chunks
+   */
+  async *generateStrategyPitch(strategyData) {
+    try {
+      console.log('🎯 Generating strategy pitch for:', strategyData.id);
+
+      // ENRICH DATA - Extract numbers from structured data and aggregate keywords
+      const enrichedStrategy = await strategyEnrichment.enrichStrategyData(strategyData);
+      const enriched = enrichedStrategy.enrichedData;
+
+      const demographics = enriched.demographics;
+
+      // Build top keywords list
+      const keywordsList = enriched.topKeywords.length > 0
+        ? enriched.topKeywords.slice(0, 5).map(k => `"${k}"`).join(', ')
+        : 'customer problem-focused keywords';
+
+      // Build CONCRETE prompt with parsed numbers - BULLET FORMAT
+      const prompt = `Provide a concise analysis of this content strategy targeting "${demographics}".
+
+**DATA:**
+- Searches: ${enriched.searchVolume.toLocaleString()}/month
+- Competition: ${enriched.competitionLabel}
+- Problem: "${enriched.customerProblem}"
+- Leads: ${enriched.estimatedLeadsPerMonth}/month
+- ROI: ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x
+- Profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month
+
+**FORMAT (REQUIRED):**
+
+**SUMMARY:**
+[1-2 sentence overview of the opportunity]
+
+**KEY INSIGHTS:**
+• [Market opportunity insight - mention search volume and competition]
+• [Strategic approach insight - mention customer problem and positioning]
+• [ROI projection insight - mention leads, profit range, and ROI multiple]
+
+CRITICAL:
+- Use the EXACT format above with headers
+- Keep bullets to ONE sentence each
+- Use SPECIFIC numbers provided
+- Present as projections, not guarantees`;
+
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+        temperature: 0.6,
+        max_tokens: 700
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          yield content;
+        }
+      }
+
+      console.log('✅ Strategy pitch generation complete');
+    } catch (error) {
+      console.error('❌ Failed to generate strategy pitch:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate streaming pricing rationale for a strategy
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {AsyncIterable<string>} - Async iterable yielding text chunks
+   */
+  async *generatePricingRationale(strategyData) {
+    try {
+      console.log('💰 Generating pricing rationale for:', strategyData.id);
+
+      // ENRICH DATA - Extract numbers from structured data and calculate ROI
+      const enrichedStrategy = await strategyEnrichment.enrichStrategyData(strategyData);
+      const enriched = enrichedStrategy.enrichedData;
+
+      const monthlyPrice = strategyData.pricing_monthly || 39.99;
+
+      // Calculate cost per search
+      const costPerThousandSearches = enriched.searchVolume > 0
+        ? ((monthlyPrice / enriched.searchVolume) * 1000).toFixed(2)
+        : 'N/A';
+
+      // Calculate cost per lead
+      const costPerLead = enriched.estimatedLeadsPerMonth > 0
+        ? (monthlyPrice / enriched.estimatedLeadsPerMonth).toFixed(2)
+        : 'N/A';
+
+      // Calculate payback time in weeks
+      const avgMonthlyProfit = (enriched.profitRangeLow + enriched.profitRangeHigh) / 2;
+      const weeksToPayback = avgMonthlyProfit > 0
+        ? Math.round((monthlyPrice / avgMonthlyProfit) * 4)
+        : 'N/A';
+
+      // Check if we have valid metrics to present
+      const hasValidMetrics = enriched.searchVolume > 0 && enriched.estimatedLeadsPerMonth > 0;
+
+      let prompt;
+
+      if (hasValidMetrics) {
+        // Full detailed prompt with metrics
+        prompt = `Write a concise pricing justification (3-4 bullet points max) for this $${monthlyPrice}/month content strategy subscription.
+
+**AVAILABLE METRICS:**
+- Cost per lead: $${costPerLead} (vs ~$${enriched.projectedCAC} industry CAC)
+- Projected profit: $${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}/month
+- ROI: ${enriched.roiMultipleLow}x-${enriched.roiMultipleHigh}x return
+- Payback: ~${weeksToPayback} weeks
+- Market: ${enriched.competitionLabel} competition
+
+**FORMAT:**
+• [Bullet point 1: Cost per lead vs industry CAC]
+• [Bullet point 2: ROI multiple and payback time]
+• [Bullet point 3: Profit projection]
+• [Bullet point 4: Market positioning advantage]
+
+Keep each bullet to ONE concise sentence. NO fluff, NO paragraphs, NO "As the AI consultant" language. Just crisp value statements.`;
+      } else {
+        // Simplified prompt when metrics are unavailable
+        prompt = `Write a concise pricing justification (3 bullet points max) for this $${monthlyPrice}/month content strategy subscription targeting ${enriched.demographics}.
+
+**FOCUS ON:**
+- Strategic value of consistent content for SEO
+- Cost-effective compared to hiring writers or agencies
+- Competitive positioning in ${enriched.competitionLabel.toLowerCase()} market
+
+**FORMAT:**
+• [Bullet 1: SEO and visibility value]
+• [Bullet 2: Cost vs alternatives]
+• [Bullet 3: Competitive advantage]
+
+Keep each bullet to ONE concise sentence. NO fluff, NO "As the AI consultant" language. Just crisp value statements.`;
+      }
+
+      prompt += `\n\nIMPORTANT: Return ONLY bullet points. No introduction, no conclusion, no "AI-estimated" disclaimers. Just the bullets.`;
+
+      const stream = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        stream: true,
+        temperature: 0.5,
+        max_tokens: 500
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          yield content;
+        }
+      }
+
+      console.log('✅ Pricing rationale generation complete');
+    } catch (error) {
+      console.error('❌ Failed to generate pricing rationale:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate 3 sample content ideas as a teaser for strategies with empty content calendars
+   * @param {Object} strategyData - Strategy data from audiences table
+   * @returns {Promise<string[]>} - Array of 3 sample content idea titles
+   */
+  async generateSampleContentIdeas(strategyData) {
+    try {
+      console.log('💡 Generating sample content ideas for strategy:', strategyData.id);
+
+      // Parse strategy data to extract key information
+      const targetSegment = strategyData.target_segment || {};
+      const demographics = targetSegment.demographics || strategyData.customer_problem || 'target audience';
+      const customerProblem = strategyData.customer_problem || 'their challenges';
+
+      // Parse customer_language (stored as JSON string or array)
+      let keywords = [];
+      if (strategyData.customer_language) {
+        try {
+          keywords = typeof strategyData.customer_language === 'string'
+            ? JSON.parse(strategyData.customer_language)
+            : strategyData.customer_language;
+          if (!Array.isArray(keywords)) keywords = [];
+        } catch (e) {
+          console.warn('Failed to parse customer_language:', e.message);
+          keywords = [];
+        }
+      }
+
+      const topKeywords = keywords.slice(0, 5).join(', ') || 'relevant keywords';
+
+      // Build OpenAI prompt for 3 SEO-optimized titles
+      const prompt = `You are an SEO content strategist. Generate exactly 3 blog post titles for the following target audience and topic.
+
+**Target Audience:** ${demographics}
+**Customer Problem:** ${customerProblem}
+**Focus Keywords:** ${topKeywords}
+
+**Requirements:**
+- Create 3 SEO-optimized blog post titles
+- Each title should feel current and trend-aware
+- Use formats like "How to...", "X Ways to...", "Guide to...", "Why [current trend]..."
+- Maximum 60 characters per title for SEO optimization
+- Titles should directly address the customer problem and appeal to the target audience
+- Make them actionable and compelling
+
+**CRITICAL:** Return ONLY a valid JSON array with exactly 3 strings. No explanation, no markdown, just the JSON array.
+
+Example format:
+["Title 1 here", "Title 2 here", "Title 3 here"]`;
+
+      console.log('📤 Sending request to OpenAI for sample ideas...');
+
+      const completion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an SEO content strategist. Return only valid JSON arrays as requested.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 300
+      });
+
+      const responseText = completion.choices[0]?.message?.content?.trim();
+
+      if (!responseText) {
+        throw new Error('Empty response from OpenAI');
+      }
+
+      console.log('📥 Received response from OpenAI');
+
+      // Parse JSON response
+      let sampleIdeas;
+      try {
+        // Remove markdown code blocks if present
+        let cleanResponse = responseText.trim();
+        cleanResponse = cleanResponse.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+
+        sampleIdeas = JSON.parse(cleanResponse);
+
+        // Validate: must be array with exactly 3 strings
+        if (!Array.isArray(sampleIdeas) || sampleIdeas.length !== 3) {
+          throw new Error('Response is not an array of 3 items');
+        }
+
+        // Ensure all items are strings
+        sampleIdeas = sampleIdeas.map(idea => String(idea).trim()).filter(idea => idea.length > 0);
+
+        if (sampleIdeas.length !== 3) {
+          throw new Error('Response does not contain 3 valid strings');
+        }
+
+        console.log('✅ Successfully generated 3 sample content ideas');
+        return sampleIdeas;
+
+      } catch (parseError) {
+        console.warn('⚠️ Failed to parse OpenAI response, using fallback ideas:', parseError.message);
+        console.log('Response text:', responseText);
+
+        // Fallback: Generate generic ideas based on strategy data
+        const fallbackIdeas = [
+          `How to ${customerProblem.toLowerCase()}`,
+          `${demographics} Guide to ${keywords[0] || 'success'}`,
+          `5 Ways ${demographics} Can Overcome ${customerProblem}`
+        ];
+
+        return fallbackIdeas;
+      }
+
+    } catch (error) {
+      console.error('❌ Failed to generate sample content ideas:', error);
+
+      // Return generic fallback ideas on any error
+      const genericIdeas = [
+        'Content idea tailored to your target audience',
+        'Strategic blog post based on your keywords',
+        'SEO-optimized article for your niche'
+      ];
+
+      return genericIdeas;
     }
   }
 }

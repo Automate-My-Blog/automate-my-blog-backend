@@ -12,6 +12,50 @@
  * Post quotas: 8 recommended, 40 maximum
  */
 
+const FLOOR_PRICE = 39.99;
+const MAX_PRICE = 150;
+const FLOOR_PROFIT = 500;
+const ESTIMATED_COST_PER_MONTH = 8;
+const POSTS_RECOMMENDED = 8;
+const POSTS_MAXIMUM = 40;
+
+/** Extract low/high profit from strategy (DB fields first, then pitch regex). Returns null if none valid. */
+function extractProfitRange(strategy) {
+  const hasDbFields = strategy.projected_profit_low != null && strategy.projected_profit_high != null;
+  if (hasDbFields) {
+    const low = parseInt(strategy.projected_profit_low, 10);
+    const high = parseInt(strategy.projected_profit_high, 10);
+    if (!isNaN(low) && !isNaN(high)) {
+      console.log('✅ Using database profit fields:', { lowEndProfit: low, highEndProfit: high });
+      return { low, high };
+    }
+  }
+
+  if (!strategy.pitch) return null;
+  const step5Match = strategy.pitch.match(
+    /Step 5:[^\$]*(?:Profit|profit)\s+of\s*\$([0-9,]+)-\$([0-9,]+)\s*(?:\/month|\/mo|monthly)/i
+  );
+  const genericMatch = strategy.pitch.match(/\$([0-9,]+)-\$([0-9,]+)\s*(?:monthly|\/month|\/mo)/i);
+  const match = step5Match || genericMatch;
+  if (!match) return null;
+  const low = parseInt(match[1].replace(/,/g, ''), 10);
+  const high = parseInt(match[2].replace(/,/g, ''), 10);
+  if (isNaN(low) || isNaN(high)) return null;
+  return { low, high };
+}
+
+/** Dynamic percentage 8% + (2% × (1000 / (profit + 1000))). Slides from ~10% toward 8% as profit grows. */
+function computeDynamicPercentage(lowProfit) {
+  return 0.08 + (0.02 * (1000 / (lowProfit + 1000)));
+}
+
+/** Raw monthly price from profit and percentage, then apply floor and ceiling. */
+function applyFloorAndCeiling(rawMonthly) {
+  const withFloor = Math.max(FLOOR_PRICE, rawMonthly);
+  const rounded = Math.round(withFloor * 100) / 100;
+  return Math.min(rounded, MAX_PRICE);
+}
+
 class PricingCalculator {
   /**
    * Calculate profit-based pricing for a strategy
@@ -20,72 +64,21 @@ class PricingCalculator {
    */
   calculateProfitBasedPrice(strategy) {
     try {
-      let lowEndProfit, highEndProfit;
-
-      // PRIORITY 1: Use database fields if available
-      if (strategy.projected_profit_low != null && strategy.projected_profit_high != null) {
-        lowEndProfit = parseInt(strategy.projected_profit_low, 10);
-        highEndProfit = parseInt(strategy.projected_profit_high, 10);
-        if (!isNaN(lowEndProfit) && !isNaN(highEndProfit)) {
-          console.log('✅ Using database profit fields:', { lowEndProfit, highEndProfit });
-        }
+      let range = extractProfitRange(strategy);
+      const noValidRange = range == null;
+      if (noValidRange) {
+        range = { low: FLOOR_PROFIT, high: FLOOR_PROFIT * 2 };
       }
 
-      // PRIORITY 2: Extract from pitch text
-      if ((lowEndProfit == null || highEndProfit == null || isNaN(lowEndProfit) || isNaN(highEndProfit)) && strategy.pitch) {
-        const profitMatch = strategy.pitch.match(
-          /Step 5:[^\$]*(?:Profit|profit)\s+of\s*\$([0-9,]+)-\$([0-9,]+)\s*(?:\/month|\/mo|monthly)/i
-        ) || strategy.pitch.match(/\$([0-9,]+)-\$([0-9,]+)\s*(?:monthly|\/month|\/mo)/i);
-        if (profitMatch) {
-          lowEndProfit = parseInt(profitMatch[1].replace(/,/g, ''), 10);
-          highEndProfit = parseInt(profitMatch[2].replace(/,/g, ''), 10);
-        }
-      }
+      const lowEndProfit = range.low;
+      const highEndProfit = range.high;
+      const dynamicPercentage = computeDynamicPercentage(lowEndProfit);
+      const rawMonthly = lowEndProfit * dynamicPercentage;
+      const monthlyPrice = applyFloorAndCeiling(rawMonthly);
 
-      // FALLBACK: Use floor when no profit data (reduces 400s for valid frontend flows)
-      if (lowEndProfit == null || highEndProfit == null || isNaN(lowEndProfit) || isNaN(highEndProfit)) {
-        const FLOOR_PROFIT = 500;
-        lowEndProfit = FLOOR_PROFIT;
-        highEndProfit = FLOOR_PROFIT * 2;
-      }
-
-      // Calculate dynamic percentage that slides from 10% to 8%
-      // Formula: 8% + (2% × (1000 / (profit + 1000)))
-      // Examples:
-      //   $500 profit  → 9.33%
-      //   $1,000 profit → 9.0%
-      //   $2,000 profit → 8.67%
-      //   $5,000 profit → 8.33%
-      //   $10,000 profit → 8.18%
-      const dynamicPercentage = 0.08 + (0.02 * (1000 / (lowEndProfit + 1000)));
-
-      // Calculate price based on profit with floor and ceiling
-      const FLOOR_PRICE = 39.99;  // Minimum to ensure healthy margins (80%+)
-      const MAX_PRICE = 150;      // Maximum to keep accessible
-
-      let monthlyPrice = Math.max(
-        FLOOR_PRICE,
-        lowEndProfit * dynamicPercentage
-      );
-
-      // Round to nearest cent
-      monthlyPrice = Math.round(monthlyPrice * 100) / 100;
-
-      // Apply ceiling
-      monthlyPrice = Math.min(monthlyPrice, MAX_PRICE);
-
-      // Calculate annual price with 10% discount
       const annualPrice = Math.round(monthlyPrice * 12 * 0.90 * 100) / 100;
-
-      // Post limits: 8 recommended (2/week for quality SEO), 40 maximum
-      const postsPerMonth = {
-        recommended: 8,
-        maximum: 40
-      };
-
-      // Calculate margin for transparency (based on recommended usage)
-      const estimatedCostPerMonth = 8; // ~$1/post for 8 recommended posts
-      const ourProfit = monthlyPrice - estimatedCostPerMonth;
+      const postsPerMonth = { recommended: POSTS_RECOMMENDED, maximum: POSTS_MAXIMUM };
+      const ourProfit = monthlyPrice - ESTIMATED_COST_PER_MONTH;
       const marginPercent = Math.round((ourProfit / monthlyPrice) * 100);
 
       return {
@@ -95,18 +88,17 @@ class PricingCalculator {
         projectedLow: lowEndProfit,
         projectedHigh: highEndProfit,
         percentage: {
-          monthly: Math.round(dynamicPercentage * 100 * 100) / 100 // e.g., 9.0
+          monthly: Math.round(dynamicPercentage * 100 * 100) / 100
         },
         savings: {
           annualMonthlyEquivalent: Math.round(annualPrice / 12 * 100) / 100,
           annualSavingsPercent: 10,
           annualSavingsDollars: Math.round((monthlyPrice * 12 - annualPrice) * 100) / 100
         },
-        // Internal margin tracking (not exposed to frontend)
         _internal: {
-          costToDeliver: estimatedCostPerMonth,
+          costToDeliver: ESTIMATED_COST_PER_MONTH,
           profitMargin: Math.round(ourProfit * 100) / 100,
-          marginPercent: marginPercent
+          marginPercent
         }
       };
     } catch (error) {

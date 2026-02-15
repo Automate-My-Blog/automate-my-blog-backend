@@ -4,8 +4,8 @@ OpenAI (and other LLM) prompts live here so we have one place to read and edit t
 
 **Layout**
 
-- `index.js` – re-exports all prompt modules.
 - `website-analysis.js` – website analysis (system + user). Used by `services/openai.js` in `analyzeWebsite()`.
+- Import directly from the prompt module (e.g. `from '../prompts/website-analysis.js'`). No barrel file.
 
 **Conventions**
 
@@ -18,13 +18,12 @@ OpenAI (and other LLM) prompts live here so we have one place to read and edit t
 
 1. Add a module under `prompts/` (e.g. `seo-analysis.js`).
 2. Export `getXxxSystemMessage` and `buildXxxUserMessage` (or whatever fits).
-3. Re-export from `prompts/index.js`.
-4. In the service/route, replace the inline `content: \`...\`` with the imported functions.
+3. In the service/route, import from the prompt module and replace inline `content: \`...\`` with the imported functions.
 
 Example for website analysis in `services/openai.js`:
 
 ```js
-import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/index.js';
+import { getWebsiteAnalysisSystemMessage, buildWebsiteAnalysisUserMessage } from '../prompts/website-analysis.js';
 
 // In analyzeWebsite():
 messages: [

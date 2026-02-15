@@ -1,102 +1,121 @@
-# Backend Logic Refactor Notes
+# Backend Logic Cleanup — Refactor Notes
 
-Refactor performed to improve clarity, safety, and testability of business logic without changing external behavior. Each chunk is described below.
+Refactor focused on business logic clarity, safety, and testability without changing API contract or behavior.
 
----
-
-## Chunk 1: Logic map and domain errors
+## Chunk 1: Logic map and refactor status
 
 **What changed**
-- Added `docs/logic-map.md`: main request flows (auth, analyze-website, jobs, blog-posts, user/credits), where business rules live, core domain entities/invariants, and hotspots (duplicated logic, complex conditionals).
-- Added `lib/errors.js`: domain error classes (`NotFoundError`, `ValidationError`, `UnauthorizedError`, `ConflictError`, `InvariantViolation`, `ServiceUnavailableError`) and `toHttpResponse(err)` to map them to HTTP status + `{ error, message }` body.
+- Updated `docs/logic-map.md` with a new section **7. Refactor Status** summarizing where domain errors, auth validation, blog post validation, job error mapping, and job state transitions live after this refactor.
 
-**Why safer/clearer**
-- Single place to see flow and hotspots; errors are named and mapped once instead of ad-hoc in handlers.
+**Why**
+- Single place to see current state of “where rules live” for future refactors and onboarding.
 
-**Behavior verified**
-- No API contract change; response shape and status codes preserved. Unit test: `tests/unit/domain-errors.test.js`.
+**Verification**
+- No code behavior change; docs only.
 
 ---
 
-## Chunk 2: Central error-handling middleware
+## Chunk 2: Job queue — domain errors and exported state constants
 
 **What changed**
-- Replaced the generic 500 error middleware in `index.js` with one that uses `toHttpResponse(error)`. For 500 responses in non-development, the message is still hidden (`Something went wrong`).
+- `services/job-queue.js`:
+  - Import and throw `InvariantViolation` for retry (when status !== 'failed') and cancel (when status not in 'queued'|'running') instead of ad-hoc `Error` with `statusCode = 400`.
+  - Throw `ServiceUnavailableError` from `ensureRedis()` when REDIS_URL is missing or invalid instead of generic `Error`.
+  - Exported `RETRIABLE_STATUS` and `CANCELLABLE_STATUSES` (already had `JOB_STATUSES`).
+  - Added JSDoc describing allowed state transitions (retry only from failed; cancel only from queued/running).
 
-**Why safer/clearer**
-- Handlers can `next(error)` and get consistent status/body; domain errors (e.g. `NotFoundError`) automatically become 404.
+**Why**
+- Retry/cancel failures are invariant violations; Redis missing is a service availability issue. Using domain errors makes intent explicit and allows consistent mapping in one place.
+- Exporting state constants makes allowed transitions visible and testable.
 
-**Behavior verified**
-- Existing 500 behavior preserved (message hidden in production). Blog-posts and auth handlers now use `next(error)` (see below).
+**Verification**
+- `npm test -- tests/unit/job-queue.test.js` — all tests pass. Tests updated to expect `InvariantViolation` and `ServiceUnavailableError` by name where applicable; new test for exported state constants.
 
 ---
 
-## Chunk 3: Blog-posts: typed errors and thin handlers
+## Chunk 3: Jobs route — central error mapping for domain errors
 
 **What changed**
-- `services/content.js`: all `throw new Error('Blog post not found')` replaced with `throw new NotFoundError('Blog post not found', 'blog_post')`; catch blocks rethrow using `instanceof NotFoundError`.
-- `index.js` blog-posts handlers (get list, create, get one, update, delete): in `catch`, call `next(error)` instead of branching on `error.message === 'Blog post not found'` and sending 404/500 manually.
+- `routes/jobs.js`:
+  - Import `InvariantViolation` and `ServiceUnavailableError` from `lib/errors.js`.
+  - `sendJobError(res, e, defaultMessage)` now handles `e instanceof ServiceUnavailableError` (503) and `e instanceof InvariantViolation` (400 or `e.statusCode`), in addition to existing `UserNotFoundError`, REDIS_URL message, and legacy `e.statusCode === 400`.
+  - Response shape unchanged: `{ success: false, error, message }`.
 
-**Why safer/clearer**
-- No string-based error detection; 404 is determined by type. Handlers are thinner and error handling is centralized.
+**Why**
+- Job API keeps its own response shape; mapping domain errors in one function keeps behavior consistent and avoids scattered conditionals.
 
-**Behavior verified**
-- Unit tests: `tests/unit/content.test.js`, `tests/unit/content-db.test.js` (still expect "Blog post not found" message; `NotFoundError` has that message). API response shape unchanged: 404 with `error` and `message`.
+**Verification**
+- Existing job route behavior unchanged (same status codes and messages). Unit tests for job-queue cover thrown types; jobs API tests (`tests/unit/jobs-api.test.js`) exercise routes with mocks.
 
 ---
 
-## Chunk 4: Auth validation and domain errors
+## Chunk 4: Blog post validation — domain layer
 
 **What changed**
-- Added `lib/auth-validation.js`: `validateRegistrationInput(body)`, `validateLoginInput(body)`, `validateRefreshInput(body)`. They throw `ValidationError` with appropriate messages (and use `details` for the long message where needed). `lib/errors.js`: for `ValidationError`, response `message` uses `err.details` when present.
-- `index.js`: register and login handlers call the validators and use `next(error)` in catch. Refresh handler uses `validateRefreshInput` and `next(error)`.
-- `services/auth-database.js`: login and memory-login throw `UnauthorizedError('Invalid email or password')`; refresh throws `UnauthorizedError` for invalid/expired token or user not found; register throws `ConflictError('User already exists with this email')`; `verifyToken` throws `UnauthorizedError('Invalid or expired token')`.
+- New `lib/blog-post-validation.js`:
+  - `validateCreateBlogPostBody(body)` — requires `title` and `content` (non-empty), returns normalized object; throws `ValidationError` otherwise.
+  - `validateUpdateBlogPostBody(body)` — requires at least one of `title`, `content`, `status`; returns updates object; throws `ValidationError` when empty.
+- `index.js` blog-posts handlers:
+  - POST create: call `validateCreateBlogPostBody(req.body)`, then `contentService.saveBlogPost` with parsed fields.
+  - PUT update: call `validateUpdateBlogPostBody(req.body)`, then `contentService.updateBlogPost` with returned updates.
+- Removed inline validation branches from handlers.
 
-**Why safer/clearer**
-- Auth rules are named and testable in one module; auth failures map to 400/401/409 via the central middleware.
+**Why**
+- Named validation rules in one place: easier to test, reuse, and map to 400 via global error handler (ValidationError → 400).
 
-**Behavior verified**
-- Response shapes and status codes unchanged (400 for validation, 401 for login/refresh failure, 409 for duplicate email). Integration tests in `tests/integration/api/auth.test.js` should be run to confirm.
+**Verification**
+- `npm test -- tests/unit/blog-post-validation.test.js` — new tests for create/update validation and error types.
+- Existing blog-posts behavior: same 400 messages and 201/200 responses; global error handler already maps ValidationError to 400.
 
 ---
 
-## Chunk 5: Job routes – central error mapping
+## Chunk 5: Content service — NotFoundError tests
 
 **What changed**
-- `routes/jobs.js`: added `sendJobError(res, e, defaultMessage)` that maps: `UserNotFoundError` or PG 23503 + `jobs_user_id_fkey` → 401; message containing `REDIS_URL` → 503; `e.statusCode === 400` → 400; else → 500. All job endpoint catch blocks now call `sendJobError` instead of duplicating the same conditionals.
+- `services/content.js`: no code change (already throws `NotFoundError` for get/update/delete when post missing or wrong owner).
+- `tests/unit/content.test.js`:
+  - getBlogPost: assert thrown error is `NotFoundError` with `resource: 'blog_post'` for both “not found” and “wrong owner”.
+  - updateBlogPost: new test that updating non-existent or wrong-owner post throws `NotFoundError`.
+  - deleteBlogPost: new test that deleting non-existent or wrong-owner post throws `NotFoundError`.
 
-**Why safer/clearer**
-- One place defines job API error semantics; adding a new error type only requires updating `sendJobError`.
+**Why**
+- Ensures content layer keeps using typed errors so the global handler can return 404 consistently; tests guard against regressions.
 
-**Behavior verified**
-- `tests/unit/jobs-api.test.js` and `tests/unit/job-queue.test.js` pass. Response shape `{ success: false, error, message }` and status codes unchanged.
+**Verification**
+- `npm test -- tests/unit/content.test.js` — all tests pass.
 
 ---
 
-## Chunk 6: Job state transitions explicit
+## Chunk 6: Job queue unit tests — domain errors and constants
 
 **What changed**
-- `services/job-queue.js`: added `JOB_STATUSES` (exported) and internal `RETRIABLE_STATUS` / `CANCELLABLE_STATUSES`. `retryJob` checks `row.status !== RETRIABLE_STATUS`; `cancelJob` checks `!CANCELLABLE_STATUSES.includes(row.status)`.
+- `tests/unit/job-queue.test.js`:
+  - New describe “state constants”: assert `JOB_STATUSES`, `RETRIABLE_STATUS`, `CANCELLABLE_STATUSES` values.
+  - retry “not failed” and cancel “not cancellable”: expect `InvariantViolation` with `name`, `message`, `statusCode`.
+  - createJob “REDIS_URL missing”: expect `ServiceUnavailableError` and message containing `REDIS_URL`.
 
-**Why safer/clearer**
-- Allowed transitions are named constants; future tests or workers can reference the same set.
+**Why**
+- Table-driven coverage of state transition rules and dependency-unavailable case; documents expected error types.
 
-**Behavior verified**
-- No behavior change; same conditions as before. `job-queue.test.js` passes.
-
----
-
-## Not done (recommended follow-up)
-
-- **Analyze-website org/intelligence block** (`POST /api/analyze-website` in `index.js`): ~600 lines of inline logic (org lookup by user vs anonymous, adoption, intelligence/CTA persistence). Recommended: extract to a service (e.g. `organizationAnalysisService.saveAnalysisResult(url, analysis, userId, sessionId)`) so the handler only validates URL, calls scraper + OpenAI, captures lead, then calls the service. Documented in `docs/logic-map.md` as a hotspot.
-- **DB schema**: No schema changes. Any future migration for correctness should be isolated and documented.
-- **Idempotency**: Not added; only existing behavior preserved.
+**Verification**
+- `npm test -- tests/unit/job-queue.test.js` — all tests pass.
 
 ---
 
-## How to run tests
+## Summary
 
-```bash
-npm run test -- --run tests/unit/domain-errors.test.js tests/unit/content.test.js tests/unit/content-db.test.js tests/unit/job-queue.test.js tests/unit/jobs-api.test.js
-npm run test -- --run tests/integration/api/auth.test.js
-```
+| Area              | Change                                                                 | Behavior preserved |
+|-------------------|------------------------------------------------------------------------|--------------------|
+| Logic map         | Documented refactor status                                             | Yes                |
+| Job queue         | InvariantViolation / ServiceUnavailableError; export state constants   | Yes                |
+| Jobs route        | sendJobError handles domain errors                                     | Yes (same status/body) |
+| Blog posts        | Validation in lib/blog-post-validation.js; handlers call validators  | Yes                |
+| Content           | Tests for NotFoundError                                                | Yes                |
+| Tests             | blog-post-validation.test.js; job/content error and constant tests     | N/A                |
+
+**How behavior was verified**
+- `npm test` (unit tests).
+- No API contract or response shape changes; only internal error types and centralization of validation and error mapping.
+
+**NOTE (ambiguous intent)**
+- Analyze-website (index.js): large block with org/intelligence/CTA logic was not extracted to a service in this refactor to keep the change set small and avoid risk. Logic map and LAYER_BOUNDARIES already call this out as a future extraction target.

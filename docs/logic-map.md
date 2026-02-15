@@ -61,3 +61,11 @@ High-level map of request flows, where business rules live, core domain, and com
 - **Analyze-website**: Extract org resolution and intelligence/CTA persistence into a service (or extend organizationService) so index.js only: validate URL → call scraper + OpenAI → call lead capture → call org/intelligence/CTA service → return analysis.
 - **Jobs**: Keep routes thin; centralize “job API error → HTTP” in one place; optionally add JOB_STATUS_TRANSITIONS or allowed states in job-queue for clarity.
 - **State transitions**: Document and enforce job transitions in job-queue only; ensure worker and API agree on when retry/cancel are allowed.
+
+## 7. Refactor Status (logic cleanup)
+
+- **Domain errors** (`lib/errors.js`): NotFoundError, ValidationError, UnauthorizedError, ConflictError, InvariantViolation, ServiceUnavailableError; `toHttpResponse(err)` used by global error middleware in index.js.
+- **Auth**: `lib/auth-validation.js` — validateRegistrationInput, validateLoginInput, validateRefreshInput (throw ValidationError); handlers are thin.
+- **Blog posts**: content service throws NotFoundError; handlers call next(error); global handler maps to 404. Blog post create/update validation extracted to `lib/blog-post-validation.js`.
+- **Jobs**: `routes/jobs.js` — single `sendJobError(res, e)` maps UserNotFoundError → 401, REDIS_URL → 503, statusCode 400 → 400, InvariantViolation/ServiceUnavailableError → same semantics; job-queue throws InvariantViolation for retry/cancel rules, ServiceUnavailableError for missing Redis.
+- **Job state transitions**: job-queue.js exports JOB_STATUSES, RETRIABLE_STATUS, CANCELLABLE_STATUSES; retry only when status === 'failed'; cancel only when status in ('queued', 'running').
