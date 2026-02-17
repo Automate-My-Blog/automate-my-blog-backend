@@ -69,3 +69,9 @@ High-level map of request flows, where business rules live, core domain, and com
 - **Blog posts**: content service throws NotFoundError; handlers call next(error); global handler maps to 404. Blog post create/update validation extracted to `lib/blog-post-validation.js`.
 - **Jobs**: `routes/jobs.js` — single `sendJobError(res, e)` maps UserNotFoundError → 401, REDIS_URL → 503, statusCode 400 → 400, InvariantViolation/ServiceUnavailableError → same semantics; job-queue throws InvariantViolation for retry/cancel rules, ServiceUnavailableError for missing Redis.
 - **Job state transitions**: job-queue.js exports JOB_STATUSES, RETRIABLE_STATUS, CANCELLABLE_STATUSES; retry only when status === 'failed'; cancel only when status in ('queued', 'running').
+- **Analyze-website persistence**: `services/website-analysis-persistence.js` — saveAnalysisResult() encapsulates priority-based org resolution (user-owned → adopt anonymous by URL → new; anonymous by URL → new), organization + organization_intelligence upsert, and CTA clear/store. Handler in index.js: validate URL → scrape → OpenAI → lead capture → persistence service → narrative job → response. Validation for URL uses ValidationError so global handler can map 400.
+
+## 8. Remaining Hotspots (candidates for future refactor)
+
+- **Handlers that don’t use next(error)**: Many index.js handlers still use ad-hoc `res.status(...).json(...)` (e.g. `/api/v1/auth/me`, `/api/v1/user/recent-analysis`, org member remove). Standardizing on domain errors + next(error) would route all failures through the global handler; some handlers intentionally use custom status/messages (e.g. auth/me maps DB infra to 500 “Service unavailable”).
+- **Stripe webhook / other routes**: Error semantics may differ; central mapping only where domain errors are thrown.
