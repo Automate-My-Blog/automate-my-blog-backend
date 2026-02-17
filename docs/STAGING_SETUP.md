@@ -34,13 +34,14 @@ Vercel will build and deploy when either branch is pushed.
 
 ### Ignore Build Step
 
-In **Vercel Dashboard** → your project → **Settings** → **Git** → **Ignore Build Step**, allow only `main` and `staging` to build (skip PRs and other branches):
+In **Vercel Dashboard** → your project → **Settings** → **Git** → **Ignore Build Step**, set either:
 
-```bash
-if [ "$VERCEL_GIT_COMMIT_REF" == "main" ] || [ "$VERCEL_GIT_COMMIT_REF" == "staging" ]; then exit 1; else exit 0; fi
-```
+- **Script (recommended):** `bash scripts/vercel-ignore-build.sh`
+- **Inline:** `if [ "$VERCEL_GIT_COMMIT_REF" == "main" ] || [ "$VERCEL_GIT_COMMIT_REF" == "staging" ]; then exit 1; else exit 0; fi`
 
 (Exit 1 = run build; exit 0 = skip.)
+
+**Required:** In **Settings** → **Environment Variables**, enable **Automatically Expose System Environment Variables** so `VERCEL_GIT_COMMIT_REF` is available. Branch builds are triggered by Vercel’s Git integration, not by GitHub Actions.
 
 ### GitHub Actions
 
