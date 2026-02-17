@@ -435,50 +435,39 @@ router.get('/trends/preview', async (req, res) => {
     const OpenAI = (await import('openai')).default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `You are analyzing Google Trends data for a user's content strategy. Write a clear, actionable summary.
+    const prompt = `Analyze trending search data and write a concise summary. Be direct and actionable.
 
-IMPORTANT: The numbers show RELATIVE growth (how much search interest increased over the past month), not absolute search volume. Higher numbers = faster-growing interest.
+TRENDING DATA:
+${trendingData.map(td => `${td.trends.slice(0, 5).map(t => `"${t.query}" (+${t.value}%)`).join(', ')}`).join('; ')}
 
-DATA FOUND:
-${trendingData.map(td => `
-Audience: ${td.audience}
-Base Keyword: "${td.keyword}"
-Rising Queries:
-${td.trends.map(t => `  • "${t.query}" - ${t.value}% growth ${t.value > 1000 ? '(BREAKOUT)' : t.value > 500 ? '(SURGING)' : '(RISING)'}`).join('\n')}
-`).join('\n')}
-
-Write exactly this structure:
+Write exactly this format (keep it SHORT):
 
 **📈 TRENDING TOPICS FOUND**
 
-Write 1-2 sentences explaining that these topics show the fastest-growing search interest in the past month. Then list ONLY the top 5 queries as bullets:
-- "query name" - X% growth (explain in 1 sentence what this means)
+List the top 3-4 queries with growth %, nothing else:
+- "query" (+X%)
+- "query" (+X%)
 
-**🎯 HOW TO TARGET**
+**🎯 WHAT TO DO NOW**
 
-Write 2-3 clear paragraphs (NOT bullets) explaining:
-1. What these growth rates tell us about opportunity
-2. Which specific content topics to create right now
-3. Exact keywords to use in titles and content
+One paragraph: Which specific articles to write this week to catch these trends. Be concrete about topics, not generic.
 
-**💡 IMPACT ON YOUR CONTENT**
+**💡 WHY THIS MATTERS**
 
-Write 2 short paragraphs (NOT bullets) about:
-1. Why creating content on these topics NOW gives you a timing advantage
-2. What visibility boost to expect from early adoption
+One short paragraph: These are rising fast - create content now to get early visibility before competition increases.
 
-CRITICAL RULES:
-- Only use bullets for the topic list under "TRENDING TOPICS FOUND"
-- Everything else should be regular paragraphs
-- Keep sentences concise and direct
-- Focus on actionable insights, not generic advice`;
+RULES:
+- ONLY bullets for the topic list
+- Everything else is plain paragraphs (NO bullets)
+- Keep it under 150 words total
+- No repetitive explanations`;
 
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: 0.7,
-      max_tokens: 500
+      max_tokens: 300
     });
 
     for await (const chunk of stream) {
