@@ -6,6 +6,7 @@ import express from 'express';
 import multer from 'multer';
 import db from '../services/database.js';
 import { extractTextFromFile, SUPPORTED_SOURCE_TYPES } from '../utils/file-extractors.js';
+import { splitDocumentIntoPosts } from '../utils/split-document-into-posts.js';
 import { createVoiceAnalysisJob } from '../services/job-queue.js';
 
 const router = express.Router();
@@ -71,44 +72,91 @@ router.post('/upload', requireAuth, upload.array('files', 10), async (req, res) 
           status: 'failed',
         });
         continue;
-        }
-      const word_count = raw_content.trim().split(/\s+/).filter(Boolean).length;
+      }
+
+      const allPosts = splitDocumentIntoPosts(raw_content);
+      const posts = allPosts.slice(0, 100);
       const weightNum = weight != null ? Math.min(5, Math.max(0.1, Number(weight))) : 1.0;
+      const baseTitle = sampleTitle || file.originalname || null;
 
-      const insert = await db.query(
-        `INSERT INTO voice_samples (
-          organization_id, source_type, file_name, file_size_bytes, raw_content, word_count,
-          processing_status, weight, uploaded_by, title
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
-        RETURNING id, source_type, file_name, word_count, processing_status, weight, created_at`,
-        [
-          organizationId,
-          sourceType,
-          file.originalname || null,
-          file.size || null,
-          raw_content,
-          word_count,
-          weightNum,
-          userId,
-          sampleTitle || file.originalname || null,
-        ]
-      );
-      const row = insert.rows[0];
-      results.push({
-        id: row.id,
-        source_type: row.source_type,
-        file_name: row.file_name,
-        word_count: row.word_count,
-        processing_status: row.processing_status,
-        weight: row.weight,
-        created_at: row.created_at,
-      });
-
-      try {
-        const { jobId } = await createVoiceAnalysisJob(row.id, organizationId, userId);
-        results[results.length - 1].jobId = jobId;
-      } catch (e) {
-        console.warn('Voice analysis job enqueue failed:', e.message);
+      if (posts.length > 1) {
+        for (let i = 0; i < posts.length; i++) {
+          const { date, body, wordCount } = posts[i];
+          const title = date ? `${baseTitle || 'Post'} – ${date}` : `${baseTitle || 'Post'} (${i + 1})`;
+          const insert = await db.query(
+            `INSERT INTO voice_samples (
+              organization_id, source_type, file_name, raw_content, word_count,
+              processing_status, weight, uploaded_by, title
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7, $8)
+            RETURNING id, source_type, file_name, word_count, processing_status, weight, created_at`,
+            [
+              organizationId,
+              sourceType,
+              `${file.originalname || 'doc'}-part-${i + 1}`,
+              body,
+              wordCount,
+              weightNum,
+              userId,
+              title,
+            ]
+          );
+          const row = insert.rows[0];
+          results.push({
+            id: row.id,
+            source_type: row.source_type,
+            file_name: row.file_name,
+            word_count: row.word_count,
+            processing_status: row.processing_status,
+            weight: row.weight,
+            created_at: row.created_at,
+            split_from: file.originalname,
+            part: i + 1,
+            total_parts: posts.length,
+          });
+          try {
+            const { jobId } = await createVoiceAnalysisJob(row.id, organizationId, userId);
+            results[results.length - 1].jobId = jobId;
+          } catch (e) {
+            console.warn('Voice analysis job enqueue failed:', e.message);
+          }
+        }
+      } else {
+        const content = posts[0]?.body ?? raw_content;
+        const word_count = content.trim().split(/\s+/).filter(Boolean).length;
+        const insert = await db.query(
+          `INSERT INTO voice_samples (
+            organization_id, source_type, file_name, file_size_bytes, raw_content, word_count,
+            processing_status, weight, uploaded_by, title
+          ) VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+          RETURNING id, source_type, file_name, word_count, processing_status, weight, created_at`,
+          [
+            organizationId,
+            sourceType,
+            file.originalname || null,
+            file.size || null,
+            content,
+            word_count,
+            weightNum,
+            userId,
+            baseTitle,
+          ]
+        );
+        const row = insert.rows[0];
+        results.push({
+          id: row.id,
+          source_type: row.source_type,
+          file_name: row.file_name,
+          word_count: row.word_count,
+          processing_status: row.processing_status,
+          weight: row.weight,
+          created_at: row.created_at,
+        });
+        try {
+          const { jobId } = await createVoiceAnalysisJob(row.id, organizationId, userId);
+          results[results.length - 1].jobId = jobId;
+        } catch (e) {
+          console.warn('Voice analysis job enqueue failed:', e.message);
+        }
       }
     }
 
@@ -139,7 +187,15 @@ router.get('/:organizationId/profile', requireAuth, async (req, res) => {
     if (profile.rows.length === 0) {
       return res.json({ success: true, profile: null });
     }
-    return res.json({ success: true, profile: profile.rows[0] });
+    const rawProfile = profile.rows[0];
+    const { buildVoiceProfileDisplay } = await import('../utils/voice-profile-display.js');
+    const { sections, derivedDirectives } = buildVoiceProfileDisplay(rawProfile);
+    return res.json({
+      success: true,
+      profile: rawProfile,
+      voiceProperties: sections,
+      derivedDirectives,
+    });
   } catch (err) {
     console.error('Voice profile get error:', err);
     return res.status(500).json({ success: false, error: err.message || 'Get profile failed' });

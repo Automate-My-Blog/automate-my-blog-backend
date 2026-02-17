@@ -9,7 +9,7 @@ import request from 'supertest';
 const mockDbQuery = vi.fn();
 vi.mock('../../services/database.js', () => ({ default: { query: mockDbQuery } }));
 
-const mockCreateVoiceAnalysisJob = vi.fn();
+const mockCreateVoiceAnalysisJob = vi.fn().mockResolvedValue({ jobId: 'job-1' });
 vi.mock('../../services/job-queue.js', () => ({
   createVoiceAnalysisJob: (...args) => mockCreateVoiceAnalysisJob(...args),
 }));
@@ -23,6 +23,16 @@ vi.mock('../../utils/file-extractors.js', () => ({
 function mockAuth(req, _res, next) {
   if (req.headers['x-test-user-id']) req.user = { userId: req.headers['x-test-user-id'] };
   next();
+}
+
+function multiPostDoc() {
+  return `Preamble.
+
+February 8, 2026
+${'First post content here. '.repeat(40)}
+
+February 15, 2026
+${'Second post content here. '.repeat(40)}`;
 }
 
 describe('voice-samples api', () => {
@@ -77,5 +87,69 @@ describe('voice-samples api', () => {
     await request(app)
       .get('/api/v1/voice-samples/00000000-0000-0000-0000-000000000001/profile')
       .expect(401);
+  });
+
+  describe('POST /upload', () => {
+    const orgId = '00000000-0000-0000-0000-000000000001';
+
+    it('returns 401 without auth', async () => {
+      await request(app)
+        .post('/api/v1/voice-samples/upload')
+        .field('organizationId', orgId)
+        .attach('files', Buffer.from('hello'), 'test.txt')
+        .expect(401);
+    });
+
+    it('splits multi-post document into separate samples', async () => {
+      mockDbQuery
+        .mockResolvedValueOnce({ rows: [{ id: orgId }] })
+        .mockResolvedValueOnce({
+          rows: [{ id: 's1', source_type: 'newsletter', file_name: 'newsletter.docx-part-1', word_count: 200, processing_status: 'pending', weight: 1, created_at: new Date() }],
+        })
+        .mockResolvedValueOnce({
+          rows: [{ id: 's2', source_type: 'newsletter', file_name: 'newsletter.docx-part-2', word_count: 200, processing_status: 'pending', weight: 1, created_at: new Date() }],
+        });
+      mockExtractTextFromFile.mockResolvedValue(multiPostDoc());
+
+      const res = await request(app)
+        .post('/api/v1/voice-samples/upload')
+        .set('x-test-user-id', 'user-1')
+        .field('organizationId', orgId)
+        .field('sourceType', 'newsletter')
+        .attach('files', Buffer.from('doc content'), 'newsletter.docx')
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.samples).toHaveLength(2);
+      expect(res.body.samples[0].split_from).toBe('newsletter.docx');
+      expect(res.body.samples[0].part).toBe(1);
+      expect(res.body.samples[0].total_parts).toBe(2);
+      expect(res.body.samples[1].split_from).toBe('newsletter.docx');
+      expect(res.body.samples[1].part).toBe(2);
+      expect(res.body.samples[1].total_parts).toBe(2);
+      expect(mockCreateVoiceAnalysisJob).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps single sample when document has no date splits', async () => {
+      const singleContent = 'Single post content. '.repeat(30);
+      mockDbQuery.mockResolvedValueOnce({ rows: [{ id: orgId }] }).mockResolvedValueOnce({
+        rows: [{ id: 's1', source_type: 'blog_post', file_name: 'post.txt', word_count: 600, processing_status: 'pending', weight: 1, created_at: new Date() }],
+      });
+      mockExtractTextFromFile.mockResolvedValue(singleContent);
+
+      const res = await request(app)
+        .post('/api/v1/voice-samples/upload')
+        .set('x-test-user-id', 'user-1')
+        .field('organizationId', orgId)
+        .field('sourceType', 'blog_post')
+        .attach('files', Buffer.from(singleContent), 'post.txt')
+        .expect(201);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.samples).toHaveLength(1);
+      expect(res.body.samples[0].split_from).toBeUndefined();
+      expect(res.body.samples[0].part).toBeUndefined();
+      expect(mockCreateVoiceAnalysisJob).toHaveBeenCalledTimes(1);
+    });
   });
 });
