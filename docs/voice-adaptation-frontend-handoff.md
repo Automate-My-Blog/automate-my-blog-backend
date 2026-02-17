@@ -134,12 +134,36 @@ Base path: **`/api/v1/voice-samples`**
     "confidence_score": 90,
     "created_at": "...",
     "updated_at": "..."
-  }
+  },
+  "voiceProperties": [
+    {
+      "section": "Writing style",
+      "items": [
+        { "key": "voice_perspective", "label": "Voice perspective", "value": "second" },
+        { "key": "sentence_length_distribution", "label": "Sentence length", "value": "short" }
+      ]
+    },
+    {
+      "section": "Vocabulary & tone",
+      "items": [
+        { "key": "formality_level", "label": "Formality level", "value": "casual" },
+        { "key": "signature_phrases", "label": "Signature phrases", "value": ["Clear?", "Ship shape."] }
+      ]
+    }
+  ],
+  "derivedDirectives": [
+    "Use first-person (we, I) and direct address (you) throughout; prefer \"we have\" and \"I meet\" over third person.",
+    "Use bullet lists for key points, milestones, and enumerations — do not use only paragraph prose.",
+    "ALWAYS end with a personal sign-off on its own line (e.g. -Author Name).",
+    "Prefer active voice; avoid passive constructions where possible."
+  ]
 }
 ```
 
-- `profile` is `null` when the org has no aggregated profile yet (no samples or all pending/failed).
+- `profile` is `null` when the org has no aggregated profile yet (no samples or all pending/failed). When `profile` is `null`, `voiceProperties` and `derivedDirectives` are omitted.
 - `confidence_score` (0–100): use to decide whether to show "voice ready" (e.g. ≥ 50).
+- **`voiceProperties`**: Display-ready sections for rendering the voice profile in the UI. Each section has `section` (category label), and `items` with `key`, `label` (human-readable), and `value` (string, number, array, or object).
+- **`derivedDirectives`**: Array of rule strings applied during blog generation. These are the "MANDATORY voice rules" derived from the profile. Show them in a "Rules applied" or "Generation rules" list.
 
 ---
 
@@ -207,13 +231,64 @@ Response includes `voiceAdaptationUsed` and `voiceProfileConfidence` for labelin
 
 ---
 
-## 5. Suggested UI flow
+## 5. Voice properties schema
+
+All voice properties from the profile are surfaced via `profile.style`, `profile.vocabulary`, `profile.structure`, `profile.formatting`, and the display-ready `voiceProperties` array. Use `voiceProperties` for rendering—it provides human-readable labels and grouped sections.
+
+### 5.1 Property keys and labels
+
+| Category | Key | Label | Value type | Notes |
+|----------|-----|-------|------------|-------|
+| **style** | voice_perspective | Voice perspective | string | first / second / third |
+| | sentence_length_distribution | Sentence length | string | short / medium / long or description |
+| | paragraph_length_preference | Paragraph length | string | e.g. short, medium |
+| | active_vs_passive_ratio | Active vs passive voice | string | description |
+| | question_frequency | Question usage | string | e.g. occasional, frequent |
+| | list_usage | List usage | string | e.g. frequent, moderate |
+| **vocabulary** | formality_level | Formality level | string | casual to academic |
+| | complexity_score | Vocabulary complexity | string/number | Flesch-Kincaid or description |
+| | industry_terms | Industry terms | array/string | domain-specific terms |
+| | signature_phrases | Signature phrases | array | e.g. ["Clear?", "Ship shape."] |
+| | metaphor_humor_style | Tone and style | string | celebratory, warm, dry, etc. |
+| **structure** | opening_hook_type | Opening style | string | anecdote, question, statistic, quote |
+| | section_organization | Section organization | string | description |
+| | transition_phrases | Transition phrases | array/string | connecting phrases |
+| | evidence_style | Evidence and facts style | string | concrete milestones, numbers, etc. |
+| | conclusion_type | Conclusion type | string | personal sign-off, summary, CTA |
+| | personal_sign_off | Personal sign-off | boolean/string | whether author signs with name |
+| **formatting** | heading_frequency | Heading frequency | string | e.g. frequent, moderate |
+| | bullet_vs_numbered | List style | string | bullet vs numbered preference |
+| | emphasis_style | Emphasis (bold/italic) | string | patterns used |
+| | blockquote_usage | Blockquote usage | string | e.g. occasional, none |
+
+### 5.2 derivedDirectives
+
+`derivedDirectives` is an array of strings. Each string is a rule that the blog generator applies when producing content. Examples:
+
+- "Use first-person (we, I) and direct address (you) throughout; prefer \"we have\" and \"I meet\" over third person."
+- "Use bullet lists for key points, milestones, and enumerations — do not use only paragraph prose."
+- "ALWAYS end with a personal sign-off on its own line (e.g. -Author Name)."
+- "Prefer active voice; avoid passive constructions where possible."
+- "Optionally weave in signature phrases such as: Clear?, Ship shape."
+
+These map to profile traits (e.g. `voice_perspective: "first"` → first-person rule; `personal_sign_off: true` → sign-off rule). Display them in a "Rules applied to generation" or "Voice rules" section.
+
+### 5.3 Suggested UI rendering
+
+1. **Profile summary**: `sample_count`, `total_word_count`, `confidence_score`.
+2. **Voice traits**: Iterate `voiceProperties`—each section gets a heading, each item shows `label` and `value` (format arrays as comma-separated or bullets).
+3. **Rules**: Render `derivedDirectives` as a bullet list or checklist-style list.
+4. **Empty state**: When `profile` is null or `voiceProperties` is empty, show "No voice profile yet" or "Upload samples to build your voice profile."
+
+---
+
+## 7. Suggested UI flow
 
 1. **Voice samples page/section**
    - Upload: multipart form with `organizationId`, `sourceType` dropdown, file picker (multiple).
    - List: table of samples with `file_name`, `source_type`, `word_count`, `processing_status`, actions (delete, reanalyze).
    - Poll list every 5s while any sample has `processing_status` in `pending` | `processing`.
-   - Show aggregated profile summary when `GET .../profile` returns non-null: `sample_count`, `total_word_count`, `confidence_score`.
+   - Show aggregated profile summary when `GET .../profile` returns non-null: `sample_count`, `total_word_count`, `confidence_score`. Use `voiceProperties` for the full trait list (by section) and `derivedDirectives` for rules applied during generation.
 
 2. **Source type dropdown options**
    - `blog_post`, `whitepaper`, `email`, `newsletter`, `social_post`, `call_summary`, `other_document`
@@ -227,7 +302,7 @@ Response includes `voiceAdaptationUsed` and `voiceProfileConfidence` for labelin
 
 ---
 
-## 6. Job behavior
+## 8. Job behavior
 
 - Upload creates `analyze_voice_sample` jobs. A **worker** must be running (Redis + DATABASE_URL) to process them.
 - Frontend does not need to poll job status directly. Poll **GET .../voice-samples/:organizationId** instead; `processing_status` on each sample reflects progress.
@@ -235,7 +310,7 @@ Response includes `voiceAdaptationUsed` and `voiceProfileConfidence` for labelin
 
 ---
 
-## 7. Test fixtures
+## 9. Test fixtures
 
 Example persona and documents for testing the full workflow are in:
 
@@ -248,7 +323,7 @@ Example persona and documents for testing the full workflow are in:
 
 ---
 
-## 8. Errors and edge cases
+## 10. Errors and edge cases
 
 | Case | Behavior |
 |------|----------|

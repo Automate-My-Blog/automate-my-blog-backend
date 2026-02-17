@@ -187,7 +187,15 @@ router.get('/:organizationId/profile', requireAuth, async (req, res) => {
     if (profile.rows.length === 0) {
       return res.json({ success: true, profile: null });
     }
-    return res.json({ success: true, profile: profile.rows[0] });
+    const rawProfile = profile.rows[0];
+    const { buildVoiceProfileDisplay } = await import('../utils/voice-profile-display.js');
+    const { sections, derivedDirectives } = buildVoiceProfileDisplay(rawProfile);
+    return res.json({
+      success: true,
+      profile: rawProfile,
+      voiceProperties: sections,
+      derivedDirectives,
+    });
   } catch (err) {
     console.error('Voice profile get error:', err);
     return res.status(500).json({ success: false, error: err.message || 'Get profile failed' });
