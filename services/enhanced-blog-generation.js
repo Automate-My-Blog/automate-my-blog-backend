@@ -1614,6 +1614,60 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     );
   }
 
+  _getSignaturePhrasesDirective(compact) {
+    const phrases = compact.vocabulary?.signature_phrases;
+    if (!Array.isArray(phrases) || phrases.length === 0) return null;
+    const sample = phrases.slice(0, 5).filter((p) => typeof p === 'string' && p.trim());
+    if (sample.length === 0) return null;
+    return `Optionally weave in signature phrases when fitting: ${sample.map((p) => `"${p}"`).join(', ')}.`;
+  }
+
+  _getOpeningHookDirective(compact) {
+    const hook = String(compact.structure?.opening_hook_type ?? '').toLowerCase();
+    if (!hook) return null;
+    if (hook.includes('anecdote') || hook.includes('story') || hook.includes('personal')) {
+      return 'Open with a brief anecdote or personal story that draws the reader in.';
+    }
+    if (hook.includes('question') || hook.includes('rhetorical')) {
+      return 'Open with a compelling question that addresses the reader\'s curiosity.';
+    }
+    if (hook.includes('statistic') || hook.includes('number') || hook.includes('data')) {
+      return 'Open with a striking statistic or data point.';
+    }
+    if (hook.includes('quote')) {
+      return 'Consider opening with a relevant quote when it fits.';
+    }
+    return null;
+  }
+
+  _suggestsActiveVoice(compact) {
+    const ratio = String(compact.style?.active_vs_passive_ratio ?? '').toLowerCase();
+    return (
+      ratio.includes('active') ||
+      ratio.includes('predominantly active') ||
+      ratio.includes('minimal passive')
+    );
+  }
+
+  _getSentenceParagraphDirective(compact) {
+    const sent = String(compact.style?.sentence_length_distribution ?? '').toLowerCase();
+    const para = String(compact.style?.paragraph_length_preference ?? '').toLowerCase();
+    const parts = [];
+    if (sent.includes('short') && !sent.includes('long')) {
+      parts.push('Use mostly short, punchy sentences.');
+    } else if (sent.includes('medium') || sent.includes('mixed')) {
+      parts.push('Mix short and medium sentence lengths for rhythm.');
+    } else if (sent.includes('long')) {
+      parts.push('Longer, flowing sentences are acceptable when they fit the content.');
+    }
+    if (para.includes('short') && !para.includes('long')) {
+      parts.push('Keep paragraphs short (2–4 sentences).');
+    } else if (para.includes('medium')) {
+      parts.push('Use moderate paragraph length for readability.');
+    }
+    return parts.length > 0 ? parts.join(' ') : null;
+  }
+
   /**
    * Derive explicit voice directives from structured profile fields.
    * Uses analyzer output (voice_perspective, list_usage, conclusion_type, etc.) so directives
@@ -1633,6 +1687,15 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     if (this._suggestsCelebratoryOrMilestoneTone(compact)) {
       rules.push('Use a celebratory tone; include concrete numbers and milestones when relevant.');
     }
+    const sig = this._getSignaturePhrasesDirective(compact);
+    if (sig) rules.push(sig);
+    const hook = this._getOpeningHookDirective(compact);
+    if (hook) rules.push(hook);
+    if (this._suggestsActiveVoice(compact)) {
+      rules.push('Prefer active voice; avoid passive constructions where possible.');
+    }
+    const sentPara = this._getSentenceParagraphDirective(compact);
+    if (sentPara) rules.push(sentPara);
     if (rules.length === 0) return '';
     return '\nMANDATORY voice rules (follow these):\n' + rules.map((r) => `- ${r}`).join('\n');
   }

@@ -244,6 +244,55 @@ describe('enhanced-blog-generation', () => {
       expect(out).toContain('celebratory');
       expect(out).toContain('milestones');
     });
+
+    it('adds signature phrases directive when signature_phrases array present', () => {
+      const compact = {
+        style: {},
+        vocabulary: { signature_phrases: ['we have', 'it has been'] },
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('Optionally weave in signature phrases');
+      expect(out).toContain('we have');
+    });
+
+    it('adds opening hook directive when opening_hook_type suggests anecdote or question', () => {
+      const compact = {
+        style: {},
+        vocabulary: {},
+        structure: { opening_hook_type: 'anecdote or personal story' },
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('Open with a brief anecdote');
+    });
+
+    it('adds active voice rule when active_vs_passive_ratio suggests active', () => {
+      const compact = {
+        style: { active_vs_passive_ratio: 'predominantly active' },
+        vocabulary: {},
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('Prefer active voice');
+    });
+
+    it('adds sentence/paragraph directive when sentence_length or paragraph_preference present', () => {
+      const compact = {
+        style: {
+          sentence_length_distribution: 'mostly short',
+          paragraph_length_preference: 'short paragraphs',
+        },
+        vocabulary: {},
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('short');
+      expect(out).toContain('paragraph');
+    });
   });
 
   describe('voice comparison (your voice vs generic)', () => {
