@@ -2,15 +2,18 @@
 /**
  * Scientific voice profile test: GAN Writing (LOCAL MODE)
  *
- * Uses a fresh org with ONLY the GAN sample for a clean test. No API; DB + services directly.
+ * Runs 1 request per post: for each split post, creates a fresh org with only that post,
+ * runs voice analysis, generates, and scores. Avoids context overflow from aggregating many samples.
  *
- * 1. Ingest: Create org, insert GAN docx as voice sample, run analyzer
- * 2. Generate: Create post via enhanced-blog-generation service
- * 3. Score: Evaluate generated post against reference excerpt
+ * 1. Extract and split docx into posts
+ * 2. For each post: create org → insert sample → analyze → generate → score
+ * 3. Write per-post reports and summary
  *
  * Usage:
  *   DATABASE_URL=... OPENAI_API_KEY=... GAN_DOCX_PATH=/path/to/GAN\ Writing\ -\ 2024.docx \
  *   node scripts/gan-voice-test/run-gan-voice-test-local.js
+ *
+ * Optional: GAN_POST_LIMIT=N to process only the first N posts (default: all)
  */
 import 'dotenv/config';
 import fs from 'fs';
@@ -24,6 +27,26 @@ import enhancedBlogGenerationService from '../../services/enhanced-blog-generati
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCX_PATH = process.env.GAN_DOCX_PATH || '/Users/samhilll/Downloads/GAN Writing - 2024.docx';
 const REFERENCE_EXCERPT = fs.readFileSync(path.join(__dirname, 'REFERENCE_EXCERPT.md'), 'utf8');
+
+/** Split document into individual posts by date headers (e.g. "February 8, 2026") */
+function splitIntoPosts(text) {
+  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
+  const dateRe = new RegExp(`(${months}\\s+\\d{1,2},\\s*\\d{4})`, 'gi');
+  const parts = text.split(dateRe);
+  const posts = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    const date = parts[i] || '';
+    const body = (parts[i + 1] || '').trim();
+    const wordCount = body.split(/\s+/).filter(Boolean).length;
+    if (wordCount >= 150) posts.push({ date, body, wordCount });
+  }
+  if (posts.length === 0) {
+    const trimmed = text.trim();
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+    if (wordCount >= 150) posts.push({ date: '', body: trimmed, wordCount });
+  }
+  return posts;
+}
 
 function log(msg, type = 'info') {
   const prefix = type === 'err' ? '❌' : type === 'ok' ? '✅' : '▶';
@@ -93,31 +116,39 @@ async function main() {
   const orgId = orgRes.rows[0].id;
   log(`Created org ${orgId}`, 'ok');
 
-  // 2. Extract text from docx and insert voice sample
+  // 2. Extract text from docx and split into individual posts
   const buffer = fs.readFileSync(DOCX_PATH);
   const multerFile = {
     buffer,
     originalname: 'GAN Writing - 2024.docx',
     mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   };
-  const raw_content = await extractTextFromFile(multerFile, 'newsletter');
-  const word_count = raw_content.trim().split(/\s+/).filter(Boolean).length;
+  const fullText = await extractTextFromFile(multerFile, 'newsletter');
+  const posts = splitIntoPosts(fullText);
+  log(`Split into ${posts.length} posts (min 150 words each)`, 'ok');
 
-  const insertRes = await db.query(
-    `INSERT INTO voice_samples (
-      organization_id, source_type, file_name, file_size_bytes, raw_content, word_count,
-      processing_status, weight, title
-    ) VALUES ($1, 'newsletter', $2, $3, $4, $5, 'pending', 1.0, $6)
-    RETURNING id`,
-    [orgId, 'GAN Writing - 2024.docx', buffer.length, raw_content, word_count, 'GAN Writing - 2024']
-  );
-  const sampleId = insertRes.rows[0].id;
-  log(`Inserted sample ${sampleId} (${word_count} words)`, 'ok');
+  const sampleIds = [];
+  for (let i = 0; i < posts.length; i++) {
+    const { date, body, wordCount } = posts[i];
+    const title = `GAN ${date || `Post ${i + 1}`}`;
+    const insertRes = await db.query(
+      `INSERT INTO voice_samples (
+        organization_id, source_type, file_name, raw_content, word_count,
+        processing_status, weight, title
+      ) VALUES ($1, 'newsletter', $2, $3, $4, 'pending', 1.0, $5)
+      RETURNING id`,
+      [orgId, `GAN-${date || i}.txt`, body, wordCount, title]
+    );
+    sampleIds.push(insertRes.rows[0].id);
+    log(`  Inserted ${title} (${wordCount} words)`, 'ok');
+  }
 
-  // 3. Run voice analysis
+  // 3. Run voice analysis on each sample
   log('Running voice analysis...');
-  await voiceAnalyzer.analyzeVoiceSample(sampleId);
-  log('Analysis complete', 'ok');
+  for (const sampleId of sampleIds) {
+    await voiceAnalyzer.analyzeVoiceSample(sampleId);
+  }
+  log(`Analysis complete (${sampleIds.length} samples)`, 'ok');
 
   const profileRes = await db.query('SELECT * FROM aggregated_voice_profiles WHERE organization_id = $1', [orgId]);
   const profile = profileRes.rows[0];
@@ -166,7 +197,7 @@ async function main() {
       timestamp: new Date().toISOString(),
       mode: 'local',
       document: DOCX_PATH,
-      sampleId,
+      sampleIds,
       orgId,
       profile: { confidence_score: profile.confidence_score, sample_count: profile.sample_count },
       generated: { title, voiceAdaptationUsed: voiceUsed, voiceProfileConfidence: confidence },

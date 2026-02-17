@@ -1558,6 +1558,29 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
+   * Produce a compact voice profile for prompt injection. Truncates arrays and long strings
+   * to keep token count bounded when many samples are aggregated (e.g. 60+ docs → huge profile).
+   */
+  compactVoiceProfileForPrompt(profile, maxArrayItems = 8, maxStringLen = 200) {
+    const compact = (v) => {
+      if (v === null || v === undefined) return v;
+      if (Array.isArray(v)) return v.slice(0, maxArrayItems).map(compact);
+      if (typeof v === 'object') {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = compact(val);
+        return out;
+      }
+      if (typeof v === 'string' && v.length > maxStringLen) return v.slice(0, maxStringLen) + '...';
+      return v;
+    };
+    const style = profile?.style && typeof profile.style === 'object' ? compact(profile.style) : {};
+    const vocabulary = profile?.vocabulary && typeof profile.vocabulary === 'object' ? compact(profile.vocabulary) : {};
+    const structure = profile?.structure && typeof profile.structure === 'object' ? compact(profile.structure) : {};
+    const formatting = profile?.formatting && typeof profile.formatting === 'object' ? compact(profile.formatting) : {};
+    return { style, vocabulary, structure, formatting };
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
    */
@@ -1571,15 +1594,12 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     // Voice & style from uploaded samples (before brand voice; only when confidence >= 50)
     const confidence = voiceProfile?.confidence_score != null ? Number(voiceProfile.confidence_score) : 0;
     if (voiceProfile && confidence >= 50) {
-      const style = voiceProfile.style && typeof voiceProfile.style === 'object' ? voiceProfile.style : {};
-      const vocabulary = voiceProfile.vocabulary && typeof voiceProfile.vocabulary === 'object' ? voiceProfile.vocabulary : {};
-      const structure = voiceProfile.structure && typeof voiceProfile.structure === 'object' ? voiceProfile.structure : {};
-      const formatting = voiceProfile.formatting && typeof voiceProfile.formatting === 'object' ? voiceProfile.formatting : {};
+      const compact = this.compactVoiceProfileForPrompt(voiceProfile);
       const voiceSection = `VOICE & STYLE (from your uploaded samples — match this precisely):
-- Writing style: ${JSON.stringify(style)}
-- Vocabulary & tone: ${JSON.stringify(vocabulary)}
-- Structure: ${JSON.stringify(structure)}
-- Formatting: ${JSON.stringify(formatting)}
+- Writing style: ${JSON.stringify(compact.style)}
+- Vocabulary & tone: ${JSON.stringify(compact.vocabulary)}
+- Structure: ${JSON.stringify(compact.structure)}
+- Formatting: ${JSON.stringify(compact.formatting)}
 
 Match this writing style PRECISELY so the post feels like it was written by the same person.`;
       contextSections.push(voiceSection);
@@ -2126,7 +2146,7 @@ Full JSON structure (content first, then metadata):
    */
   async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '', opts = {}) {
     const startTime = Date.now();
-    const model = process.env.OPENAI_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_BLOG_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
 
     try {
       console.log(`🚀 Starting enhanced blog generation for organization: ${organizationId}`);
@@ -2619,7 +2639,7 @@ Full JSON structure (content first, then metadata):
    * Client must open GET /api/v1/stream?token= first to get connectionId, then POST here with connectionId.
    */
   async generateBlogPostStream(topic, businessInfo, organizationId, connectionId, options = {}) {
-    const model = process.env.OPENAI_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_BLOG_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
     const additionalInstructions = options.additionalInstructions ?? '';
     try {
       // Attach preloaded tweets, articles, videos from options so prompt can use [TWEET:0], [ARTICLE:0], [VIDEO:0]

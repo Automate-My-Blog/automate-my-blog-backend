@@ -17,7 +17,8 @@ Scientific test: ingest a prospective client's blog collection (GAN Writing - 20
 Uses a **fresh org with only the GAN sample** so the profile is not diluted by other samples.
 
 ```bash
-DATABASE_URL=postgresql://... OPENAI_API_KEY=sk-... \
+# If using gpt-4o-mini for OPENAI_MODEL, set OPENAI_BLOG_MODEL=gpt-4o (128k context for many voice samples)
+OPENAI_BLOG_MODEL=gpt-4o DATABASE_URL=postgresql://... OPENAI_API_KEY=sk-... \
 GAN_DOCX_PATH=/path/to/GAN\ Writing\ -\ 2024.docx \
 node scripts/gan-voice-test/run-gan-voice-test-local.js
 ```
