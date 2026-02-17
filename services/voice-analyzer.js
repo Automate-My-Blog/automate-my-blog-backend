@@ -15,7 +15,7 @@ const VOICE_ANALYSIS_SYSTEM = `You are an expert writing analyst. Analyze the gi
 Respond with a single JSON object (no markdown, no code block) with these exact keys:
 - style_analysis: object with sentence_length_distribution (short/medium/long ratio or description), paragraph_length_preference, voice_perspective (first/second/third), active_vs_passive_ratio (description), question_frequency, list_usage
 - vocabulary_analysis: object with complexity_score (Flesch-Kincaid level or description), formality_level (casual to academic), industry_terms (array or description), signature_phrases (array if any), metaphor_humor_style
-- structural_patterns: object with opening_hook_type, section_organization, transition_phrases (array or description), evidence_style, conclusion_type
+- structural_patterns: object with opening_hook_type, section_organization, transition_phrases (array or description), evidence_style, conclusion_type (e.g. "personal sign-off", "summary", "CTA"), personal_sign_off (boolean or description if author signs with name)
 - formatting_preferences: object with heading_frequency, bullet_vs_numbered, emphasis_style (bold/italic patterns), blockquote_usage
 - quality_score: number 0-100 indicating how representative and analyzable the sample is (length, clarity, consistency).`;
 

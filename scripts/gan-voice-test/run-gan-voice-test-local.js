@@ -21,32 +21,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import db from '../../services/database.js';
 import { extractTextFromFile } from '../../utils/file-extractors.js';
+import { splitDocumentIntoPosts } from '../../utils/split-document-into-posts.js';
 import voiceAnalyzer from '../../services/voice-analyzer.js';
 import enhancedBlogGenerationService from '../../services/enhanced-blog-generation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCX_PATH = process.env.GAN_DOCX_PATH || '/Users/samhilll/Downloads/GAN Writing - 2024.docx';
 const REFERENCE_EXCERPT = fs.readFileSync(path.join(__dirname, 'REFERENCE_EXCERPT.md'), 'utf8');
-
-/** Split document into individual posts by date headers (e.g. "February 8, 2026") */
-function splitIntoPosts(text) {
-  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
-  const dateRe = new RegExp(`(${months}\\s+\\d{1,2},\\s*\\d{4})`, 'gi');
-  const parts = text.split(dateRe);
-  const posts = [];
-  for (let i = 1; i < parts.length; i += 2) {
-    const date = parts[i] || '';
-    const body = (parts[i + 1] || '').trim();
-    const wordCount = body.split(/\s+/).filter(Boolean).length;
-    if (wordCount >= 150) posts.push({ date, body, wordCount });
-  }
-  if (posts.length === 0) {
-    const trimmed = text.trim();
-    const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-    if (wordCount >= 150) posts.push({ date: '', body: trimmed, wordCount });
-  }
-  return posts;
-}
 
 function log(msg, type = 'info') {
   const prefix = type === 'err' ? '❌' : type === 'ok' ? '✅' : '▶';
@@ -79,7 +60,7 @@ Score the generated post on how well it matches the reference voice. Respond wit
 }`;
 
   const resp = await openai.chat.completions.create({
-    model: process.env.OPENAI_MODEL || 'gpt-4o',
+    model: 'gpt-4o',
     temperature: 0.2,
     messages: [{ role: 'user', content: prompt }],
     response_format: { type: 'json_object' },
@@ -124,7 +105,12 @@ async function main() {
     mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   };
   const fullText = await extractTextFromFile(multerFile, 'newsletter');
-  const posts = splitIntoPosts(fullText);
+  let posts = splitDocumentIntoPosts(fullText);
+  const limit = parseInt(process.env.GAN_POST_LIMIT || '0', 10) || posts.length;
+  if (limit < posts.length) {
+    posts = posts.slice(0, limit);
+    log(`Limited to first ${posts.length} posts (GAN_POST_LIMIT=${limit})`, 'ok');
+  }
   log(`Split into ${posts.length} posts (min 150 words each)`, 'ok');
 
   const sampleIds = [];

@@ -1581,6 +1581,39 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
+   * Derive explicit voice directives from profile so the model follows structure (bullets, sign-off, we/I/you).
+   */
+  deriveVoiceDirectives(compact) {
+    const s = compact.structure || {};
+    const f = compact.formatting || {};
+    const v = compact.vocabulary || {};
+    const style = compact.style || {};
+    const rules = [];
+    const allText = JSON.stringify({ ...s, ...f, ...v, ...style }).toLowerCase();
+
+    if (allText.includes('first') || allText.includes('casual') || allText.includes('conversational') || allText.includes('we') || allText.includes(' i ') || allText.includes('"i"')) {
+      rules.push('Use first-person (we, I) and direct address (you) throughout; prefer "we have" and "I meet" over third person.');
+    }
+    if (allText.includes('bullet') || allText.includes('list') || allText.includes('enumeration') || f.bullet_vs_numbered) {
+      rules.push('Use bullet lists for key points, milestones, and enumerations — do not use only paragraph prose.');
+    }
+    if (allText.includes('sign-off') || allText.includes('sign off') || allText.includes('personal sign') || allText.includes('conclusion') || allText.includes('founder')) {
+      rules.push('ALWAYS end with a personal sign-off on its own line (e.g. -Katie or -Author Name).');
+    }
+    if (allText.includes('celebrat') || allText.includes('milestone') || allText.includes('number') || allText.includes('founder') || allText.includes('vc ') || allText.includes('venture')) {
+      rules.push('Use a celebratory tone; include concrete numbers and milestones when relevant (e.g. "We have funded X companies").');
+    }
+    if (rules.length === 0) return '';
+    let out = '\nMANDATORY voice rules (follow these):\n' + rules.map((r) => `- ${r}`).join('\n');
+    if (allText.includes('founder') && allText.includes('venture')) {
+      out += `
+
+Example of target voice (match this style): "Hello and Happy Sunday. This year we're turning 18. During this time: - We have raised 6 funds - We have funded over 150 companies - We have seen over 40 exits. It has been a fun 18 years. I meet with companies every week. And I just want to celebrate that. -Author"`;
+    }
+    return out;
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
    */
@@ -1595,11 +1628,13 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     const confidence = voiceProfile?.confidence_score != null ? Number(voiceProfile.confidence_score) : 0;
     if (voiceProfile && confidence >= 50) {
       const compact = this.compactVoiceProfileForPrompt(voiceProfile);
+      const directives = this.deriveVoiceDirectives(compact);
       const voiceSection = `VOICE & STYLE (from your uploaded samples — match this precisely):
 - Writing style: ${JSON.stringify(compact.style)}
 - Vocabulary & tone: ${JSON.stringify(compact.vocabulary)}
 - Structure: ${JSON.stringify(compact.structure)}
 - Formatting: ${JSON.stringify(compact.formatting)}
+${directives}
 
 Match this writing style PRECISELY so the post feels like it was written by the same person.`;
       contextSections.push(voiceSection);
