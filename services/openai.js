@@ -2734,7 +2734,11 @@ CRITICAL:
 
       if (hasValidMetrics) {
         // Full detailed prompt with metrics
-        prompt = `Write a concise pricing justification (3-4 bullet points max) for this $${monthlyPrice}/month content strategy subscription.
+        const pricingPercentage = ((monthlyPrice / avgMonthlyProfit) * 100).toFixed(1);
+        prompt = `Write a concise value-based pricing justification (4-5 bullet points max) for this $${monthlyPrice}/month content strategy subscription.
+
+**CONTEXT: VALUE-BASED PRICING MODEL**
+This is NOT volume-based pricing. It's ${pricingPercentage}% of projected monthly profit ($${enriched.profitRangeLow.toLocaleString()}-$${enriched.profitRangeHigh.toLocaleString()}). Price adapts to business size, niche complexity, and profit potential. This aligns incentives: we succeed when the customer succeeds.
 
 **AVAILABLE METRICS:**
 - Cost per lead: $${costPerLead} (vs ~$${enriched.projectedCAC} industry CAC)
@@ -2743,28 +2747,34 @@ CRITICAL:
 - Payback: ~${weeksToPayback} weeks
 - Market: ${enriched.competitionLabel} competition
 
-**FORMAT:**
-• [Bullet point 1: Cost per lead vs industry CAC]
-• [Bullet point 2: ROI multiple and payback time]
-• [Bullet point 3: Profit projection]
-• [Bullet point 4: Market positioning advantage]
+**FORMAT (prioritize first 2 bullets, then add 2-3 supporting metrics):**
+• [Bullet 1: Value-based pricing advantage - "Just ${pricingPercentage}% of your projected profit" or "Pricing scales with your success"]
+• [Bullet 2: Aligned incentives - "You only pay more when we help you earn more" or similar]
+• [Bullet 3: Cost per lead vs industry CAC]
+• [Bullet 4: ROI multiple and payback time]
+• [Optional Bullet 5: Profit projection or competitive advantage]
 
-Keep each bullet to ONE concise sentence. NO fluff, NO paragraphs, NO "As the AI consultant" language. Just crisp value statements.`;
+Keep each bullet to ONE concise sentence. Emphasize that this is results-based pricing, not paying for volume. NO fluff, NO "As the AI consultant" language. Just crisp value statements.`;
       } else {
         // Simplified prompt when metrics are unavailable
-        prompt = `Write a concise pricing justification (3 bullet points max) for this $${monthlyPrice}/month content strategy subscription targeting ${enriched.demographics}.
+        prompt = `Write a concise value-based pricing justification (3-4 bullet points max) for this $${monthlyPrice}/month content strategy subscription targeting ${enriched.demographics}.
+
+**CONTEXT: VALUE-BASED PRICING**
+This price adapts to business size and niche complexity. It's results-based pricing aligned with the customer's success, not volume-based.
 
 **FOCUS ON:**
-- Strategic value of consistent content for SEO
-- Cost-effective compared to hiring writers or agencies
+- Value-based pricing that scales with results
+- Strategic value of consistent content for SEO and visibility
+- Cost-effective compared to hiring writers or agencies ($5K-15K+/month)
 - Competitive positioning in ${enriched.competitionLabel.toLowerCase()} market
 
 **FORMAT:**
-• [Bullet 1: SEO and visibility value]
-• [Bullet 2: Cost vs alternatives]
-• [Bullet 3: Competitive advantage]
+• [Bullet 1: Value-based pricing advantage - scales with business success]
+• [Bullet 2: SEO and visibility value]
+• [Bullet 3: Cost vs alternatives (writers/agencies)]
+• [Optional Bullet 4: Competitive advantage in market]
 
-Keep each bullet to ONE concise sentence. NO fluff, NO "As the AI consultant" language. Just crisp value statements.`;
+Keep each bullet to ONE concise sentence. Emphasize this is results-driven pricing. NO fluff, NO "As the AI consultant" language. Just crisp value statements.`;
       }
 
       prompt += `\n\nIMPORTANT: Return ONLY bullet points. No introduction, no conclusion, no "AI-estimated" disclaimers. Just the bullets.`;

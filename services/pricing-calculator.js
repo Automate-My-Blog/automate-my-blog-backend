@@ -181,17 +181,35 @@ class PricingCalculator {
   }
 
   /**
-   * Format pricing for display
+   * Format pricing for display with value-based rationale
    * @param {Object} pricing - Pricing data
    * @returns {string} Formatted pricing message
    */
   formatPricingMessage(pricing) {
     if (!pricing) return '';
 
-    return `Projected Profit: $${pricing.projectedLow.toLocaleString()}-$${pricing.projectedHigh.toLocaleString()}/month. ` +
-           `Subscribe for $${pricing.monthly}/month (${pricing.percentage.monthly}% of your projected profit). ` +
-           `Get ${pricing.posts.recommended} posts/month recommended (up to ${pricing.posts.maximum} available). ` +
-           `Pay annually and save $${pricing.savings.annualSavingsDollars}.`;
+    return `## Value-Based Pricing
+
+**Projected Monthly Profit:** $${pricing.projectedLow.toLocaleString()}-$${pricing.projectedHigh.toLocaleString()}
+
+**Your Monthly Investment:** $${pricing.monthly}/month (${pricing.percentage.monthly}% of projected profit)
+
+### Why Pricing Adapts to Your Business
+
+Our pricing is **value-based, not volume-based**. You pay a percentage of the profit potential we help you unlock. Here's why:
+
+✅ **Aligned Incentives** - We succeed when you succeed. Your investment scales with the value we deliver.
+
+✅ **Complexity-Aware** - Higher competition or complex industries require more sophisticated content strategies. Our pricing reflects the effort needed to drive results.
+
+✅ **Business-Size Appropriate** - Smaller businesses with simpler needs pay less. Larger businesses with complex requirements pay more. Everyone gets excellent ROI.
+
+✅ **Quality Over Volume** - You're paying for results (traffic, leads, conversions), not just post count. We optimize for moving your business forward measurably.
+
+✅ **ROI Tracking** - When you connect Google Analytics, we track the traffic and conversions we drive. Our system optimizes based on real performance data, ensuring your investment delivers returns.
+
+**Recommended:** ${pricing.posts.recommended} posts/month (up to ${pricing.posts.maximum} available)
+**Annual Plan:** Pay yearly and save $${pricing.savings.annualSavingsDollars}/year`;
   }
 
   /**

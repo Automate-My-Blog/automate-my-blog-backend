@@ -29,6 +29,7 @@
   "license": "ISC",
   "description": "Backend API for AutoBlog - AI-powered blog content generation platform",
   "dependencies": {
+    "@google-analytics/data": "^5.2.1",
     "@sendgrid/mail": "^8.1.6",
     "@sparticuz/chromium": "^143.0.4",
     "@vercel/functions": "^3.3.6",
@@ -40,6 +41,8 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "express-rate-limit": "^8.2.1",
+    "google-trends-api": "^4.9.2",
+    "googleapis": "^171.4.0",
     "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.11.0",

@@ -47,6 +47,7 @@ import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
 import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
+import googleIntegrationsRoutes from './routes/google-integrations.js';
 import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
@@ -230,6 +231,9 @@ app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), stra
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
+
+// Google API Integrations (Trends, Search Console, Analytics)
+app.use('/api/v1/google', authService.optionalAuthMiddleware.bind(authService), googleIntegrationsRoutes);
 
 // Email test routes (optional auth for testing)
 app.use('/api/v1/email/test', authService.optionalAuthMiddleware.bind(authService), emailTestRoutes);
