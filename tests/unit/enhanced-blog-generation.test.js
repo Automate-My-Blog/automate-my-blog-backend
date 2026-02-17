@@ -191,6 +191,61 @@ describe('enhanced-blog-generation', () => {
     });
   });
 
+  describe('deriveVoiceDirectives', () => {
+    it('returns empty string when profile has no matching traits', () => {
+      const compact = { style: {}, vocabulary: {}, structure: {}, formatting: {} };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toBe('');
+    });
+
+    it('adds first-person rule when voice_perspective or formality suggests it', () => {
+      const compact = {
+        style: { voice_perspective: 'first' },
+        vocabulary: {},
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('MANDATORY voice rules');
+      expect(out).toContain('first-person');
+      expect(out).toContain('we, I');
+    });
+
+    it('adds bullet rule when list_usage or bullet_vs_numbered present', () => {
+      const compact = {
+        style: {},
+        vocabulary: {},
+        structure: {},
+        formatting: { bullet_vs_numbered: 'bullet' },
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('bullet lists');
+    });
+
+    it('adds sign-off rule when conclusion or founder present', () => {
+      const compact = {
+        style: {},
+        vocabulary: { industry_terms: ['founder'] },
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('personal sign-off');
+    });
+
+    it('adds exemplar when founder and venture in profile', () => {
+      const compact = {
+        style: {},
+        vocabulary: { industry_terms: ['founder', 'venture'] },
+        structure: {},
+        formatting: {},
+      };
+      const out = service.deriveVoiceDirectives(compact);
+      expect(out).toContain('Example of target voice');
+      expect(out).toContain('We have raised');
+    });
+  });
+
   describe('voice comparison (your voice vs generic)', () => {
     it('buildEnhancedPrompt with voiceProfile null produces generic-style prompt', () => {
       const contextWithVoice = {
