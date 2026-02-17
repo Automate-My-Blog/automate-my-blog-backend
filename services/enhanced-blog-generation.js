@@ -1580,37 +1580,61 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     return { style, vocabulary, structure, formatting };
   }
 
+  _suggestsFirstPerson(compact) {
+    const p = String(compact.style?.voice_perspective ?? '').toLowerCase();
+    const f = String(compact.vocabulary?.formality_level ?? '').toLowerCase();
+    return p.includes('first') || f.includes('casual') || f.includes('conversational');
+  }
+
+  _suggestsBulletLists(compact) {
+    const list = String(compact.style?.list_usage ?? '').toLowerCase();
+    const fmt = compact.formatting?.bullet_vs_numbered;
+    return list.includes('bullet') || list.includes('list') || (fmt && String(fmt).toLowerCase().includes('bullet'));
+  }
+
+  _suggestsPersonalSignOff(compact) {
+    const c = String(compact.structure?.conclusion_type ?? '').toLowerCase();
+    const pso = compact.structure?.personal_sign_off;
+    return c.includes('sign-off') || c.includes('sign off') || c.includes('personal') || !!pso;
+  }
+
+  _suggestsCelebratoryOrMilestoneTone(compact) {
+    const evidence = String(compact.structure?.evidence_style ?? '').toLowerCase();
+    const meta = String(compact.vocabulary?.metaphor_humor_style ?? '').toLowerCase();
+    const formality = String(compact.vocabulary?.formality_level ?? '').toLowerCase();
+    return (
+      evidence.includes('milestone') ||
+      evidence.includes('number') ||
+      evidence.includes('statistic') ||
+      evidence.includes('concrete') ||
+      meta.includes('celebrat') ||
+      meta.includes('warm') ||
+      meta.includes('enthusiastic') ||
+      formality.includes('celebrat')
+    );
+  }
+
   /**
-   * Derive explicit voice directives from profile so the model follows structure (bullets, sign-off, we/I/you).
+   * Derive explicit voice directives from structured profile fields.
+   * Uses analyzer output (voice_perspective, list_usage, conclusion_type, etc.) so directives
+   * apply generically to any document type, not domain-specific keywords.
    */
   deriveVoiceDirectives(compact) {
-    const s = compact.structure || {};
-    const f = compact.formatting || {};
-    const v = compact.vocabulary || {};
-    const style = compact.style || {};
     const rules = [];
-    const allText = JSON.stringify({ ...s, ...f, ...v, ...style }).toLowerCase();
-
-    if (allText.includes('first') || allText.includes('casual') || allText.includes('conversational') || allText.includes('we') || allText.includes(' i ') || allText.includes('"i"')) {
+    if (this._suggestsFirstPerson(compact)) {
       rules.push('Use first-person (we, I) and direct address (you) throughout; prefer "we have" and "I meet" over third person.');
     }
-    if (allText.includes('bullet') || allText.includes('list') || allText.includes('enumeration') || f.bullet_vs_numbered) {
+    if (this._suggestsBulletLists(compact)) {
       rules.push('Use bullet lists for key points, milestones, and enumerations — do not use only paragraph prose.');
     }
-    if (allText.includes('sign-off') || allText.includes('sign off') || allText.includes('personal sign') || allText.includes('conclusion') || allText.includes('founder')) {
-      rules.push('ALWAYS end with a personal sign-off on its own line (e.g. -Katie or -Author Name).');
+    if (this._suggestsPersonalSignOff(compact)) {
+      rules.push('ALWAYS end with a personal sign-off on its own line (e.g. -Author Name).');
     }
-    if (allText.includes('celebrat') || allText.includes('milestone') || allText.includes('number') || allText.includes('founder') || allText.includes('vc ') || allText.includes('venture')) {
-      rules.push('Use a celebratory tone; include concrete numbers and milestones when relevant (e.g. "We have funded X companies").');
+    if (this._suggestsCelebratoryOrMilestoneTone(compact)) {
+      rules.push('Use a celebratory tone; include concrete numbers and milestones when relevant.');
     }
     if (rules.length === 0) return '';
-    let out = '\nMANDATORY voice rules (follow these):\n' + rules.map((r) => `- ${r}`).join('\n');
-    if (allText.includes('founder') && allText.includes('venture')) {
-      out += `
-
-Example of target voice (match this style): "Hello and Happy Sunday. This year we're turning 18. During this time: - We have raised 6 funds - We have funded over 150 companies - We have seen over 40 exits. It has been a fun 18 years. I meet with companies every week. And I just want to celebrate that. -Author"`;
-    }
-    return out;
+    return '\nMANDATORY voice rules (follow these):\n' + rules.map((r) => `- ${r}`).join('\n');
   }
 
   /**

@@ -222,27 +222,27 @@ describe('enhanced-blog-generation', () => {
       expect(out).toContain('bullet lists');
     });
 
-    it('adds sign-off rule when conclusion or founder present', () => {
+    it('adds sign-off rule when conclusion_type or personal_sign_off present', () => {
       const compact = {
         style: {},
-        vocabulary: { industry_terms: ['founder'] },
-        structure: {},
+        vocabulary: {},
+        structure: { conclusion_type: 'personal sign-off' },
         formatting: {},
       };
       const out = service.deriveVoiceDirectives(compact);
       expect(out).toContain('personal sign-off');
     });
 
-    it('adds exemplar when founder and venture in profile', () => {
+    it('adds celebratory rule when evidence_style or metaphor_humor_style suggests it', () => {
       const compact = {
         style: {},
-        vocabulary: { industry_terms: ['founder', 'venture'] },
-        structure: {},
+        vocabulary: { metaphor_humor_style: 'celebratory and warm' },
+        structure: { evidence_style: 'concrete milestones and numbers' },
         formatting: {},
       };
       const out = service.deriveVoiceDirectives(compact);
-      expect(out).toContain('Example of target voice');
-      expect(out).toContain('We have raised');
+      expect(out).toContain('celebratory');
+      expect(out).toContain('milestones');
     });
   });
 
