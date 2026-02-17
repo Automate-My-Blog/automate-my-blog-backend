@@ -435,41 +435,43 @@ router.get('/trends/preview', async (req, res) => {
     const OpenAI = (await import('openai')).default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `You are analyzing Google Trends data for a user's content strategy. Generate a data-driven summary explaining the trending opportunities.
+    const prompt = `You are analyzing Google Trends data for a user's content strategy. Write a clear, actionable summary.
 
-CRITICAL: You MUST include specific numbers and percentages. Reference the actual growth rates shown below.
-
-Structure your response as follows:
-
-**📈 TRENDING TOPICS FOUND:**
-List each trending query with its exact growth metric:
-- "[Query Name]" (↑ [exact % or metric from data])
-- Explain what this growth means in plain terms
-
-**🎯 HOW TO TARGET:**
-- Search volume insight: What the numbers tell us about opportunity size
-- Content strategy: Which specific topics to prioritize based on growth rates
-- Keywords to use in your content based on these trends
-
-**💡 IMPACT ON YOUR CONTENT:**
-- Expected visibility boost from targeting these trends
-- Timing advantage: Why creating content NOW matters
-- Competitive edge: How early adoption helps
+IMPORTANT: The numbers show RELATIVE growth (how much search interest increased over the past month), not absolute search volume. Higher numbers = faster-growing interest.
 
 DATA FOUND:
 ${trendingData.map(td => `
 Audience: ${td.audience}
 Base Keyword: "${td.keyword}"
-Rising Queries with Growth:
-${td.trends.map(t => `  • "${t.query}" - Growth: ${t.formattedValue || (t.value + '%')} ${t.value > 1000 ? '(BREAKING OUT - Massive spike)' : t.value > 500 ? '(SURGING - Major growth)' : '(RISING - Significant interest)'}`).join('\n')}
+Rising Queries:
+${td.trends.map(t => `  • "${t.query}" - ${t.value}% growth ${t.value > 1000 ? '(BREAKOUT)' : t.value > 500 ? '(SURGING)' : '(RISING)'}`).join('\n')}
 `).join('\n')}
 
-REQUIREMENTS:
-- Use bullet points and clear sections
-- Include ALL growth percentages from the data
-- Explain what each metric means for their strategy
-- Be specific about how to use this data
-- Keep it actionable and data-focused`;
+Write exactly this structure:
+
+**📈 TRENDING TOPICS FOUND**
+
+Write 1-2 sentences explaining that these topics show the fastest-growing search interest in the past month. Then list ONLY the top 5 queries as bullets:
+- "query name" - X% growth (explain in 1 sentence what this means)
+
+**🎯 HOW TO TARGET**
+
+Write 2-3 clear paragraphs (NOT bullets) explaining:
+1. What these growth rates tell us about opportunity
+2. Which specific content topics to create right now
+3. Exact keywords to use in titles and content
+
+**💡 IMPACT ON YOUR CONTENT**
+
+Write 2 short paragraphs (NOT bullets) about:
+1. Why creating content on these topics NOW gives you a timing advantage
+2. What visibility boost to expect from early adoption
+
+CRITICAL RULES:
+- Only use bullets for the topic list under "TRENDING TOPICS FOUND"
+- Everything else should be regular paragraphs
+- Keep sentences concise and direct
+- Focus on actionable insights, not generic advice`;
 
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
