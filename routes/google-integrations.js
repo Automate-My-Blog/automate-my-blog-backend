@@ -435,39 +435,36 @@ router.get('/trends/preview', async (req, res) => {
     const OpenAI = (await import('openai')).default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `Analyze trending search data and write a concise summary. Be direct and actionable.
+    const prompt = `Summarize trending topics in 2-3 sentences total. Be extremely concise.
 
-TRENDING DATA:
+DATA:
 ${trendingData.map(td => `${td.trends.slice(0, 5).map(t => `"${t.query}" (+${t.value}%)`).join(', ')}`).join('; ')}
 
-Write exactly this format (keep it SHORT):
+Write EXACTLY this format:
 
-**📈 TRENDING TOPICS FOUND**
+**📈 TRENDING TOPICS**
 
-List the top 3-4 queries with growth %, nothing else:
-- "query" (+X%)
-- "query" (+X%)
+[Number] topics including "[topic 1]", "[topic 2]", and "[topic 3]".
 
 **🎯 WHAT TO DO NOW**
 
-One paragraph: Which specific articles to write this week to catch these trends. Be concrete about topics, not generic.
+We will create content like "[specific article title 1]", "[specific article title 2]", and "[specific article title 3]" to target this opportunity.
 
 **💡 WHY THIS MATTERS**
 
-One short paragraph: These are rising fast - create content now to get early visibility before competition increases.
+These topics are growing fast - create content now to capture early traffic.
 
 RULES:
-- ONLY bullets for the topic list
-- Everything else is plain paragraphs (NO bullets)
-- Keep it under 150 words total
-- No repetitive explanations`;
+- No bullets anywhere
+- Maximum 3 sentences per section
+- No explanations, just the summary`;
 
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: 0.7,
-      max_tokens: 300
+      max_tokens: 200
     });
 
     for await (const chunk of stream) {
