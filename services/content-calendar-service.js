@@ -1,10 +1,12 @@
 /**
  * Content Calendar Service
- * Generates and persists 30-day content calendar for strategies on purchase (Issue #270).
+ * Generates and persists N-day content calendar for strategies on purchase (Issue #270). Default 7 days (CONTENT_CALENDAR_DAYS).
  */
 
 import db from './database.js';
 import openaiService from './openai.js';
+
+const CONTENT_CALENDAR_DAYS = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
 
 /** Progress phases for one strategy (for granular progress reporting). */
 export const CONTENT_CALENDAR_PHASES = [
@@ -19,7 +21,7 @@ const PHASE_MESSAGES = {
   audience: 'Loading audience...',
   organization: 'Loading organization context...',
   keywords: 'Loading SEO keywords...',
-  generating: 'Generating 30-day ideas with AI...',
+  generating: `Generating ${CONTENT_CALENDAR_DAYS}-day ideas with AI...`,
   saving: 'Saving calendar...'
 };
 
@@ -90,7 +92,7 @@ export async function generateAndSaveContentCalendar(strategyId, opts = {}) {
     const seoKeywords = keywordsResult.rows.map((r) => ({ keyword: r.keyword, search_volume: r.search_volume }));
 
     reportProgress(onProgress, 'generating', undefined, undefined, strategyId);
-    const ideas = await openaiService.generateContentCalendarIdeas(audience, orgContext, seoKeywords);
+    const ideas = await openaiService.generateContentCalendarIdeas(audience, orgContext, seoKeywords, { days: CONTENT_CALENDAR_DAYS });
 
     reportProgress(onProgress, 'saving', undefined, undefined, strategyId);
     await db.query(

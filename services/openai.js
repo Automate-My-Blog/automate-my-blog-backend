@@ -839,14 +839,16 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
   }
 
   /**
-   * Generate 30-day content calendar ideas for a strategy/audience.
-   * Used when user subscribes to a strategy (Issue #270).
+   * Generate N-day content calendar ideas for a strategy/audience (default 7 days).
+   * Used when user subscribes to a strategy (Issue #270). Day count from CONTENT_CALENDAR_DAYS env or options.days.
    * @param {Object} audience - Audience/strategy row: target_segment, customer_problem, business_value, conversion_path
    * @param {Object} orgContext - { businessType, targetAudience, contentFocus, brandVoice? }
    * @param {Array<{keyword: string, search_volume?: number}>} seoKeywords - From seo_keywords table
+   * @param {{ days?: number }} [options] - Optional. days: number of ideas (default from CONTENT_CALENDAR_DAYS env or 7)
    * @returns {Promise<Array<{dayNumber: number, title: string, searchIntent?: string, format?: string, keywords?: string[]}>>}
    */
-  async generateContentCalendarIdeas(audience, orgContext = {}, seoKeywords = []) {
+  async generateContentCalendarIdeas(audience, orgContext = {}, seoKeywords = [], options = {}) {
+    const days = options.days ?? (parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7);
     const model = process.env.OPENAI_CALENDAR_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const targetSegment = typeof audience.target_segment === 'string'
       ? (() => { try { return JSON.parse(audience.target_segment); } catch { return {}; } })()
@@ -859,7 +861,7 @@ Return an array of 2 SEO-optimized topics that address real search intent with c
     const keywordList = seoKeywords.slice(0, 15).map((k) => k.keyword || k).filter(Boolean);
     const keywordStr = keywordList.length > 0 ? `\nSEO keywords to weave in: ${keywordList.join(', ')}` : '';
 
-    const prompt = `Generate exactly 30 unique blog post ideas for a 30-day content calendar.
+    const prompt = `Generate exactly ${days} unique blog post ideas for a ${days}-day content calendar.
 
 AUDIENCE:
 - Demographics/Target: ${demographics}
@@ -873,7 +875,7 @@ ORGANIZATION CONTEXT:
 ${keywordStr}
 
 REQUIREMENTS:
-- 30 unique ideas, one per day (dayNumber 1-30)
+- ${days} unique ideas, one per day (dayNumber 1-${days})
 - Mix formats: how-to, listicle, guide, case-study, comparison, checklist
 - SEO-optimized titles (50-60 chars ideal)
 - Varied topics; no duplicates or near-duplicates
@@ -908,10 +910,10 @@ Return a JSON array only, no other text:
       if (!Array.isArray(ideas)) {
         ideas = ideas?.ideas ?? ideas?.contentIdeas ?? ideas?.calendar ?? [];
       }
-      if (!Array.isArray(ideas) || ideas.length < 30) {
-        console.warn(`generateContentCalendarIdeas: got ${ideas?.length ?? 0} ideas, expected 30`);
+      if (!Array.isArray(ideas) || ideas.length < days) {
+        console.warn(`generateContentCalendarIdeas: got ${ideas?.length ?? 0} ideas, expected ${days}`);
       }
-      return (ideas || []).slice(0, 30).map((item, i) => ({
+      return (ideas || []).slice(0, days).map((item, i) => ({
         dayNumber: item.dayNumber ?? i + 1,
         title: item.title || `Post idea ${i + 1}`,
         searchIntent: item.searchIntent,

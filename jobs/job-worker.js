@@ -246,6 +246,7 @@ async function processContentCalendar(jobId, input, context) {
     throw new Error('content_calendar job requires non-empty strategyIds in input');
   }
 
+  const contentCalendarDays = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
   const totalStrategies = strategyIds.length;
   const { generateContentCalendarsForStrategies, CONTENT_CALENDAR_PHASES } = await import('../services/content-calendar-service.js');
   const phasesPerStrategy = CONTENT_CALENDAR_PHASES.length;
@@ -281,12 +282,12 @@ async function processContentCalendar(jobId, input, context) {
 
   await updateJobProgress(jobId, {
     progress: 5,
-    current_step: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : 'Generating 30-day content calendar...',
+    current_step: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
     estimated_seconds_remaining: 60
   }).catch(() => {});
   publishJobStreamEvent(connection, jobId, 'progress-update', {
     progress: 5,
-    currentStep: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : 'Generating 30-day content calendar...',
+    currentStep: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
     estimatedTimeRemaining: 60
   });
 
