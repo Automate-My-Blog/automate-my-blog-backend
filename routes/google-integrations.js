@@ -435,48 +435,36 @@ router.get('/trends/preview', async (req, res) => {
     const OpenAI = (await import('openai')).default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `You are analyzing Google Trends data for a user's content strategy. Generate a data-driven summary explaining the trending opportunities.
+    const prompt = `Summarize trending topics in 2-3 sentences total. Be extremely concise.
 
-CRITICAL: You MUST include specific numbers and percentages. Reference the actual growth rates shown below.
+DATA:
+${trendingData.map(td => `${td.trends.slice(0, 5).map(t => `"${t.query}" (+${t.value}%)`).join(', ')}`).join('; ')}
 
-Structure your response as follows:
+Write EXACTLY this format:
 
-**📈 TRENDING TOPICS FOUND:**
-List each trending query with its exact growth metric:
-- "[Query Name]" (↑ [exact % or metric from data])
-- Explain what this growth means in plain terms
+**📈 TRENDING TOPICS**
 
-**🎯 HOW TO TARGET:**
-- Search volume insight: What the numbers tell us about opportunity size
-- Content strategy: Which specific topics to prioritize based on growth rates
-- Keywords to use in your content based on these trends
+[Number] topics including "[topic 1]", "[topic 2]", and "[topic 3]".
 
-**💡 IMPACT ON YOUR CONTENT:**
-- Expected visibility boost from targeting these trends
-- Timing advantage: Why creating content NOW matters
-- Competitive edge: How early adoption helps
+**🎯 WHAT TO DO NOW**
 
-DATA FOUND:
-${trendingData.map(td => `
-Audience: ${td.audience}
-Base Keyword: "${td.keyword}"
-Rising Queries with Growth:
-${td.trends.map(t => `  • "${t.query}" - Growth: ${t.formattedValue || (t.value + '%')} ${t.value > 1000 ? '(BREAKING OUT - Massive spike)' : t.value > 500 ? '(SURGING - Major growth)' : '(RISING - Significant interest)'}`).join('\n')}
-`).join('\n')}
+We will create content like "[specific article title 1]", "[specific article title 2]", and "[specific article title 3]" to target this opportunity.
 
-REQUIREMENTS:
-- Use bullet points and clear sections
-- Include ALL growth percentages from the data
-- Explain what each metric means for their strategy
-- Be specific about how to use this data
-- Keep it actionable and data-focused`;
+**💡 WHY THIS MATTERS**
+
+These topics are growing fast - create content now to capture early traffic.
+
+RULES:
+- No bullets anywhere
+- Maximum 3 sentences per section
+- No explanations, just the summary`;
 
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: 0.7,
-      max_tokens: 500
+      max_tokens: 200
     });
 
     for await (const chunk of stream) {
