@@ -151,8 +151,7 @@ router.get('/overview', authService.authMiddleware.bind(authService), async (req
         business_type,
         industry_category,
         business_model,
-        target_audience,
-        content_focus
+        target_audience
       FROM organizations
       WHERE id = $1
     `;
