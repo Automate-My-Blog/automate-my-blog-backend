@@ -152,13 +152,18 @@ const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NOD
 const isDev = process.env.NODE_ENV === 'development';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isDevelopment ? 1000 : 100,
+  max: isDevelopment ? 10000 : 100, // Increased for local dev with many API calls
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health' || req.path === '/manifest.json'
+  skip: (req) => {
+    // Skip rate limiting for health checks and localhost in development
+    if (req.path === '/health' || req.path === '/manifest.json') return true;
+    if (isDevelopment && (req.hostname === 'localhost' || req.hostname === '127.0.0.1')) return true;
+    return false;
+  }
 });
 
 app.use(limiter);
