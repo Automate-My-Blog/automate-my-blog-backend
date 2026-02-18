@@ -1,54 +1,19 @@
 /**
  * Content Calendar Service
- * Generates and persists N-day content calendar for strategies on purchase (Issue #270). Default 7 days (CONTENT_CALENDAR_DAYS).
+ * Generates and persists 30-day content calendar for strategies on purchase (Issue #270).
  */
 
 import db from './database.js';
 import openaiService from './openai.js';
-
-const CONTENT_CALENDAR_DAYS = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
-
-/** Progress phases for one strategy (for granular progress reporting). */
-export const CONTENT_CALENDAR_PHASES = [
-  'audience',
-  'organization',
-  'keywords',
-  'generating',
-  'saving'
-];
-
-const PHASE_MESSAGES = {
-  audience: 'Loading audience...',
-  organization: 'Loading organization context...',
-  keywords: 'Loading SEO keywords...',
-  generating: `Generating ${CONTENT_CALENDAR_DAYS}-day ideas with AI...`,
-  saving: 'Saving calendar...'
-};
-
-/**
- * Report progress for a single phase.
- * @param {((opts: { phase: string, message: string, strategyIndex?: number, strategyTotal?: number, strategyId?: string }) => void)|undefined} onProgress
- * @param {string} phase - One of CONTENT_CALENDAR_PHASES
- * @param {number} [strategyIndex] - 0-based index of current strategy
- * @param {number} [strategyTotal] - Total number of strategies
- * @param {string} [strategyId] - Current strategy/audience id
- */
-function reportProgress(onProgress, phase, strategyIndex, strategyTotal, strategyId) {
-  if (typeof onProgress !== 'function') return;
-  const message = PHASE_MESSAGES[phase] || phase;
-  onProgress({ phase, message, strategyIndex, strategyTotal, strategyId });
-}
+import googleContentOptimizer from './google-content-optimizer.js';
 
 /**
  * Generate and save 30-day content ideas for a strategy (audience).
  * @param {string} strategyId - audiences.id (strategy_id)
- * @param {{ onProgress?: (opts: { phase: string, message: string, strategyIndex?: number, strategyTotal?: number, strategyId?: string }) => void }} [opts] - Optional progress callback
  * @returns {Promise<{ strategyId: string, success: boolean, ideaCount?: number, error?: string }>}
  */
-export async function generateAndSaveContentCalendar(strategyId, opts = {}) {
-  const { onProgress } = opts;
+export async function generateAndSaveContentCalendar(strategyId) {
   try {
-    reportProgress(onProgress, 'audience', undefined, undefined, strategyId);
     const audienceResult = await db.query(
       `SELECT a.id, a.target_segment, a.customer_problem, a.business_value, a.conversion_path,
               a.organization_intelligence_id, oi.organization_id
@@ -65,7 +30,6 @@ export async function generateAndSaveContentCalendar(strategyId, opts = {}) {
     const audience = audienceResult.rows[0];
     let orgContext = {};
 
-    reportProgress(onProgress, 'organization', undefined, undefined, strategyId);
     if (audience.organization_id) {
       const orgResult = await db.query(
         `SELECT o.business_type, o.target_audience, o.description, o.brand_voice
@@ -84,17 +48,39 @@ export async function generateAndSaveContentCalendar(strategyId, opts = {}) {
       }
     }
 
-    reportProgress(onProgress, 'keywords', undefined, undefined, strategyId);
     const keywordsResult = await db.query(
       `SELECT keyword, search_volume FROM seo_keywords WHERE audience_id = $1 ORDER BY relevance_score DESC NULLS LAST LIMIT 20`,
       [strategyId]
     );
     const seoKeywords = keywordsResult.rows.map((r) => ({ keyword: r.keyword, search_volume: r.search_volume }));
 
-    reportProgress(onProgress, 'generating', undefined, undefined, strategyId);
-    const ideas = await openaiService.generateContentCalendarIdeas(audience, orgContext, seoKeywords, { days: CONTENT_CALENDAR_DAYS });
+    // Fetch Google data to inform content strategy
+    let googleData = null;
+    try {
+      // Get user_id from audience
+      const userResult = await db.query(`SELECT user_id FROM audiences WHERE id = $1`, [strategyId]);
+      const userId = userResult.rows[0]?.user_id;
 
-    reportProgress(onProgress, 'saving', undefined, undefined, strategyId);
+      if (userId) {
+        const [trending, opportunities] = await Promise.all([
+          googleContentOptimizer.getTrendingTopicsForUser(userId, 10),
+          googleContentOptimizer.getContentOpportunities(userId, 10)
+        ]);
+
+        googleData = {
+          trending: trending.slice(0, 5), // Top 5 trending topics
+          opportunities: opportunities.slice(0, 5) // Top 5 opportunities
+        };
+
+        console.log(`📊 Fetched Google data for calendar: ${trending.length} trends, ${opportunities.length} opportunities`);
+      }
+    } catch (error) {
+      console.error('⚠️ Failed to fetch Google data for calendar:', error.message);
+      // Continue without Google data
+    }
+
+    const ideas = await openaiService.generateContentCalendarIdeas(audience, orgContext, seoKeywords, googleData);
+
     await db.query(
       `UPDATE audiences SET content_ideas = $1, content_calendar_generated_at = NOW(), updated_at = NOW() WHERE id = $2`,
       [JSON.stringify(ideas), strategyId]
@@ -111,19 +97,12 @@ export async function generateAndSaveContentCalendar(strategyId, opts = {}) {
 /**
  * Generate calendars for multiple strategies. Continues on per-strategy failure.
  * @param {string[]} strategyIds
- * @param {{ onProgress?: (opts: { phase: string, message: string, strategyIndex?: number, strategyTotal?: number, strategyId?: string }) => void }} [opts] - Optional progress callback (receives strategyIndex/strategyTotal in each call)
  * @returns {Promise<{ results: Array<{ strategyId: string, success: boolean, ideaCount?: number, error?: string }> }>}
  */
-export async function generateContentCalendarsForStrategies(strategyIds, opts = {}) {
-  const { onProgress } = opts;
-  const total = strategyIds.length;
+export async function generateContentCalendarsForStrategies(strategyIds) {
   const results = [];
-  for (let i = 0; i < strategyIds.length; i++) {
-    const id = strategyIds[i];
-    const wrappedProgress = typeof onProgress === 'function'
-      ? (p) => onProgress({ ...p, strategyIndex: i, strategyTotal: total, strategyId: id })
-      : undefined;
-    const r = await generateAndSaveContentCalendar(id, { onProgress: wrappedProgress });
+  for (const id of strategyIds) {
+    const r = await generateAndSaveContentCalendar(id);
     results.push(r);
   }
   return { results };
