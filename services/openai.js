@@ -2983,7 +2983,7 @@ Example format:
    - Show concrete outcomes for their business type
 
 3. **pricing** (3-4 paragraphs): Explain outcome-aligned pricing in their context:
-   - Para 1: Introduce value-based pricing (not effort-based)
+   - Para 1: Introduce value-based pricing (not effort-based). Emphasize: "We win by driving outcomes, not by billing hours or post count, since post count is an input - not an output!"
    - Para 2: Explain that high-competition keywords in lucrative markets (where ${businessType || 'their products'} typically command premium prices) require more investment and carry higher rates
    - Para 3: Conversely, low-competition long-tail keywords for lower-value ${businessType || 'products'} cost less, matching what we create with the value delivered
    - Para 4: Emphasize this approach remains 10x cheaper than traditional agencies while aligning with their business outcomes
@@ -3048,7 +3048,7 @@ Return ONLY valid JSON with this structure:
           'Guide them naturally toward your products or services',
           'Build long-term organic traffic and conversions'
         ],
-        pricing: `We price based on value delivered, not effort required. When you subscribe to an audience strategy, you pay a fixed monthly price for a set number of high-quality posts.\n\nKeywords with more competition in lucrative markets require more investment and carry higher rates. This ensures our system invests appropriately in opportunities that can meaningfully move your revenue.\n\nConversely, you'll pay far less for low-competition, long-tail keywords targeting lower-value products—matching what you pay with the value we create.\n\nThis value-aligned approach remains 10x cheaper than traditional agencies while ensuring fair pricing for both sides.`,
+        pricing: `We price based on value delivered, not effort required. When you subscribe to an audience strategy, you pay a fixed monthly price for a set number of high-quality posts. We win by driving outcomes, not by billing hours or post count—since post count is an input, not an output!\n\nKeywords with more competition in lucrative markets require more investment and carry higher rates. This ensures our system invests appropriately in opportunities that can meaningfully move your revenue.\n\nConversely, you'll pay far less for low-competition, long-tail keywords targeting lower-value products—matching what you pay with the value we create.\n\nThis value-aligned approach remains 10x cheaper than traditional agencies while aligning pricing with the real business value we deliver.`,
         integrations: {
           heading: allIntegrationsConnected ? 'Your Google Integrations Are Active' : 'Maximize Your Results with Google Integrations',
           message: allIntegrationsConnected
