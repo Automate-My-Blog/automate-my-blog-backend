@@ -586,9 +586,20 @@ router.get('/search-console/top-queries', async (req, res) => {
       return res.status(400).json({ error: 'siteUrl, startDate, and endDate parameters required' });
     }
 
-    // TODO: Get user's OAuth tokens from session/database
-    // const userTokens = req.user.googleTokens;
-    // await googleSearchConsoleService.initializeAuth(userTokens);
+    // Get user's OAuth credentials
+    const userId = req.user.userId;
+    const credentials = await oauthManager.getCredentials(userId, 'google_search_console');
+
+    if (!credentials) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google Search Console not connected. Please connect your account first.',
+        needsReconnect: true
+      });
+    }
+
+    // Initialize GSC service with user's OAuth tokens
+    await googleSearchConsoleService.initializeAuth(credentials);
 
     const result = await googleSearchConsoleService.getTopQueries(
       siteUrl,
@@ -600,6 +611,16 @@ router.get('/search-console/top-queries', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching Google Search Console:', error);
+
+    // Handle token expiration errors
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect your account.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -622,7 +643,21 @@ router.get('/search-console/page-performance', async (req, res) => {
       return res.status(400).json({ error: 'siteUrl, pageUrl, startDate, and endDate parameters required' });
     }
 
-    // TODO: Get user's OAuth tokens from session/database
+    // Get user's OAuth credentials
+    const userId = req.user.userId;
+    const credentials = await oauthManager.getCredentials(userId, 'google_search_console');
+
+    if (!credentials) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google Search Console not connected. Please connect your account first.',
+        needsReconnect: true
+      });
+    }
+
+    // Initialize GSC service with user's OAuth tokens
+    await googleSearchConsoleService.initializeAuth(credentials);
+
     const result = await googleSearchConsoleService.getPagePerformance(
       siteUrl,
       pageUrl,
@@ -633,6 +668,16 @@ router.get('/search-console/page-performance', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching Google Search Console:', error);
+
+    // Handle token expiration errors
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect your account.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -642,19 +687,36 @@ router.get('/search-console/page-performance', async (req, res) => {
  * Get page performance from Google Analytics
  *
  * Query params:
+ * - propertyId (required): GA4 Property ID
  * - pageUrl (required): The page URL path
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
 router.get('/analytics/page-performance', async (req, res) => {
   try {
-    const { pageUrl, startDate, endDate } = req.query;
+    const { propertyId, pageUrl, startDate, endDate } = req.query;
 
-    if (!pageUrl || !startDate || !endDate) {
-      return res.status(400).json({ error: 'pageUrl, startDate, and endDate parameters required' });
+    if (!propertyId || !pageUrl || !startDate || !endDate) {
+      return res.status(400).json({ error: 'propertyId, pageUrl, startDate, and endDate parameters required' });
     }
 
+    // Get user's OAuth credentials
+    const userId = req.user.userId;
+    const credentials = await oauthManager.getCredentials(userId, 'google_analytics');
+
+    if (!credentials) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google Analytics not connected. Please connect your account first.',
+        needsReconnect: true
+      });
+    }
+
+    // Initialize GA service with user's OAuth tokens
+    await googleAnalyticsService.initializeAuth(credentials);
+
     const result = await googleAnalyticsService.getPagePerformance(
+      propertyId,
       pageUrl,
       startDate,
       endDate
@@ -663,6 +725,16 @@ router.get('/analytics/page-performance', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching Google Analytics:', error);
+
+    // Handle token expiration errors
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect your account.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -672,18 +744,35 @@ router.get('/analytics/page-performance', async (req, res) => {
  * Get traffic sources breakdown from Google Analytics
  *
  * Query params:
+ * - propertyId (required): GA4 Property ID
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
 router.get('/analytics/traffic-sources', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
+    const { propertyId, startDate, endDate } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({ error: 'startDate and endDate parameters required' });
+    if (!propertyId || !startDate || !endDate) {
+      return res.status(400).json({ error: 'propertyId, startDate, and endDate parameters required' });
     }
 
+    // Get user's OAuth credentials
+    const userId = req.user.userId;
+    const credentials = await oauthManager.getCredentials(userId, 'google_analytics');
+
+    if (!credentials) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google Analytics not connected. Please connect your account first.',
+        needsReconnect: true
+      });
+    }
+
+    // Initialize GA service with user's OAuth tokens
+    await googleAnalyticsService.initializeAuth(credentials);
+
     const result = await googleAnalyticsService.getTrafficSources(
+      propertyId,
       startDate,
       endDate
     );
@@ -691,6 +780,16 @@ router.get('/analytics/traffic-sources', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error fetching Google Analytics:', error);
+
+    // Handle token expiration errors
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect your account.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -700,6 +799,7 @@ router.get('/analytics/traffic-sources', async (req, res) => {
  * Compare performance of trend-informed vs standard content
  *
  * Body:
+ * - propertyId (required): GA4 Property ID
  * - trendInformedUrls (required): Array of trend-informed post URLs
  * - standardUrls (required): Array of standard post URLs
  * - startDate (required): Start date (YYYY-MM-DD)
@@ -707,11 +807,11 @@ router.get('/analytics/traffic-sources', async (req, res) => {
  */
 router.post('/analytics/compare-trend-performance', async (req, res) => {
   try {
-    const { trendInformedUrls, standardUrls, startDate, endDate } = req.body;
+    const { propertyId, trendInformedUrls, standardUrls, startDate, endDate } = req.body;
 
-    if (!trendInformedUrls || !standardUrls || !startDate || !endDate) {
+    if (!propertyId || !trendInformedUrls || !standardUrls || !startDate || !endDate) {
       return res.status(400).json({
-        error: 'trendInformedUrls, standardUrls, startDate, and endDate are required'
+        error: 'propertyId, trendInformedUrls, standardUrls, startDate, and endDate are required'
       });
     }
 
@@ -721,7 +821,23 @@ router.post('/analytics/compare-trend-performance', async (req, res) => {
       });
     }
 
+    // Get user's OAuth credentials
+    const userId = req.user.userId;
+    const credentials = await oauthManager.getCredentials(userId, 'google_analytics');
+
+    if (!credentials) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google Analytics not connected. Please connect your account first.',
+        needsReconnect: true
+      });
+    }
+
+    // Initialize GA service with user's OAuth tokens
+    await googleAnalyticsService.initializeAuth(credentials);
+
     const result = await googleAnalyticsService.compareTrendPerformance(
+      propertyId,
       trendInformedUrls,
       standardUrls,
       startDate,
@@ -731,6 +847,16 @@ router.post('/analytics/compare-trend-performance', async (req, res) => {
     res.json({ success: true, data: result });
   } catch (error) {
     console.error('Error comparing trend performance:', error);
+
+    // Handle token expiration errors
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect your account.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });

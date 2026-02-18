@@ -1,4 +1,5 @@
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
+import { google } from 'googleapis';
 
 /**
  * Google Analytics Service
@@ -6,40 +7,45 @@ import { BetaAnalyticsDataClient } from '@google-analytics/data';
  */
 export class GoogleAnalyticsService {
   constructor() {
-    this.propertyId = process.env.GOOGLE_ANALYTICS_PROPERTY_ID?.trim();
-    this.credentials = process.env.GOOGLE_ANALYTICS_CREDENTIALS
-      ? JSON.parse(process.env.GOOGLE_ANALYTICS_CREDENTIALS)
-      : null;
+    // Will use OAuth2 for user-specific data
+    this.oauth2Client = null;
+    this.analyticsDataClient = null;
+  }
 
-    if (!this.credentials) {
-      console.warn('⚠️ GOOGLE_ANALYTICS_CREDENTIALS not configured - GA disabled');
-    } else {
-      try {
-        this.analyticsDataClient = new BetaAnalyticsDataClient({
-          credentials: this.credentials
-        });
-      } catch (error) {
-        console.error('❌ Failed to initialize Google Analytics client:', error.message);
-        this.analyticsDataClient = null;
-      }
-    }
+  /**
+   * Initialize OAuth2 client for user
+   * @param {Object} userTokens - User's OAuth tokens
+   */
+  async initializeAuth(userTokens) {
+    this.oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    this.oauth2Client.setCredentials(userTokens);
+
+    // Initialize GA client with OAuth2
+    this.analyticsDataClient = new BetaAnalyticsDataClient({
+      auth: this.oauth2Client
+    });
   }
 
   /**
    * Get page performance (pageviews, engagement, conversions)
+   * @param {string} propertyId - GA4 Property ID
    * @param {string} pageUrl - The page URL path (e.g., '/blog/my-post')
    * @param {string} startDate - Start date (YYYY-MM-DD)
    * @param {string} endDate - End date (YYYY-MM-DD)
    * @returns {Promise<Object>} Page performance metrics
    */
-  async getPagePerformance(pageUrl, startDate, endDate) {
+  async getPagePerformance(propertyId, pageUrl, startDate, endDate) {
     if (!this.analyticsDataClient) {
-      return { data: null, error: 'Not configured' };
+      return { data: null, error: 'Not authenticated' };
     }
 
     try {
       const [response] = await this.analyticsDataClient.runReport({
-        property: `properties/${this.propertyId}`,
+        property: `properties/${propertyId}`,
         dateRanges: [{ startDate, endDate }],
         dimensions: [{ name: 'pagePath' }],
         metrics: [
@@ -81,18 +87,19 @@ export class GoogleAnalyticsService {
 
   /**
    * Get traffic sources breakdown
+   * @param {string} propertyId - GA4 Property ID
    * @param {string} startDate - Start date (YYYY-MM-DD)
    * @param {string} endDate - End date (YYYY-MM-DD)
    * @returns {Promise<Object>} Traffic sources data
    */
-  async getTrafficSources(startDate, endDate) {
+  async getTrafficSources(propertyId, startDate, endDate) {
     if (!this.analyticsDataClient) {
-      return { sources: [], error: 'Not configured' };
+      return { sources: [], error: 'Not authenticated' };
     }
 
     try {
       const [response] = await this.analyticsDataClient.runReport({
-        property: `properties/${this.propertyId}`,
+        property: `properties/${propertyId}`,
         dateRanges: [{ startDate, endDate }],
         dimensions: [
           { name: 'sessionDefaultChannelGroup' },
@@ -124,27 +131,28 @@ export class GoogleAnalyticsService {
 
   /**
    * Compare trend-informed vs standard content performance
+   * @param {string} propertyId - GA4 Property ID
    * @param {string[]} trendInformedUrls - Array of trend-informed post URLs
    * @param {string[]} standardUrls - Array of standard post URLs
    * @param {string} startDate - Start date (YYYY-MM-DD)
    * @param {string} endDate - End date (YYYY-MM-DD)
    * @returns {Promise<Object>} Performance comparison data
    */
-  async compareTrendPerformance(trendInformedUrls, standardUrls, startDate, endDate) {
+  async compareTrendPerformance(propertyId, trendInformedUrls, standardUrls, startDate, endDate) {
     if (!this.analyticsDataClient) {
-      return { comparison: null, error: 'Not configured' };
+      return { comparison: null, error: 'Not authenticated' };
     }
 
     try {
       // Fetch performance for trend-informed posts
       const trendInformedPromises = trendInformedUrls.map(url =>
-        this.getPagePerformance(url, startDate, endDate)
+        this.getPagePerformance(propertyId, url, startDate, endDate)
       );
       const trendInformedResults = await Promise.all(trendInformedPromises);
 
       // Fetch performance for standard posts
       const standardPromises = standardUrls.map(url =>
-        this.getPagePerformance(url, startDate, endDate)
+        this.getPagePerformance(propertyId, url, startDate, endDate)
       );
       const standardResults = await Promise.all(standardPromises);
 

@@ -183,7 +183,7 @@ export async function fetchAnalyticsDataForAllUsers() {
 
     for (const row of result.rows) {
       try {
-        // Get OAuth credentials (Analytics uses service account, but we still check)
+        // Get OAuth credentials
         const credentials = await oauthManager.getCredentials(
           row.user_id,
           'google_analytics'
@@ -194,8 +194,10 @@ export async function fetchAnalyticsDataForAllUsers() {
           continue;
         }
 
-        // Fetch traffic sources (aggregate data)
+        // Initialize auth and fetch data
+        await googleAnalyticsService.initializeAuth(credentials);
         const data = await googleAnalyticsService.getTrafficSources(
+          row.property_id,
           startDate.toISOString().split('T')[0],
           endDate.toISOString().split('T')[0]
         );
