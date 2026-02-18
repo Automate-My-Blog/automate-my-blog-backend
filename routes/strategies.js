@@ -19,6 +19,13 @@ const sampleIdeasCache = new Map();
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
 const CONTENT_CALENDAR_DAYS = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
 
+// In-memory cache for strategy overview
+// Key format: overview-${orgId}-${integrationsHash}
+// Value: { overview: object, integrationStatus: object, timestamp: number }
+// TTL: 24 hours (86400000ms)
+const overviewCache = new Map();
+const OVERVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 /**
  * GET /api/v1/strategies/:id/pitch
  * Generate LLM-powered pitch and pricing rationale for a strategy
@@ -103,6 +110,135 @@ router.get('/:id/pitch', async (req, res) => {
       content: error.message || 'Failed to generate strategy pitch'
     })}\n\n`);
     res.end();
+  }
+});
+
+/**
+ * GET /api/v1/strategies/overview
+ * Generate personalized "Understanding Audience Strategies" content
+ * Returns LLM-generated explanations adapted to the user's business context
+ * Authentication: Token required via Authorization header
+ * Caching: Results cached for 24 hours per organization
+ */
+router.get('/overview', authService.authMiddleware.bind(authService), async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    console.log(`📖 Strategy overview request: userId=${userId}`);
+
+    // Get user's organization via organization_members table
+    const userQuery = `
+      SELECT om.organization_id
+      FROM organization_members om
+      WHERE om.user_id = $1 AND om.status = 'active'
+      LIMIT 1
+    `;
+    const userResult = await db.query(userQuery, [userId]);
+
+    if (!userResult.rows || userResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found or not member of any organization' });
+    }
+
+    const organizationId = userResult.rows[0].organization_id;
+
+    if (!organizationId) {
+      return res.status(400).json({ success: false, error: 'User has no organization' });
+    }
+
+    // Get organization context
+    const orgQuery = `
+      SELECT
+        business_type,
+        industry_category,
+        business_model,
+        target_audience
+      FROM organizations
+      WHERE id = $1
+    `;
+    const orgResult = await db.query(orgQuery, [organizationId]);
+
+    if (!orgResult.rows || orgResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Organization not found' });
+    }
+
+    const orgContext = orgResult.rows[0];
+
+    // Check Google integration status
+    const integrationsQuery = `
+      SELECT service_name, status, last_used_at
+      FROM user_oauth_credentials
+      WHERE user_id = $1 AND status = 'active'
+    `;
+    const integrationsResult = await db.query(integrationsQuery, [userId]);
+
+    const integrationStatus = {
+      trends: integrationsResult.rows.some(row => row.service_name === 'google_trends'),
+      searchConsole: integrationsResult.rows.some(row => row.service_name === 'google_search_console'),
+      analytics: integrationsResult.rows.some(row => row.service_name === 'google_analytics')
+    };
+
+    // Create cache key based on org and integrations
+    const integrationsHash = `${integrationStatus.trends}-${integrationStatus.searchConsole}-${integrationStatus.analytics}`;
+    const cacheKey = `overview-${organizationId}-${integrationsHash}`;
+
+    // Check cache first
+    const cachedData = overviewCache.get(cacheKey);
+    if (cachedData && (Date.now() - cachedData.timestamp < OVERVIEW_CACHE_TTL_MS)) {
+      console.log(`✅ Cache hit for strategy overview: ${cacheKey}`);
+      return res.json({
+        success: true,
+        overview: cachedData.overview,
+        integrationStatus: cachedData.integrationStatus,
+        cached: true
+      });
+    }
+
+    // Generate personalized overview using LLM
+    console.log('🤖 Generating personalized overview with OpenAI...');
+    const overview = await openaiService.generateStrategyOverview(orgContext, integrationStatus);
+
+    // Cache the result
+    overviewCache.set(cacheKey, {
+      overview,
+      integrationStatus,
+      timestamp: Date.now()
+    });
+
+    console.log(`✅ Strategy overview generated and cached: ${cacheKey}`);
+
+    res.json({
+      success: true,
+      overview: {
+        sections: {
+          whatIsStrategy: overview.whatIsStrategy,
+          howWeUse: overview.howWeUse,
+          pricing: overview.pricing,
+          googleIntegrations: overview.integrations
+        }
+      },
+      integrationStatus: {
+        googleTrends: {
+          connected: integrationStatus.trends,
+          connectedAt: integrationsResult.rows.find(r => r.service_name === 'google_trends')?.last_used_at
+        },
+        searchConsole: {
+          connected: integrationStatus.searchConsole,
+          connectedAt: integrationsResult.rows.find(r => r.service_name === 'google_search_console')?.last_used_at
+        },
+        analytics: {
+          connected: integrationStatus.analytics,
+          connectedAt: integrationsResult.rows.find(r => r.service_name === 'google_analytics')?.last_used_at
+        }
+      },
+      cached: false
+    });
+
+  } catch (error) {
+    console.error('❌ Strategy overview error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to generate strategy overview'
+    });
   }
 });
 

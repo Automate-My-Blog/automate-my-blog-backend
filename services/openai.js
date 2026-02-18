@@ -2951,6 +2951,114 @@ Example format:
       return genericIdeas;
     }
   }
+
+  /**
+   * Generate personalized "Understanding Audience Strategies" overview content
+   * Adapts messaging to the specific business context and integration status
+   * @param {Object} orgContext - Organization context { businessType, industry, targetAudience, etc. }
+   * @param {Object} integrationStatus - Google integration status { trends, searchConsole, analytics }
+   * @returns {Promise<Object>} Personalized content sections
+   */
+  async generateStrategyOverview(orgContext, integrationStatus) {
+    const { businessType, industryCategory, targetAudience, businessModel } = orgContext;
+    const allIntegrationsConnected = integrationStatus.trends && integrationStatus.searchConsole && integrationStatus.analytics;
+
+    const prompt = `You are explaining the "Audience Strategy" concept to a business owner. Personalize this explanation for their specific business context.
+
+**Business Context:**
+- Business Type: ${businessType || 'their business'}
+- Industry: ${industryCategory || 'their industry'}
+- Target Audience: ${targetAudience || 'their customers'}
+- Business Model: ${businessModel || 'their model'}
+
+**Task:** Generate personalized explanations for each section below. Speak in their business's language, not generic marketing jargon. Reference their specific industry, products, and customers naturally.
+
+**Sections to generate:**
+
+1. **whatIsStrategy** (2-3 sentences): Explain what an audience strategy is, using their business context. Reference their specific customer types and industry naturally.
+
+2. **howWeUse** (3-4 bullet points): Explain how audience strategies work for THEIR business specifically. Each bullet should:
+   - Reference their products/services naturally
+   - Address their customers' actual search behaviors
+   - Show concrete outcomes for their business type
+
+3. **pricing** (3-4 paragraphs): Explain outcome-aligned pricing in their context:
+   - Para 1: Introduce value-based pricing (not effort-based). Emphasize: "We win by driving outcomes, not by billing hours or post count, since post count is an input - not an output!"
+   - Para 2: Explain that high-competition keywords in lucrative markets (where ${businessType || 'their products'} typically command premium prices) require more investment and carry higher rates
+   - Para 3: Conversely, low-competition long-tail keywords for lower-value ${businessType || 'products'} cost less, matching what we create with the value delivered
+   - Para 4: Emphasize this approach remains 10x cheaper than traditional agencies while aligning with their business outcomes
+
+4. **${allIntegrationsConnected ? 'integrationsActive' : 'integrationsPrompt'}**:
+${allIntegrationsConnected
+  ? `- Write 2-3 sentences acknowledging their Google integrations are active (Trends, Search Console, Analytics)
+   - Explain how these give our AI real-time insights to optimize their content strategy
+   - End with: "Now it's all about deciding which audience segments to target first."`
+  : `- Write a compelling 2-3 sentence prompt to connect Google Trends, Search Console, and Analytics
+   - Explain the specific benefits for ${businessType || 'their business'}: understanding what works, tracking performance, improving over time
+   - Make it feel essential but not pushy`}
+
+**Output format:**
+Return ONLY valid JSON with this structure:
+{
+  "whatIsStrategy": "...",
+  "howWeUse": ["bullet 1", "bullet 2", "bullet 3", "bullet 4"],
+  "pricing": "paragraph 1\\n\\nparagraph 2\\n\\nparagraph 3\\n\\nparagraph 4",
+  "integrations": {
+    "heading": "${allIntegrationsConnected ? 'Your Google Integrations Are Active' : 'Maximize Your Results with Google Integrations'}",
+    "message": "...",
+    "callToAction": "${allIntegrationsConnected ? 'Now choose your audience targets' : 'Connect Google Integrations'}"
+  }
+}`;
+
+    try {
+      console.log('📝 Generating personalized strategy overview...');
+
+      const completion = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a business consultant explaining audience strategies. Adapt your language to match the specific business context. Be conversational, insightful, and avoid generic marketing jargon. Output only valid JSON.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 1500,
+        temperature: 0.7
+      });
+
+      const responseText = completion.choices[0].message.content.trim();
+      console.log('📥 Received strategy overview from OpenAI');
+
+      // Parse JSON response
+      let cleanResponse = responseText.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '').trim();
+      const overview = JSON.parse(cleanResponse);
+
+      console.log('✅ Successfully generated personalized strategy overview');
+      return overview;
+
+    } catch (error) {
+      console.error('❌ Failed to generate strategy overview:', error);
+
+      // Return sensible fallback content
+      return {
+        whatIsStrategy: `An audience strategy represents a specific segment of your target market with unique needs, pain points, and search behaviors. Each strategy is carefully crafted to attract and convert a particular type of customer through highly-targeted content.`,
+        howWeUse: [
+          'Rank for keywords your target audience is searching for',
+          'Address their specific problems and questions',
+          'Guide them naturally toward your products or services',
+          'Build long-term organic traffic and conversions'
+        ],
+        pricing: `We price based on value delivered, not effort required. When you subscribe to an audience strategy, you pay a fixed monthly price for a set number of high-quality posts. We win by driving outcomes, not by billing hours or post count—since post count is an input, not an output!\n\nKeywords with more competition in lucrative markets require more investment and carry higher rates. This ensures our system invests appropriately in opportunities that can meaningfully move your revenue.\n\nConversely, you'll pay far less for low-competition, long-tail keywords targeting lower-value products—matching what you pay with the value we create.\n\nThis value-aligned approach remains 10x cheaper than traditional agencies while aligning pricing with the real business value we deliver.`,
+        integrations: {
+          heading: allIntegrationsConnected ? 'Your Google Integrations Are Active' : 'Maximize Your Results with Google Integrations',
+          message: allIntegrationsConnected
+            ? 'Great! With Google Trends, Search Console, and Google Analytics connected, our AI has real-time insights into your market performance and can continuously optimize your content strategy. Now it\'s all about deciding which audience segments to target first.'
+            : 'Connect your Google Trends, Search Console, and Google Analytics to give our AI powerful insights into what\'s working in your market, how your content performs, and which topics drive valuable traffic. These integrations help our system measure success and continuously improve.',
+          callToAction: allIntegrationsConnected ? 'Now choose your audience targets' : 'Connect Google Integrations'
+        }
+      };
+    }
+  }
 }
 
 export default new OpenAIService();
