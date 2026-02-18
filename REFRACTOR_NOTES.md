@@ -119,3 +119,41 @@ Refactor focused on business logic clarity, safety, and testability without chan
 
 **NOTE (ambiguous intent)**
 - Analyze-website (index.js): large block with org/intelligence/CTA logic was not extracted to a service in this refactor to keep the change set small and avoid risk. Logic map and LAYER_BOUNDARIES already call this out as a future extraction target.
+
+---
+
+## Chunk 7: Analyze-website persistence service and thin handler
+
+**What changed**
+- New `services/website-analysis-persistence.js`:
+  - `resolveOrganization(db, { userId, sessionId, url })` — priority-based org lookup (user_owned → anonymous_adoption → new_for_user; anonymous_session → new_anonymous). No DB writes.
+  - `buildOrganizationAndIntelligenceData(analysis, url)` — builds organizationData and intelligenceData from analysis (pure).
+  - `saveOrganizationAndIntelligence(db, ...)` — update or create org, mark previous intelligence not current, insert new intelligence row.
+  - `storeCTAs(db, organizationId, pageUrl, ctas)` — clear old CTAs, insert normalized CTAs, update has_cta_data flag.
+  - `getStoredCTAs(db, organizationId, limit)` — fetch CTAs for response.
+  - `saveAnalysisResult(db, { userId, sessionId, url, analysis, ctas })` — single entry point: no-op when !userId && !sessionId; otherwise resolve → save org+intelligence → store CTAs → return { organizationId, storedCTAs, ctaStoredCount }.
+- `index.js` analyze-website handler:
+  - URL validation now throws `ValidationError` (message/details) so global error handler can return 400.
+  - Handler uses `(req, res, next)` and in catch calls `next(error)` so domain errors are mapped centrally.
+  - Replaced ~450 lines of inline org/intelligence/CTA logic with: extract userId/sessionId from JWT and x-session-id → `saveAnalysisResult(db, { userId, sessionId, url, analysis, ctas: scrapedContent.ctas || [] })` → use returned organizationId, storedCTAs, ctaStoredCount for narrative job and response. Persistence errors are logged and do not fail the request (same as before).
+
+**Why**
+- Business rules (org resolution, intelligence and CTA persistence) live in one service with named functions; handler only parses input, calls service, and forwards errors.
+- ValidationError for URL gives consistent 400 via toHttpResponse; single catch with next(error) avoids ad-hoc status codes in this handler.
+
+**Verification**
+- `npm test` — all tests pass, including new `tests/unit/website-analysis-persistence.test.js` (resolveOrganization sources, buildOrganizationAndIntelligenceData, saveAnalysisResult no-op when no user/session, storeCTAs, getStoredCTAs).
+- No API contract or response shape change for POST /api/analyze-website; same success response and 400/500 semantics.
+
+---
+
+## Chunk 8: Logic map and remaining hotspots
+
+**What changed**
+- `docs/logic-map.md`: Added **§7** bullet for analyze-website persistence service and handler flow; added **§8. Remaining Hotspots** (handlers that don’t use next(error), Stripe/other routes).
+
+**Why**
+- Single place to see where persistence and remaining ad-hoc error handling live for future refactors.
+
+**Verification**
+- Docs only; no behavior change.

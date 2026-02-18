@@ -246,22 +246,66 @@ async function processContentCalendar(jobId, input, context) {
     throw new Error('content_calendar job requires non-empty strategyIds in input');
   }
 
+  const contentCalendarDays = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
+  const totalStrategies = strategyIds.length;
+  const { generateContentCalendarsForStrategies, CONTENT_CALENDAR_PHASES } = await import('../services/content-calendar-service.js');
+  const phasesPerStrategy = CONTENT_CALENDAR_PHASES.length;
+  const totalSteps = totalStrategies * phasesPerStrategy;
+
+  const progressFromStep = (strategyIndex, phase) => {
+    const phaseIndex = CONTENT_CALENDAR_PHASES.indexOf(phase);
+    const step = strategyIndex * phasesPerStrategy + (phaseIndex >= 0 ? phaseIndex : 0);
+    return Math.min(95, 5 + Math.round((step / totalSteps) * 90));
+  };
+
+  const onProgress = ({ phase, message, strategyIndex, strategyTotal, strategyId }) => {
+    const progress = progressFromStep(strategyIndex ?? 0, phase);
+    const currentStepLabel = (strategyTotal ?? 1) > 1
+      ? `Strategy ${(strategyIndex ?? 0) + 1} of ${strategyTotal}: ${message}`
+      : message;
+    const estimatedRemaining = Math.max(10, Math.round((1 - progress / 100) * 90));
+    updateJobProgress(jobId, {
+      progress,
+      current_step: currentStepLabel,
+      estimated_seconds_remaining: estimatedRemaining
+    }).catch((e) => console.warn('Content calendar progress update failed:', e.message));
+    publishJobStreamEvent(connection, jobId, 'progress-update', {
+      progress,
+      currentStep: currentStepLabel,
+      estimatedTimeRemaining: estimatedRemaining,
+      phase,
+      strategyIndex: strategyIndex ?? 0,
+      strategyTotal: strategyTotal ?? 1,
+      strategyId: strategyId ?? null
+    });
+  };
+
   await updateJobProgress(jobId, {
     progress: 5,
-    current_step: 'Generating 30-day content calendar...',
+    current_step: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
     estimated_seconds_remaining: 60
   }).catch(() => {});
   publishJobStreamEvent(connection, jobId, 'progress-update', {
     progress: 5,
-    currentStep: 'Generating 30-day content calendar...',
+    currentStep: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
     estimatedTimeRemaining: 60
   });
 
-  const { generateContentCalendarsForStrategies } = await import('../services/content-calendar-service.js');
-  const { results } = await generateContentCalendarsForStrategies(strategyIds);
+  const { results } = await generateContentCalendarsForStrategies(strategyIds, { onProgress });
 
   const succeeded = results.filter((r) => r.success).length;
   const failed = results.filter((r) => !r.success);
+
+  await updateJobProgress(jobId, {
+    progress: 100,
+    current_step: 'Complete',
+    estimated_seconds_remaining: null
+  }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 100,
+    currentStep: 'Complete',
+    estimatedTimeRemaining: null
+  });
 
   if (failed.length > 0) {
     console.warn(`content_calendar job: ${failed.length} strategy(ies) failed:`, failed.map((f) => f.strategyId));

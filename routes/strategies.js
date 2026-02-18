@@ -17,6 +17,7 @@ const authService = new DatabaseAuthService();
 // TTL: 1 week (604800000ms)
 const sampleIdeasCache = new Map();
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 1 week
+const CONTENT_CALENDAR_DAYS = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
 
 /**
  * GET /api/v1/strategies/:id/pitch
@@ -150,7 +151,7 @@ router.post('/:id/sample-content-ideas', async (req, res) => {
           success: true,
           sampleIdeas: cached.ideas,
           isTeaser: true,
-          totalIdeasAvailable: 30,
+          totalIdeasAvailable: CONTENT_CALENDAR_DAYS,
           cached: true
         });
       } else {
@@ -197,7 +198,7 @@ router.post('/:id/sample-content-ideas', async (req, res) => {
       success: true,
       sampleIdeas: sampleIdeas,
       isTeaser: true,
-      totalIdeasAvailable: 30
+      totalIdeasAvailable: CONTENT_CALENDAR_DAYS
     });
 
   } catch (error) {

@@ -1558,6 +1558,149 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
   }
 
   /**
+   * Produce a compact voice profile for prompt injection. Truncates arrays and long strings
+   * to keep token count bounded when many samples are aggregated (e.g. 60+ docs → huge profile).
+   */
+  compactVoiceProfileForPrompt(profile, maxArrayItems = 8, maxStringLen = 200) {
+    const compact = (v) => {
+      if (v === null || v === undefined) return v;
+      if (Array.isArray(v)) return v.slice(0, maxArrayItems).map(compact);
+      if (typeof v === 'object') {
+        const out = {};
+        for (const [k, val] of Object.entries(v)) out[k] = compact(val);
+        return out;
+      }
+      if (typeof v === 'string' && v.length > maxStringLen) return v.slice(0, maxStringLen) + '...';
+      return v;
+    };
+    const style = profile?.style && typeof profile.style === 'object' ? compact(profile.style) : {};
+    const vocabulary = profile?.vocabulary && typeof profile.vocabulary === 'object' ? compact(profile.vocabulary) : {};
+    const structure = profile?.structure && typeof profile.structure === 'object' ? compact(profile.structure) : {};
+    const formatting = profile?.formatting && typeof profile.formatting === 'object' ? compact(profile.formatting) : {};
+    return { style, vocabulary, structure, formatting };
+  }
+
+  _suggestsFirstPerson(compact) {
+    const p = String(compact.style?.voice_perspective ?? '').toLowerCase();
+    const f = String(compact.vocabulary?.formality_level ?? '').toLowerCase();
+    return p.includes('first') || f.includes('casual') || f.includes('conversational');
+  }
+
+  _suggestsBulletLists(compact) {
+    const list = String(compact.style?.list_usage ?? '').toLowerCase();
+    const fmt = compact.formatting?.bullet_vs_numbered;
+    return list.includes('bullet') || list.includes('list') || (fmt && String(fmt).toLowerCase().includes('bullet'));
+  }
+
+  _suggestsPersonalSignOff(compact) {
+    const c = String(compact.structure?.conclusion_type ?? '').toLowerCase();
+    const pso = compact.structure?.personal_sign_off;
+    return c.includes('sign-off') || c.includes('sign off') || c.includes('personal') || !!pso;
+  }
+
+  _suggestsCelebratoryOrMilestoneTone(compact) {
+    const evidence = String(compact.structure?.evidence_style ?? '').toLowerCase();
+    const meta = String(compact.vocabulary?.metaphor_humor_style ?? '').toLowerCase();
+    const formality = String(compact.vocabulary?.formality_level ?? '').toLowerCase();
+    return (
+      evidence.includes('milestone') ||
+      evidence.includes('number') ||
+      evidence.includes('statistic') ||
+      evidence.includes('concrete') ||
+      meta.includes('celebrat') ||
+      meta.includes('warm') ||
+      meta.includes('enthusiastic') ||
+      formality.includes('celebrat')
+    );
+  }
+
+  _getSignaturePhrasesDirective(compact) {
+    const phrases = compact.vocabulary?.signature_phrases;
+    if (!Array.isArray(phrases) || phrases.length === 0) return null;
+    const sample = phrases.slice(0, 5).filter((p) => typeof p === 'string' && p.trim());
+    if (sample.length === 0) return null;
+    return `Optionally weave in signature phrases when fitting: ${sample.map((p) => `"${p}"`).join(', ')}.`;
+  }
+
+  _getOpeningHookDirective(compact) {
+    const hook = String(compact.structure?.opening_hook_type ?? '').toLowerCase();
+    if (!hook) return null;
+    if (hook.includes('anecdote') || hook.includes('story') || hook.includes('personal')) {
+      return 'Open with a brief anecdote or personal story that draws the reader in.';
+    }
+    if (hook.includes('question') || hook.includes('rhetorical')) {
+      return 'Open with a compelling question that addresses the reader\'s curiosity.';
+    }
+    if (hook.includes('statistic') || hook.includes('number') || hook.includes('data')) {
+      return 'Open with a striking statistic or data point.';
+    }
+    if (hook.includes('quote')) {
+      return 'Consider opening with a relevant quote when it fits.';
+    }
+    return null;
+  }
+
+  _suggestsActiveVoice(compact) {
+    const ratio = String(compact.style?.active_vs_passive_ratio ?? '').toLowerCase();
+    return (
+      ratio.includes('active') ||
+      ratio.includes('predominantly active') ||
+      ratio.includes('minimal passive')
+    );
+  }
+
+  _getSentenceParagraphDirective(compact) {
+    const sent = String(compact.style?.sentence_length_distribution ?? '').toLowerCase();
+    const para = String(compact.style?.paragraph_length_preference ?? '').toLowerCase();
+    const parts = [];
+    if (sent.includes('short') && !sent.includes('long')) {
+      parts.push('Use mostly short, punchy sentences.');
+    } else if (sent.includes('medium') || sent.includes('mixed')) {
+      parts.push('Mix short and medium sentence lengths for rhythm.');
+    } else if (sent.includes('long')) {
+      parts.push('Longer, flowing sentences are acceptable when they fit the content.');
+    }
+    if (para.includes('short') && !para.includes('long')) {
+      parts.push('Keep paragraphs short (2–4 sentences).');
+    } else if (para.includes('medium')) {
+      parts.push('Use moderate paragraph length for readability.');
+    }
+    return parts.length > 0 ? parts.join(' ') : null;
+  }
+
+  /**
+   * Derive explicit voice directives from structured profile fields.
+   * Uses analyzer output (voice_perspective, list_usage, conclusion_type, etc.) so directives
+   * apply generically to any document type, not domain-specific keywords.
+   */
+  deriveVoiceDirectives(compact) {
+    const rules = [];
+    if (this._suggestsFirstPerson(compact)) {
+      rules.push('Use first-person (we, I) and direct address (you) throughout; prefer "we have" and "I meet" over third person.');
+    }
+    if (this._suggestsBulletLists(compact)) {
+      rules.push('Use bullet lists for key points, milestones, and enumerations — do not use only paragraph prose.');
+    }
+    if (this._suggestsPersonalSignOff(compact)) {
+      rules.push('ALWAYS end with a personal sign-off on its own line (e.g. -Author Name).');
+    }
+    if (this._suggestsCelebratoryOrMilestoneTone(compact)) {
+      rules.push('Use a celebratory tone; include concrete numbers and milestones when relevant.');
+    }
+    const sig = this._getSignaturePhrasesDirective(compact);
+    if (sig) rules.push(sig);
+    const hook = this._getOpeningHookDirective(compact);
+    if (hook) rules.push(hook);
+    if (this._suggestsActiveVoice(compact)) {
+      rules.push('Prefer active voice; avoid passive constructions where possible.');
+    }
+    const sentPara = this._getSentenceParagraphDirective(compact);
+    if (sentPara) rules.push(sentPara);
+    if (rules.length === 0) return '';
+    return '\nMANDATORY voice rules (follow these):\n' + rules.map((r) => `- ${r}`).join('\n');
+  }
+
+  /**
    * Build enhanced generation prompt with all available data
    * @param {Array<{ text: string, href?: string, type?: string, placement?: string }>} requestCtas - Optional CTAs from request (stream or job payload); overrides DB when provided
    */
@@ -1571,15 +1714,14 @@ Return the FULL blog post with explanatory text and tweet placeholders inserted.
     // Voice & style from uploaded samples (before brand voice; only when confidence >= 50)
     const confidence = voiceProfile?.confidence_score != null ? Number(voiceProfile.confidence_score) : 0;
     if (voiceProfile && confidence >= 50) {
-      const style = voiceProfile.style && typeof voiceProfile.style === 'object' ? voiceProfile.style : {};
-      const vocabulary = voiceProfile.vocabulary && typeof voiceProfile.vocabulary === 'object' ? voiceProfile.vocabulary : {};
-      const structure = voiceProfile.structure && typeof voiceProfile.structure === 'object' ? voiceProfile.structure : {};
-      const formatting = voiceProfile.formatting && typeof voiceProfile.formatting === 'object' ? voiceProfile.formatting : {};
+      const compact = this.compactVoiceProfileForPrompt(voiceProfile);
+      const directives = this.deriveVoiceDirectives(compact);
       const voiceSection = `VOICE & STYLE (from your uploaded samples — match this precisely):
-- Writing style: ${JSON.stringify(style)}
-- Vocabulary & tone: ${JSON.stringify(vocabulary)}
-- Structure: ${JSON.stringify(structure)}
-- Formatting: ${JSON.stringify(formatting)}
+- Writing style: ${JSON.stringify(compact.style)}
+- Vocabulary & tone: ${JSON.stringify(compact.vocabulary)}
+- Structure: ${JSON.stringify(compact.structure)}
+- Formatting: ${JSON.stringify(compact.formatting)}
+${directives}
 
 Match this writing style PRECISELY so the post feels like it was written by the same person.`;
       contextSections.push(voiceSection);
@@ -2126,7 +2268,7 @@ Full JSON structure (content first, then metadata):
    */
   async generateEnhancedBlogPost(topic, businessInfo, organizationId, additionalInstructions = '', opts = {}) {
     const startTime = Date.now();
-    const model = process.env.OPENAI_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_BLOG_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
 
     try {
       console.log(`🚀 Starting enhanced blog generation for organization: ${organizationId}`);
@@ -2619,7 +2761,7 @@ Full JSON structure (content first, then metadata):
    * Client must open GET /api/v1/stream?token= first to get connectionId, then POST here with connectionId.
    */
   async generateBlogPostStream(topic, businessInfo, organizationId, connectionId, options = {}) {
-    const model = process.env.OPENAI_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_BLOG_MODEL || process.env.OPENAI_MODEL || 'gpt-4o';
     const additionalInstructions = options.additionalInstructions ?? '';
     try {
       // Attach preloaded tweets, articles, videos from options so prompt can use [TWEET:0], [ARTICLE:0], [VIDEO:0]
