@@ -126,12 +126,17 @@ router.get('/overview', authService.authMiddleware.bind(authService), async (req
   try {
     console.log(`📖 Strategy overview request: userId=${userId}`);
 
-    // Get user's organization
-    const userQuery = 'SELECT organization_id FROM users WHERE id = $1';
+    // Get user's organization via organization_members table
+    const userQuery = `
+      SELECT om.organization_id
+      FROM organization_members om
+      WHERE om.user_id = $1 AND om.status = 'active'
+      LIMIT 1
+    `;
     const userResult = await db.query(userQuery, [userId]);
 
     if (!userResult.rows || userResult.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'User not found' });
+      return res.status(404).json({ success: false, error: 'User not found or not member of any organization' });
     }
 
     const organizationId = userResult.rows[0].organization_id;
