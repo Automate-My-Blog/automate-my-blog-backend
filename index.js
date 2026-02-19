@@ -106,6 +106,17 @@ function isVercelPreviewOrigin(origin) {
   return origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'));
 }
 
+/** Allow any https origin whose host is automatemyblog.com or a subdomain (e.g. staging.automatemyblog.com). */
+function isAutomatemyblogOrigin(origin) {
+  if (typeof origin !== 'string' || !origin.startsWith('https://')) return false;
+  try {
+    const u = new URL(origin);
+    return u.hostname === 'automatemyblog.com' || u.hostname.endsWith('.automatemyblog.com');
+  } catch {
+    return false;
+  }
+}
+
 function isLocalhostInDevelopment(origin) {
   if (process.env.NODE_ENV !== 'development') return false;
   try {
@@ -122,6 +133,7 @@ function isOriginAllowed(origin) {
   const normalized = normalizeOrigin(origin);
   if (isInAllowList(normalized) || isInAllowList(origin)) return true;
   if (isVercelPreviewOrigin(origin)) return true;
+  if (isAutomatemyblogOrigin(origin)) return true;
   if (isLocalhostInDevelopment(origin)) return true;
   return false;
 }
@@ -133,13 +145,17 @@ function corsOrigin(origin, callback) {
 
 // Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
 // The browser sends OPTIONS first; without these headers the actual request is blocked.
-// Only set Allow-Origin when origin is present; setting it to undefined can become "undefined" and break CORS.
+// When Origin is missing (e.g. stripped by proxy), use CORS_OPTIONS_FALLBACK_ORIGIN so preflight still succeeds.
 app.use((req, res, next) => {
   if (req.method !== 'OPTIONS') return next();
   const rawOrigin = req.headers.origin;
   const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : '';
-  if (origin && isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  const fallbackOrigin = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || '').trim() || null;
+  const allowOrigin = (origin && isOriginAllowed(origin))
+    ? origin
+    : (fallbackOrigin && isOriginAllowed(fallbackOrigin) ? fallbackOrigin : null);
+  if (allowOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
