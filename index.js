@@ -90,8 +90,16 @@ const allowedOriginList = [
 const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allAllowedOrigins = [...allowedOriginList, ...extraOrigins];
 
+/** Normalize origin for comparison (trim, strip trailing slash). */
+function normalizeOrigin(origin) {
+  if (typeof origin !== 'string') return '';
+  return origin.trim().replace(/\/+$/, '') || '';
+}
+
 function isInAllowList(origin) {
-  return allAllowedOrigins.includes(origin);
+  if (!origin) return false;
+  const o = normalizeOrigin(origin);
+  return allAllowedOrigins.some((allowed) => normalizeOrigin(allowed) === o || allowed === origin);
 }
 
 function isVercelPreviewOrigin(origin) {
@@ -111,7 +119,8 @@ function isLocalhostInDevelopment(origin) {
 /** Single source of truth for CORS origin allow. */
 function isOriginAllowed(origin) {
   if (!origin) return true;
-  if (isInAllowList(origin)) return true;
+  const normalized = normalizeOrigin(origin);
+  if (isInAllowList(normalized) || isInAllowList(origin)) return true;
   if (isVercelPreviewOrigin(origin)) return true;
   if (isLocalhostInDevelopment(origin)) return true;
   return false;
@@ -119,7 +128,7 @@ function isOriginAllowed(origin) {
 
 function corsOrigin(origin, callback) {
   // Pass the origin string when allowed so the cors package sets Access-Control-Allow-Origin correctly.
-  callback(null, isOriginAllowed(origin) ? origin : false);
+  callback(null, isOriginAllowed(origin) ? (origin || false) : false);
 }
 
 // Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
@@ -127,7 +136,8 @@ function corsOrigin(origin, callback) {
 // Only set Allow-Origin when origin is present; setting it to undefined can become "undefined" and break CORS.
 app.use((req, res, next) => {
   if (req.method !== 'OPTIONS') return next();
-  const origin = req.headers.origin;
+  const rawOrigin = req.headers.origin;
+  const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : '';
   if (origin && isOriginAllowed(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
