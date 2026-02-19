@@ -5,7 +5,16 @@ import Stripe from 'stripe';
 import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy init so server can start when STRIPE_SECRET_KEY is missing.
+let _stripe = null;
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is required in environment variables');
+  }
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  return _stripe;
+}
 
 /**
  * Note: Authentication is handled at the router level in index.js
@@ -209,7 +218,7 @@ router.post('/:id/subscribe',  async (req, res) => {
 
     const demographics = targetSegment?.demographics || 'Audience Strategy';
 
-    const stripePrice = await stripe.prices.create({
+    const stripePrice = await getStripe().prices.create({
       unit_amount: Math.round(amount * 100), // Convert to cents
       currency: 'usd',
       recurring: {
@@ -263,7 +272,7 @@ router.post('/:id/subscribe',  async (req, res) => {
     });
 
     // Create Checkout Session
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: req.user.email,
       line_items: [{
         price: stripePrice.id,

@@ -16,7 +16,9 @@ The browser enforces CORS: the backend must send the right headers. The frontend
 - `allowedHeaders: ['Content-Type', 'Authorization', 'x-session-id']`.
 - `optionsSuccessStatus: 204`.
 
-This project uses the legacy Vercel `routes` property in `vercel.json`. Vercel does not allow `headers` (or rewrites, redirects, etc.) when `routes` is defined, so CORS is configured only in Express.
+This project uses the legacy Vercel `routes` property in `vercel.json`. CORS is handled by:
+- **Edge Middleware** (`middleware.js`): intercepts OPTIONS for `/api/*` at the edge and returns 204 with CORS headers so preflight always succeeds before any Node function runs.
+- **Express** (`index.js`): CORS middleware and OPTIONS handler for non-OPTIONS and for local/dev. When `VERCEL` is set, a serverless wrapper also handles OPTIONS before Express.
 
 ## Adding more origins
 

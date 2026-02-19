@@ -7,7 +7,16 @@ import emailService from '../services/email.js';
 import strategyWebhooks from '../services/strategy-subscription-webhooks.js';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy init so server can start (health, CORS) when STRIPE_SECRET_KEY is missing.
+let _stripe = null;
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is required in environment variables');
+  }
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  return _stripe;
+}
 
 /**
  * Create Checkout Session
@@ -46,7 +55,7 @@ router.post('/create-checkout-session', async (req, res) => {
     console.log(`Success URL: ${successUrl}`);
     console.log(`Cancel URL: ${cancelUrl}`);
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: userEmail,
       line_items: [
         {
@@ -91,7 +100,7 @@ router.post('/webhook', async (req, res) => {
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(
+    event = Stripe.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
