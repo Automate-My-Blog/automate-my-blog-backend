@@ -2933,4 +2933,32 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export default app;
+// On Vercel, handle OPTIONS before Express so preflight always gets CORS headers (no middleware or proxy can block it).
+function handleOptions(req, res) {
+  const origin = (req.headers && (req.headers.origin || req.headers.Origin)) || '';
+  const fallback = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || process.env.CORS_ORIGINS || '').split(',')[0].trim() || 'https://staging.automatemyblog.com';
+  const allowed =
+    /^https:\/\/(staging\.|www\.)?automatemyblog\.com$/i.test(origin) ||
+    /^https?:\/\/[^/]+\.vercel\.app$/i.test(origin) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  const allowOrigin = (origin && allowed) ? origin : fallback;
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+}
+
+const serverlessHandler =
+  process.env.VERCEL && process.env.NODE_ENV !== 'test'
+    ? (req, res) => {
+        if (req.method === 'OPTIONS') {
+          handleOptions(req, res);
+          return;
+        }
+        app(req, res);
+      }
+    : app;
+
+export default serverlessHandler;
