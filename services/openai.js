@@ -14,9 +14,8 @@ const openai = new OpenAI({
 
 export class OpenAIService {
   constructor() {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is required in environment variables');
-    }
+    // Don't throw here: allows server to start (health, CORS) when key is missing.
+    // OpenAI API calls will fail at request time with a clear error if key is missing.
   }
 
   /**
