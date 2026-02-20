@@ -258,10 +258,10 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
+// Strategy subscription management routes first (POST /:id/subscribe, GET /:id/pricing, etc.) so they match before param routes in strategyRoutes
+app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), strategySubscriptionRoutes);
 // Strategy pitch generation routes (handles auth via query params for SSE compatibility)
 app.use('/api/v1/strategies', strategyRoutes);
-// Strategy subscription management routes (require header-based auth)
-app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), strategySubscriptionRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
