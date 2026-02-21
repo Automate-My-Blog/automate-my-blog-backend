@@ -30,25 +30,12 @@ const OVERVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
  * GET /api/v1/strategies/:id/pitch
  * Generate LLM-powered pitch and pricing rationale for a strategy
  * Streams content via SSE (Server-Sent Events)
- * Authentication: Token passed via query param (EventSource can't send headers)
+ * Authentication: Bearer header or ?token= query param (EventSource can't send headers)
  * Note: Uses GET instead of POST because EventSource only supports GET
  */
 router.get('/:id/pitch', async (req, res) => {
   const { id } = req.params;
-  const token = req.query.token;
-
-  // Validate auth token from query params (EventSource can't send headers)
-  let userId = null;
-  if (token) {
-    try {
-      const decoded = authService.verifyToken(token);
-      userId = decoded?.userId;
-    } catch (error) {
-      console.warn('⚠️ Invalid auth token for SSE pitch:', error.message);
-      res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
-      return;
-    }
-  }
+  const userId = req.user?.userId;
 
   if (!userId) {
     res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
