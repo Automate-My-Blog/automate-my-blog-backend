@@ -41,8 +41,7 @@ import emailTestRoutes from './routes/email-test.js';
 import schedulerRoutes from './routes/scheduler.js';
 import emailPreferencesRoutes from './routes/email-preferences.js';
 import founderEmailRoutes from './routes/founderEmails.js';
-import strategyRoutes from './routes/strategies.js';
-import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
+import strategyRoutes from './routes/strategies-router.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
 import voiceSamplesRoutes from './routes/voice-samples.js';
@@ -258,9 +257,8 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
-// Strategy routes: use flexible auth (Bearer header OR ?token= for EventSource/pitch) — route order no longer matters for auth
+// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
 app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
-app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategySubscriptionRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);

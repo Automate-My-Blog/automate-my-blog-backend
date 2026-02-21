@@ -4,8 +4,6 @@ import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
 import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
-const router = express.Router();
-
 // Lazy init so server can start when STRIPE_SECRET_KEY is missing.
 let _stripe = null;
 function getStripe() {
@@ -17,12 +15,15 @@ function getStripe() {
 }
 
 /**
- * Note: Authentication is handled at the router level in index.js
- * All routes here assume req.user is already set by authService.authMiddleware
+ * Register strategy subscription routes on the given router.
+ * Authentication is handled at the router level in index.js.
+ * Call this first when building the combined strategy router so literal paths are registered before :id routes.
+ *
+ * @param {express.Router} router
  */
-
-/**
- * GET /api/v1/strategies/content-calendar
+export function registerRoutes(router) {
+  /**
+   * GET /api/v1/strategies/content-calendar
  * Return unified 30-day content calendar across all subscribed strategies (Issue #270).
  * Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD (optional, defaults to next 30 days)
  * Query: ?testbed=1 - Calendar testbed mode: skip subscription requirement, use fixture content when empty (requires ENABLE_CALENDAR_TESTBED=1)
@@ -514,5 +515,9 @@ router.post('/:id/decrement',  async (req, res) => {
     res.status(500).json({ error: 'Failed to decrement posts' });
   }
 });
+}
 
+// Default export for backwards compatibility (index uses composite router; tests may use this)
+const router = express.Router();
+registerRoutes(router);
 export default router;
