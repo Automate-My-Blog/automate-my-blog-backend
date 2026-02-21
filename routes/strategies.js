@@ -1,6 +1,7 @@
 /**
- * Strategy routes for pitch generation and strategy management
- * Complements strategy-subscriptions.js (subscription/payment endpoints)
+ * Strategy routes for pitch generation and strategy management.
+ * Complements strategy-subscriptions.js (subscription/payment endpoints).
+ * Use registerRoutes(router) when building the combined strategy router; call after subscription routes.
  */
 
 import express from 'express';
@@ -8,8 +9,12 @@ import db from '../services/database.js';
 import openaiService from '../services/openai.js';
 import DatabaseAuthService from '../services/auth-database.js';
 
-const router = express.Router();
 const authService = new DatabaseAuthService();
+
+/**
+ * @param {express.Router} router
+ */
+export function registerRoutes(router) {
 
 // In-memory cache for sample content ideas
 // Key format: sample-ideas-${strategyId}
@@ -343,76 +348,14 @@ router.post('/:id/sample-content-ideas', async (req, res) => {
   }
 });
 
-/**
- * GET /api/v1/strategies/content-calendar
- * Get unified content calendar for all subscribed strategies
- * Returns all strategies the user is subscribed to with their content ideas
- * Requires authentication
- */
-router.get('/content-calendar', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const userId = req.user?.userId;
-
-    if (!userId) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-
-    console.log(`📅 Content calendar request for user: ${userId}`);
-
-    // Get all subscribed strategies for this user
-    const query = `
-      SELECT DISTINCT a.*
-      FROM audiences a
-      INNER JOIN strategy_purchases sp ON a.id = sp.strategy_id
-      WHERE sp.user_id = $1
-        AND sp.status = 'active'
-      ORDER BY a.created_at DESC
-    `;
-
-    const result = await db.query(query, [userId]);
-
-    if (!result.rows || result.rows.length === 0) {
-      console.log(`ℹ️ No subscribed strategies found for user: ${userId}`);
-      return res.json({
-        success: true,
-        strategies: [],
-        message: 'No subscribed strategies found'
-      });
-    }
-
-    // Transform strategies to include all relevant fields
-    const strategies = result.rows.map(strategy => ({
-      id: strategy.id,
-      pitch: strategy.pitch,
-      customer_problem: strategy.customer_problem,
-      content_ideas: strategy.content_ideas || [],
-      content_calendar_generated_at: strategy.content_calendar_generated_at,
-      target_segment: strategy.target_segment,
-      pricing_monthly: strategy.pricing_monthly,
-      profit_low: strategy.profit_low,
-      profit_high: strategy.profit_high,
-      created_at: strategy.created_at
-    }));
-
-    console.log(`✅ Found ${strategies.length} subscribed strategies with calendars`);
-
-    res.json({
-      success: true,
-      strategies: strategies
-    });
-
-  } catch (error) {
-    console.error('❌ Error fetching content calendar:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to fetch content calendar'
-    });
-  }
-});
+  // GET /content-calendar is registered in strategy-subscriptions.js (single source, testbed support)
+}
 
 /**
  * Note: Generic GET routes for strategies are handled by audiences.js and strategy-subscriptions.js
- * This file focuses on LLM-powered strategy pitch generation and content calendar views
+ * This file focuses on LLM-powered strategy pitch generation.
  */
 
+const router = express.Router();
+registerRoutes(router);
 export default router;
