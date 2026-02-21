@@ -258,9 +258,10 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
-// Strategy routes: use flexible auth (Bearer header OR ?token= for EventSource/pitch) — route order no longer matters for auth
-app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
+// Strategy routes: use flexible auth (Bearer header OR ?token= for EventSource/pitch).
+// Mount subscription router FIRST so POST /:id/subscribe is matched before strategyRoutes (avoids 405 when first router has no POST for that path).
 app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategySubscriptionRoutes);
+app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
