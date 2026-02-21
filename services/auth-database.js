@@ -866,6 +866,38 @@ class DatabaseAuthService {
   }
 
   /**
+   * Flexible auth middleware: accepts Bearer header OR ?token= query param.
+   * Use for strategy routes where pitch uses EventSource (?token=) and others use Bearer.
+   * Eliminates route-order dependence for auth.
+   */
+  authMiddlewareFlexible(req, res, next) {
+    let token = null;
+    if (req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.substring(7);
+    } else if (req.query?.token && typeof req.query.token === 'string') {
+      token = req.query.token.trim();
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: 'No token provided (use Authorization: Bearer <token> or ?token=<token>)'
+      });
+    }
+
+    try {
+      const decoded = this.verifyToken(token);
+      req.user = decoded;
+      next();
+    } catch (error) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: error.message
+      });
+    }
+  }
+
+  /**
    * Optional auth middleware
    */
   optionalAuthMiddleware(req, res, next) {
