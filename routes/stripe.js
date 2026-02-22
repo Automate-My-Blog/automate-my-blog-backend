@@ -147,7 +147,10 @@ async function handleCheckoutCompleted(session) {
 
   // Check if this is a strategy subscription (individual or bundle)
   if (strategyWebhooks.isStrategySubscription(session)) {
-    console.log('🎯 Strategy subscription detected, delegating to strategy webhook handler');
+    console.log('🎯 Strategy subscription detected, delegating to strategy webhook handler', {
+      sessionId: session.id,
+      metadata: session.metadata
+    });
     await strategyWebhooks.handleStrategyCheckoutCompleted(session);
     return; // Early return - strategy subscriptions handled separately
   }
