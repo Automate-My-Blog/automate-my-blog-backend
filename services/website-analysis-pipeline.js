@@ -314,7 +314,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
    * Backfill missing cache data by making necessary service calls.
    * Extensible: add new backfill steps here when we add new fields.
    */
-  const backfillMissingCacheData = async (result, { org, intelRow, storedCTAs, report, onPartialResult }) => {
+  const backfillMissingCacheData = async (result, { org, intelRow, storedCTAs, report, onPartialResult, userId, sessionId }) => {
     let { analysis, scenarios } = result;
     const orgId = result.organizationId;
 
@@ -489,6 +489,54 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       }
     }
 
+    // 3. Ensure current user/session has their own audience rows so adoption works on login.
+    // When a cache hit returns scenarios from another user's rows, the current session has
+    // no audience rows of its own — adoption (UPDATE audiences SET user_id WHERE session_id)
+    // finds nothing. Copy cached scenario data as new rows for the current context.
+    if (scenarios.length > 0 && (userId || sessionId) && intelRow?.id) {
+      try {
+        const contextClause = userId ? 'user_id = $2' : 'session_id = $2';
+        const contextValue = userId || sessionId;
+        const existing = await db.query(
+          `SELECT id FROM audiences WHERE organization_intelligence_id = $1 AND ${contextClause} LIMIT 1`,
+          [intelRow.id, contextValue]
+        );
+        if (existing.rows.length === 0) {
+          for (let i = 0; i < scenarios.length; i++) {
+            const s = scenarios[i];
+            await db.query(
+              `INSERT INTO audiences (
+                user_id, session_id, organization_intelligence_id,
+                target_segment, customer_problem, customer_language, conversion_path,
+                business_value, priority, pitch, image_url,
+                projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+              [
+                userId || null,
+                userId ? null : (sessionId || null),
+                intelRow.id,
+                JSON.stringify(s.targetSegment || {}),
+                s.customerProblem || null,
+                s.customerLanguage ? JSON.stringify(s.customerLanguage) : null,
+                s.conversionPath || null,
+                JSON.stringify(s.businessValue || {}),
+                (s.businessValue?.priority ?? i + 1),
+                s.pitch || null,
+                s.imageUrl || null,
+                s.projectedRevenueLow ?? null,
+                s.projectedRevenueHigh ?? null,
+                s.projectedProfitLow ?? null,
+                s.projectedProfitHigh ?? null
+              ]
+            );
+          }
+          console.log(`✅ Created ${scenarios.length} audience rows for ${userId ? 'user' : 'session'} ${contextValue} from cache`);
+        }
+      } catch (e) {
+        console.warn('⚠️ Cache audience row copy failed:', e.message);
+      }
+    }
+
     return { ...result, analysis, scenarios };
   };
 
@@ -496,7 +544,7 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     const org = await findOrgForCache();
     if (!org?.id) return null;
     const intelResult = await db.query(
-      `SELECT oi.raw_openai_response, oi.created_at, oi.narrative_analysis, oi.narrative_confidence, oi.key_insights,
+      `SELECT oi.id, oi.raw_openai_response, oi.created_at, oi.narrative_analysis, oi.narrative_confidence, oi.key_insights,
               oi.customer_language_patterns, oi.customer_scenarios, oi.search_behavior_insights,
               oi.seo_opportunities, oi.content_strategy_recommendations, oi.business_value_assessment,
               o.name, o.description, o.business_type, o.industry_category, o.target_audience, o.brand_voice,
@@ -610,7 +658,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
       intelRow,
       storedCTAs,
       report,
-      onPartialResult
+      onPartialResult,
+      userId,
+      sessionId
     });
 
     if (typeof onPartialResult === 'function') {
