@@ -2,6 +2,7 @@ import express from 'express';
 import db from '../services/database.js';
 import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
+import * as strategyWebhooks from '../services/strategy-subscription-webhooks.js';
 import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
 // Lazy init so server can start when STRIPE_SECRET_KEY is missing.
@@ -265,7 +266,7 @@ router.post('/:id/subscribe',  async (req, res) => {
     // Sanitize URL
     frontendUrl = frontendUrl.trim().replace(/\/+$/, '');
 
-    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}`;
+    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${frontendUrl}/dashboard?tab=audience-segments`;
 
     console.log('🔗 Stripe Checkout URLs:', {
@@ -398,6 +399,57 @@ router.get('/subscribed',  async (req, res) => {
       userId: req.user?.userId
     });
     res.status(500).json({ error: 'Failed to fetch subscriptions' });
+  }
+});
+
+/**
+ * POST /api/v1/strategies/activate-purchase
+ * Idempotent fallback to activate a strategy subscription after Stripe redirect.
+ * Called by the frontend when the webhook may not have fired yet (local dev, race).
+ */
+router.post('/activate-purchase', async (req, res) => {
+  const { session_id, strategy_id } = req.body;
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+  }
+
+  if (!session_id || !strategy_id) {
+    return res.status(400).json({ error: 'session_id and strategy_id are required' });
+  }
+
+  try {
+    // Idempotency: already activated?
+    const existing = await db.query(
+      `SELECT id FROM strategy_purchases WHERE user_id=$1 AND strategy_id=$2 AND status='active'`,
+      [userId, strategy_id]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ success: true, alreadyActivated: true });
+    }
+
+    // Retrieve and verify the Stripe session
+    const session = await getStripe().checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') {
+      return res.status(402).json({ error: 'Payment not completed', status: session.payment_status });
+    }
+    if (session.metadata?.user_id !== userId.toString()) {
+      return res.status(403).json({ error: 'Session does not belong to this user' });
+    }
+
+    // Reuse existing webhook handler (same code path as real webhook)
+    await strategyWebhooks.handleStrategyCheckoutCompleted(session);
+    return res.json({ success: true, activated: true });
+  } catch (error) {
+    console.error('❌ Error in activate-purchase:', {
+      message: error.message,
+      stack: error.stack,
+      userId,
+      session_id,
+      strategy_id
+    });
+    return res.status(500).json({ error: 'Failed to activate purchase', message: error.message });
   }
 });
 
