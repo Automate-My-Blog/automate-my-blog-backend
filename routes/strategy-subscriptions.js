@@ -144,6 +144,9 @@ router.get('/:id/pricing', async (req, res) => {
  */
 router.post('/:id/subscribe',  async (req, res) => {
   try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+    }
     const { id: strategyId } = req.params;
     const { billingInterval } = req.body; // 'monthly' or 'annual'
     const userId = req.user.userId;
