@@ -41,15 +41,18 @@ import emailTestRoutes from './routes/email-test.js';
 import schedulerRoutes from './routes/scheduler.js';
 import emailPreferencesRoutes from './routes/email-preferences.js';
 import founderEmailRoutes from './routes/founderEmails.js';
-import strategySubscriptionRoutes from './routes/strategy-subscriptions.js';
+import strategyRoutes from './routes/strategies-router.js';
 import bundleSubscriptionRoutes from './routes/bundle-subscriptions.js';
 import jobsRoutes from './routes/jobs.js';
+import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
+import googleIntegrationsRoutes from './routes/google-integrations.js';
 import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
-import { normalizeCTA } from './utils/cta-normalizer.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
-import { toHttpResponse } from './lib/errors.js';
+import { toHttpResponse, ValidationError } from './lib/errors.js';
 import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
+import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
+import { saveAnalysisResult } from './services/website-analysis-persistence.js';
 
 // Load environment variables
 dotenv.config();
@@ -86,43 +89,77 @@ const allowedOriginList = [
 const extraOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 const allAllowedOrigins = [...allowedOriginList, ...extraOrigins];
 
-function corsOrigin(origin, callback) {
-  if (!origin) return callback(null, true);
-  if (allAllowedOrigins.includes(origin)) return callback(null, true);
-  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return callback(null, true);
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const u = new URL(origin);
-      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return callback(null, true);
-    } catch (_) { /* ignore */ }
-  }
-  callback(null, false);
+/** Normalize origin for comparison (trim, strip trailing slash). */
+function normalizeOrigin(origin) {
+  if (typeof origin !== 'string') return '';
+  return origin.trim().replace(/\/+$/, '') || '';
 }
 
-function isOriginAllowed(origin) {
+function isInAllowList(origin) {
   if (!origin) return false;
-  if (allAllowedOrigins.includes(origin)) return true;
-  if (origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'))) return true;
-  if (process.env.NODE_ENV === 'development') {
-    try {
-      const u = new URL(origin);
-      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return true;
-    } catch (_) { /* ignore */ }
+  const o = normalizeOrigin(origin);
+  return allAllowedOrigins.some((allowed) => normalizeOrigin(allowed) === o || allowed === origin);
+}
+
+function isVercelPreviewOrigin(origin) {
+  return origin.endsWith('.vercel.app') && (origin.startsWith('https://') || origin.startsWith('http://'));
+}
+
+/** Allow any https origin whose host is automatemyblog.com or a subdomain (e.g. staging.automatemyblog.com). */
+function isAutomatemyblogOrigin(origin) {
+  if (typeof origin !== 'string' || !origin.startsWith('https://')) return false;
+  try {
+    const u = new URL(origin);
+    return u.hostname === 'automatemyblog.com' || u.hostname.endsWith('.automatemyblog.com');
+  } catch {
+    return false;
   }
+}
+
+function isLocalhostInDevelopment(origin) {
+  if (process.env.NODE_ENV !== 'development') return false;
+  try {
+    const u = new URL(origin);
+    return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  } catch {
+    return false;
+  }
+}
+
+/** Single source of truth for CORS origin allow. */
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  const normalized = normalizeOrigin(origin);
+  if (isInAllowList(normalized) || isInAllowList(origin)) return true;
+  if (isVercelPreviewOrigin(origin)) return true;
+  if (isAutomatemyblogOrigin(origin)) return true;
+  if (isLocalhostInDevelopment(origin)) return true;
   return false;
+}
+
+function corsOrigin(origin, callback) {
+  // Pass the origin string when allowed so the cors package sets Access-Control-Allow-Origin correctly.
+  callback(null, isOriginAllowed(origin) ? (origin || false) : false);
 }
 
 // Explicit OPTIONS (preflight) handler so CORS headers are always sent in serverless (Vercel).
 // The browser sends OPTIONS first; without these headers the actual request is blocked.
+// When Origin is missing (e.g. stripped by proxy), use CORS_OPTIONS_FALLBACK_ORIGIN so preflight still succeeds.
 app.use((req, res, next) => {
   if (req.method !== 'OPTIONS') return next();
-  const origin = req.headers.origin;
-  if (isOriginAllowed(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
+  const rawOrigin = req.headers.origin;
+  const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : '';
+  const fallbackOrigin = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || '').trim() || null;
+  const allowOrigin = (origin && isOriginAllowed(origin))
+    ? origin
+    : (fallbackOrigin && isOriginAllowed(fallbackOrigin) ? fallbackOrigin : null);
+  if (allowOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Max-Age', '86400');
+    res.setHeader('Vary', 'Origin');
   }
   res.status(204).end();
 });
@@ -140,32 +177,45 @@ const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NOD
 const isDev = process.env.NODE_ENV === 'development';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: isDevelopment ? 1000 : 100,
+  max: isDevelopment ? 10000 : 100, // Increased for local dev with many API calls
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => req.path === '/health' || req.path === '/manifest.json'
+  skip: (req) => {
+    // Skip rate limiting for health checks and localhost in development
+    if (req.path === '/health' || req.path === '/manifest.json') return true;
+    if (isDevelopment && (req.hostname === 'localhost' || req.hostname === '127.0.0.1')) return true;
+    return false;
+  }
 });
 
 app.use(limiter);
 
+function isStripeWebhook(req) {
+  return req.method === 'POST' && req.url === '/api/v1/stripe/webhook';
+}
+
+function isJsonSyntaxError(err) {
+  return err instanceof SyntaxError && err.status === 400 && 'body' in err;
+}
+
 // Body parsing - raw for webhook, JSON for everything else
 app.use((req, res, next) => {
-  if (req.method === 'POST' && req.url === '/api/v1/stripe/webhook') {
+  if (isStripeWebhook(req)) {
     express.raw({ type: 'application/json' })(req, res, next);
-  } else {
-    express.json({ limit: '10mb' })(req, res, (err) => {
-      if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-        return res.status(400).json({
-          error: 'Invalid JSON format',
-          message: 'The request body contains malformed JSON'
-        });
-      }
-      next(err);
-    });
+    return;
   }
+  express.json({ limit: '10mb' })(req, res, (err) => {
+    if (err && isJsonSyntaxError(err)) {
+      return res.status(400).json({
+        error: 'Invalid JSON format',
+        message: 'The request body contains malformed JSON'
+      });
+    }
+    next(err);
+  });
 });
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -178,6 +228,7 @@ app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), u
 app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
 app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
 app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
+app.use('/api/v1/voice-samples', authService.authMiddleware.bind(authService), voiceSamplesRoutes);
 app.use('/api/v1/stream', registerStreamRoute(authService));
 app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
 app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
@@ -206,10 +257,14 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
-app.use('/api/v1/strategies', authService.authMiddleware.bind(authService), strategySubscriptionRoutes);
+// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
+app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
+
+// Google API Integrations (Trends, Search Console, Analytics)
+app.use('/api/v1/google', authService.optionalAuthMiddleware.bind(authService), googleIntegrationsRoutes);
 
 // Email test routes (optional auth for testing)
 app.use('/api/v1/email/test', authService.optionalAuthMiddleware.bind(authService), emailTestRoutes);
@@ -507,23 +562,25 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
   }
 });
 
+function isInfrastructureError(error) {
+  const codes = ['28000', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', '57P01'];
+  return error?.code != null && codes.includes(String(error.code));
+}
+
 // Get current user endpoint
 app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const user = await authService.getUserById(req.user.userId);
-
     res.json({
       success: true,
       user
     });
-
   } catch (error) {
     console.error('Get user error:', error);
-    // Return 500 for infrastructure/DB errors, 404 for user-not-found
-    const isServerError = error.code === '28000' || error.code === 'ECONNREFUSED' ||
-      error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === '57P01';
-    res.status(isServerError ? 500 : 404).json({
-      error: isServerError ? 'Service unavailable' : 'User not found',
+    const statusCode = isInfrastructureError(error) ? 500 : 404;
+    const errorLabel = isInfrastructureError(error) ? 'Service unavailable' : 'User not found';
+    res.status(statusCode).json({
+      error: errorLabel,
       message: error.message
     });
   }
@@ -593,7 +650,7 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
 // Analyze website endpoint — request timeout so we never hang indefinitely
 const ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS = Math.max(60000, parseInt(process.env.ANALYZE_WEBSITE_REQUEST_TIMEOUT_MS || '120000', 10));
 
-app.post('/api/analyze-website', async (req, res) => {
+app.post('/api/analyze-website', async (req, res, next) => {
   console.log('=== Website Analysis Request ===');
   console.log('Request body:', req.body);
   console.log('Headers:', req.headers);
@@ -615,19 +672,10 @@ app.post('/api/analyze-website', async (req, res) => {
     console.log('Analyzing URL:', url);
 
     if (!url) {
-      console.log('Error: No URL provided');
-      return res.status(400).json({
-        error: 'URL is required',
-        message: 'Please provide a valid website URL'
-      });
+      throw new ValidationError('URL is required', 'Please provide a valid website URL');
     }
-
     if (!webScraperService.isValidUrl(url)) {
-      console.log('Error: Invalid URL format:', url);
-      return res.status(400).json({
-        error: 'Invalid URL format',
-        message: 'Please provide a valid HTTP or HTTPS URL'
-      });
+      throw new ValidationError('Invalid URL format', 'Please provide a valid HTTP or HTTPS URL');
     }
 
     console.log('Starting website scraping...');
@@ -670,496 +718,37 @@ app.post('/api/analyze-website', async (req, res) => {
       console.warn('Failed to capture lead:', leadError.message);
     }
 
-    // Save analysis to organizations and organization intelligence tables with session support
-    // Declare foundOrganizationId here so it's accessible for narrative generation later
+    // Persist analysis: org resolution, organization + intelligence, CTAs (single service call)
     let foundOrganizationId = null;
-
-    try {
-      const sessionId = req.headers['x-session-id'];
-      const token = req.headers.authorization?.replace('Bearer ', '');
-      let userId = null;
-      
-      // Extract user ID from JWT token if authenticated
-      if (token) {
-        try {
-          const jwt = await import('jsonwebtoken');
-          const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
-          userId = payload.userId;
-          console.log('🔍 Authenticated user found for organization intelligence save:', userId);
-        } catch (jwtError) {
-          console.warn('Failed to extract user from JWT:', jwtError.message);
-        }
-      }
-      
-      // Only save if we have either userId or sessionId
-      if (userId || sessionId) {
-        const { v4: uuidv4 } = await import('uuid');
-        const now = new Date();
-        
-        // Create organization name from business name or URL
-        const organizationName = analysis?.businessName || analysis?.companyName || new URL(url).hostname;
-        
-        const organizationData = {
-          name: organizationName,
-          website_url: url,
-          business_type: analysis?.businessType,
-          industry_category: analysis?.industryCategory,
-          business_model: analysis?.businessModel,
-          company_size: analysis?.companySize,
-          description: analysis?.description,
-          target_audience: analysis?.targetAudience,
-          brand_voice: analysis?.brandVoice,
-          website_goals: analysis?.websiteGoals,
-          // search_behavior_summary: analysis?.searchBehavior, // Column not yet migrated in production DB
-          last_analyzed_at: now
-        };
-        
-        const intelligenceData = {
-          customer_scenarios: analysis?.customerScenarios ? JSON.stringify(analysis.customerScenarios) : null,
-          business_value_assessment: analysis?.businessValueAssessment ? JSON.stringify(analysis.businessValueAssessment) : null,
-          customer_language_patterns: analysis?.customerLanguagePatterns ? JSON.stringify(analysis.customerLanguagePatterns) : null,
-          search_behavior_insights: analysis?.searchBehaviorInsights ? JSON.stringify(analysis.searchBehaviorInsights) : null,
-          seo_opportunities: analysis?.seoOpportunities ? JSON.stringify(analysis.seoOpportunities) : null,
-          content_strategy_recommendations: analysis?.contentStrategyRecommendations ? JSON.stringify(analysis.contentStrategyRecommendations) : null,
-          competitive_intelligence: analysis?.competitiveIntelligence ? JSON.stringify(analysis.competitiveIntelligence) : null,
-          analysis_confidence_score: analysis?.analysisConfidenceScore || 0.75,
-          data_sources: analysis?.dataSources ? JSON.stringify(analysis.dataSources) : JSON.stringify(['website_analysis']),
-          ai_model_used: analysis?.aiModelUsed || 'gpt-4',
-          raw_openai_response: analysis?.rawOpenaiResponse ? JSON.stringify(analysis.rawOpenaiResponse) : null
-        };
-        
-        // PRIORITY-BASED ORGANIZATION LOOKUP (with session adoption)
-        let existingOrganization = null;
-        let organizationSource = null;
-        let shouldAdoptAnonymousOrg = false;
-
-        // PRIORITY 1: Check if authenticated user already has an organization
-        if (userId) {
-          console.log('🔍 [ORG DEBUG] Checking for existing organization by user ID:', { userId });
-
-          const userOrgResult = await db.query(
-            'SELECT id, website_url FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
-            [userId]
-          );
-
-          if (userOrgResult.rows.length > 0) {
-            existingOrganization = userOrgResult.rows[0];
-            organizationSource = 'user_owned';
-            console.log('✅ [ORG DEBUG] Found user\'s existing organization:', {
-              organizationId: existingOrganization.id,
-              currentWebsiteUrl: existingOrganization.website_url,
-              newWebsiteUrl: url,
-              action: 'will_update'
-            });
-          } else {
-            // PRIORITY 2: Check if there's an anonymous org for this URL to adopt
-            console.log('🔍 [ORG DEBUG] No user org found, checking for anonymous org to adopt');
-
-            const anonymousOrgResult = await db.query(
-              'SELECT id, website_url FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
-              [url]
-            );
-
-            if (anonymousOrgResult.rows.length > 0) {
-              existingOrganization = anonymousOrgResult.rows[0];
-              organizationSource = 'anonymous_adoption';
-              shouldAdoptAnonymousOrg = true;
-              console.log('✅ [ORG DEBUG] Found anonymous org to adopt:', {
-                organizationId: existingOrganization.id,
-                websiteUrl: url,
-                action: 'will_adopt_and_update'
-              });
-            } else {
-              console.log('ℹ️ [ORG DEBUG] No existing org found, will create new one for user');
-              organizationSource = 'new_for_user';
-            }
-          }
-        } else {
-          // PRIORITY 3: For anonymous users, check by URL (no adoption)
-          console.log('🔍 [ORG DEBUG] Anonymous user - checking for existing organization by URL');
-
-          const urlOrgResult = await db.query(
-            'SELECT id, website_url FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
-            [url]
-          );
-
-          if (urlOrgResult.rows.length > 0) {
-            existingOrganization = urlOrgResult.rows[0];
-            organizationSource = 'anonymous_session';
-            console.log('✅ [ORG DEBUG] Found anonymous organization by URL:', {
-              organizationId: existingOrganization.id,
-              websiteUrl: url
-            });
-          } else {
-            console.log('ℹ️ [ORG DEBUG] No existing anonymous organization for URL, will create new one');
-            organizationSource = 'new_anonymous';
-          }
-        }
-
-        let organizationId;
-
-        // Update existing organization or create new one
-        if (existingOrganization) {
-          organizationId = existingOrganization.id;
-
-          console.log('🔄 [ORG DEBUG] Updating existing organization:', {
-            organizationId,
-            source: organizationSource,
-            userId: userId || 'anonymous',
-            websiteUrl: url,
-            willAdopt: shouldAdoptAnonymousOrg
-          });
-
-          const updateFields = [];
-          const updateValues = [];
-          let paramIndex = 1;
-
-          // If adopting anonymous org, set owner_user_id
-          if (shouldAdoptAnonymousOrg) {
-            updateFields.push(`owner_user_id = $${paramIndex}`);
-            updateValues.push(userId);
-            paramIndex++;
-          }
-
-          for (const [key, value] of Object.entries(organizationData)) {
-            if (key !== 'name') { // Don't update name usually
-              updateFields.push(`${key} = $${paramIndex}`);
-              updateValues.push(value);
-              paramIndex++;
-            }
-          }
-          updateFields.push(`updated_at = NOW()`);
-          updateValues.push(organizationId);
-
-          await db.query(
-            `UPDATE organizations SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
-            updateValues
-          );
-
-          console.log('✅ [ORG DEBUG] Updated existing organization:', {
-            organizationId,
-            source: organizationSource,
-            adopted: shouldAdoptAnonymousOrg,
-            websiteUrlUpdated: existingOrganization.website_url !== url
-          });
-
-          // Mark previous intelligence records as not current
-          await db.query(
-            'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',
-            [organizationId]
-          );
-
-        } else {
-          // Create new organization
-          organizationId = uuidv4();
-
-          console.log('➕ [ORG DEBUG] Creating new organization:', {
-            source: organizationSource,
-            userId: userId || 'anonymous',
-            websiteUrl: url
-          });
-
-          const insertFields = ['id', 'slug', ...Object.keys(organizationData), 'created_at', 'updated_at'];
-          const orgSlug = organizationName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').substring(0, 100);
-          const insertValues = [organizationId, orgSlug, ...Object.values(organizationData), now, now];
-
-          // Add owner_user_id or session_id
-          if (userId) {
-            insertFields.push('owner_user_id');
-            insertValues.push(userId);
-          } else {
-            insertFields.push('session_id');
-            insertValues.push(sessionId);
-          }
-
-          const insertPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
-
-          await db.query(
-            `INSERT INTO organizations (${insertFields.join(', ')}) VALUES (${insertPlaceholders})`,
-            insertValues
-          );
-
-          console.log('✅ [ORG DEBUG] Created new organization:', {
-            organizationId,
-            source: organizationSource
-          });
-        }
-        
-        // Create new intelligence record
-        const intelligenceId = uuidv4();
-        const intelInsertFields = ['id', 'organization_id', ...Object.keys(intelligenceData), 'is_current', 'created_at', 'updated_at'];
-        const intelInsertValues = [intelligenceId, organizationId, ...Object.values(intelligenceData), true, now, now];
-        
-        // Add session_id for session-based intelligence (organization_id will be null for sessions)
-        if (!userId && sessionId) {
-          intelInsertFields.push('session_id');
-          intelInsertValues.push(sessionId);
-          // Remove organization_id for session-based records
-          const orgIdIndex = intelInsertFields.indexOf('organization_id');
-          intelInsertFields.splice(orgIdIndex, 1);
-          intelInsertValues.splice(orgIdIndex, 1);
-        }
-        
-        const intelInsertPlaceholders = intelInsertFields.map((_, i) => `$${i + 1}`).join(', ');
-        
-        await db.query(
-          `INSERT INTO organization_intelligence (${intelInsertFields.join(', ')}) VALUES (${intelInsertPlaceholders})`,
-          intelInsertValues
-        );
-
-        console.log('✅ Created new organization intelligence record');
-
-        // ✅ FIX: Set foundOrganizationId to the newly created/updated organization
-        foundOrganizationId = organizationId;
-        console.log('✅ [ORG DEBUG] Set foundOrganizationId for narrative generation:', { foundOrganizationId });
-
-      } else {
-        console.warn('⚠️ No userId or sessionId available - analysis not saved to database');
-      }
-    } catch (saveError) {
-      // Don't fail the main request if saving to database fails
-      console.error('Failed to save organization intelligence to database:', saveError.message);
-    }
-
-    // Store CTAs regardless of whether organization save succeeded
-    // foundOrganizationId is now already set from the organization creation above
-    // Only do database lookup as fallback if organization creation failed
+    let storedCTAs = [];
     let ctaStoredCount = 0;
 
-    try {
-      // ✅ FIX: Only lookup organization if we don't already have it from creation step
-      if (!foundOrganizationId) {
-        console.log('⚠️ [CTA DEBUG] foundOrganizationId not set from creation, attempting fallback lookup');
-
-        const token = req.headers.authorization?.replace('Bearer ', '');
-        let userId = null;
-
-        if (token) {
-          try {
-            const jwt = await import('jsonwebtoken');
-            const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
-            userId = payload.userId;
-          } catch (jwtError) {
-            console.warn('JWT verification failed for CTA storage:', jwtError.message);
-          }
-        }
-
-        // Use same user-first lookup as main organization creation
-        // This ensures CTAs are stored in the correct organization
-        if (userId) {
-        console.log('🔍 [CTA DEBUG] Looking up organization by user ID for CTA storage:', { userId });
-
-        const userOrgResult = await db.query(
-          'SELECT id FROM organizations WHERE owner_user_id = $1 ORDER BY created_at DESC LIMIT 1',
-          [userId]
-        );
-
-        if (userOrgResult.rows.length > 0) {
-          foundOrganizationId = userOrgResult.rows[0].id;
-          console.log('✅ [CTA DEBUG] Found user organization for CTA storage:', {
-            organizationId: foundOrganizationId,
-            userId,
-            method: 'user_id_lookup'
-          });
-        } else {
-          // Fallback to URL lookup for anonymous org adoption case
-          console.log('🔍 [CTA DEBUG] No user org found, checking by URL for CTA storage');
-
-          const urlOrgResult = await db.query(
-            'SELECT id FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
-            [url]
-          );
-
-          if (urlOrgResult.rows.length > 0) {
-            foundOrganizationId = urlOrgResult.rows[0].id;
-            console.log('✅ [CTA DEBUG] Found anonymous org by URL for CTA storage:', {
-              organizationId: foundOrganizationId,
-              url,
-              method: 'anonymous_url_lookup'
-            });
-          } else {
-            console.warn('⚠️ [CTA DEBUG] No organization found for authenticated user:', { userId, url });
-          }
-        }
-      } else {
-        // Anonymous user - lookup by URL
-        console.log('🔍 [CTA DEBUG] Anonymous user, looking up organization by URL for CTA storage');
-
-        const urlOrgResult = await db.query(
-          'SELECT id FROM organizations WHERE website_url = $1 AND owner_user_id IS NULL ORDER BY created_at DESC LIMIT 1',
-          [url]
-        );
-
-        if (urlOrgResult.rows.length > 0) {
-          foundOrganizationId = urlOrgResult.rows[0].id;
-          console.log('✅ [CTA DEBUG] Found anonymous organization for CTA storage:', {
-            organizationId: foundOrganizationId,
-            url,
-            method: 'anonymous_url_lookup'
-          });
-        } else {
-          console.warn('⚠️ [CTA DEBUG] No organization found for URL:', { url });
-        }
-        }
-      } else {
-        console.log('✅ [CTA DEBUG] Using foundOrganizationId from organization creation step:', { foundOrganizationId });
+    const sessionId = req.headers['x-session-id'] || null;
+    let userId = null;
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (token) {
+      try {
+        const jwt = await import('jsonwebtoken');
+        const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+        userId = payload.userId;
+      } catch (jwtError) {
+        console.warn('Failed to extract user from JWT:', jwtError.message);
       }
-
-      console.log('🎯 [CTA DEBUG] Final organizationId for CTA storage:', {
-        organizationId: foundOrganizationId,
-        url
-      });
-
-      // Clear old CTAs before storing new ones (for re-analysis scenarios)
-      if (foundOrganizationId) {
-        try {
-          console.log('🗑️ [CTA DEBUG] Clearing old CTAs before storing new analysis:', {
-            organizationId: foundOrganizationId
-          });
-
-          await db.query(
-            'DELETE FROM cta_analysis WHERE organization_id = $1',
-            [foundOrganizationId]
-          );
-
-          // Reset has_cta_data flag (will be set to true later if CTAs found)
-          await db.query(`
-            UPDATE organizations
-            SET data_availability = jsonb_set(
-              COALESCE(data_availability, '{}'::jsonb),
-              '{has_cta_data}',
-              'false'::jsonb
-            )
-            WHERE id = $1
-          `, [foundOrganizationId]);
-
-          console.log('✅ [CTA DEBUG] Old CTAs cleared and flag reset, ready for new analysis');
-        } catch (clearError) {
-          console.error('🚨 [CTA DEBUG] Failed to clear old CTAs:', clearError.message);
-        }
-      }
-
-      // Store CTAs if we have an organization and CTAs exist
-      if (foundOrganizationId && scrapedContent.ctas && scrapedContent.ctas.length > 0) {
-        console.log('🎯 [CTA DEBUG] Storing CTAs for organization:', {
-          organizationId: foundOrganizationId,
-          ctaCount: scrapedContent.ctas.length
-        });
-
-        // ctaStoredCount is already declared at outer scope
-        for (const cta of scrapedContent.ctas) {
-          try {
-            // Normalize CTA using centralized utility
-            const normalized = normalizeCTA(cta);
-
-            console.log('🎯 [CTA DEBUG] Storing individual CTA (normalized):', {
-              organizationId: foundOrganizationId,
-              ctaText: normalized.cta_text,
-              ctaType: normalized.cta_type,
-              placement: normalized.placement,
-              href: normalized.href
-            });
-
-            await db.query(`
-              INSERT INTO cta_analysis (
-                organization_id, page_url, cta_text, cta_type, placement,
-                href, context, class_name, tag_name, conversion_potential,
-                visibility_score, page_type, analysis_source, data_source, scraped_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-              ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
-                cta_type = EXCLUDED.cta_type,
-                href = EXCLUDED.href,
-                context = EXCLUDED.context,
-                data_source = EXCLUDED.data_source,
-                scraped_at = EXCLUDED.scraped_at
-            `, [
-              foundOrganizationId,
-              url,
-              normalized.cta_text,
-              normalized.cta_type,
-              normalized.placement,
-              normalized.href,
-              normalized.context,
-              normalized.class_name,
-              normalized.tag_name,
-              normalized.conversion_potential,
-              normalized.visibility_score,
-              'homepage',
-              'website_scraping',
-              'scraped'
-            ]);
-
-            ctaStoredCount++;
-            console.log('✅ [CTA DEBUG] CTA stored successfully:', { ctaText: normalized.cta_text });
-          } catch (ctaError) {
-            console.error('🚨 [CTA DEBUG] Failed to store CTA:', {
-              ctaText: cta.text,
-              error: ctaError.message
-            });
-          }
-        }
-
-        console.log('✅ [CTA DEBUG] CTA storage complete:', {
-          totalStoredCTAs: ctaStoredCount,
-          expectedCTAs: scrapedContent.ctas.length,
-          organizationId: foundOrganizationId
-        });
-
-        // Update organization has_cta_data flag
-        if (ctaStoredCount > 0) {
-          await db.query(`
-            UPDATE organizations
-            SET data_availability = jsonb_set(
-              COALESCE(data_availability, '{}'::jsonb),
-              '{has_cta_data}',
-              'true'::jsonb
-            )
-            WHERE id = $1
-          `, [foundOrganizationId]);
-
-          console.log('🎯 [CTA DEBUG] Updated has_cta_data flag:', {
-            organizationId: foundOrganizationId,
-            has_cta_data: true
-          });
-        }
-
-        console.log('🚩 [CHECKPOINT 1] Website Analysis Complete:', {
-          organizationId: foundOrganizationId,
-          ctasExtracted: scrapedContent.ctas.length,
-          ctasStored: ctaStoredCount,
-          nextStep: 'CTAs should now appear in topic cards'
-        });
-      } else {
-        console.log('⚠️ [CTA DEBUG] Cannot store CTAs:', {
-          hasOrganizationId: !!foundOrganizationId,
-          hasCTAs: !!(scrapedContent.ctas && scrapedContent.ctas.length > 0),
-          ctaCount: scrapedContent.ctas?.length || 0
-        });
-      }
-    } catch (ctaStorageError) {
-      console.error('🚨 [CTA DEBUG] CTA storage failed:', ctaStorageError.message);
     }
 
-    // Fetch stored CTAs to include in response
-    let storedCTAs = [];
-    if (foundOrganizationId && ctaStoredCount > 0) {
-      try {
-        const ctaResult = await db.query(`
-          SELECT id, cta_text as text, cta_type as type, href, placement,
-                 conversion_potential, data_source
-          FROM cta_analysis
-          WHERE organization_id = $1
-          ORDER BY conversion_potential DESC
-          LIMIT 5
-        `, [foundOrganizationId]);
-        storedCTAs = ctaResult.rows;
-        console.log('📊 [CTA DEBUG] Fetched CTAs for response:', {
-          organizationId: foundOrganizationId,
-          ctaCount: storedCTAs.length
-        });
-      } catch (fetchError) {
-        console.warn('⚠️ Failed to fetch CTAs for response:', fetchError.message);
-      }
+    try {
+      const result = await saveAnalysisResult(db, {
+        userId,
+        sessionId,
+        url,
+        analysis,
+        ctas: scrapedContent.ctas || []
+      });
+      foundOrganizationId = result.organizationId;
+      storedCTAs = result.storedCTAs;
+      ctaStoredCount = result.ctaStoredCount;
+    } catch (saveError) {
+      console.error('Failed to save organization intelligence to database:', saveError.message);
     }
 
     // Generate narrative analysis via job queue
@@ -1232,17 +821,8 @@ app.post('/api/analyze-website', async (req, res) => {
     if (!res.headersSent) res.json(response);
 
   } catch (error) {
-    console.error('=== Website Analysis Error ===');
-    console.error('Error type:', error.constructor.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    console.error('================================');
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: 'Analysis failed',
-        message: error.message
-      });
-    }
+    console.error('=== Website Analysis Error ===', error?.message);
+    if (!res.headersSent) next(error);
   }
 });
 
@@ -2067,21 +1647,14 @@ app.get('/api/v1/blog-posts', authService.authMiddleware.bind(authService), asyn
 // Create new blog post
 app.post('/api/v1/blog-posts', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
-    const { title, content, topic, businessInfo, status = 'draft' } = req.body;
-
-    if (!title || !content) {
-      return res.status(400).json({
-        error: 'Missing required fields',
-        message: 'title and content are required'
-      });
-    }
+    const parsed = validateCreateBlogPostBody(req.body);
 
     const savedPost = await contentService.saveBlogPost(req.user.userId, {
-      title,
-      content,
-      topic,
-      businessInfo,
-      status
+      title: parsed.title,
+      content: parsed.content,
+      topic: parsed.topic,
+      businessInfo: parsed.businessInfo,
+      status: parsed.status
     });
 
     res.status(201).json({
@@ -2115,19 +1688,7 @@ app.get('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), 
 app.put('/api/v1/blog-posts/:id', authService.authMiddleware.bind(authService), async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { title, content, status } = req.body;
-
-    const updates = {};
-    if (title !== undefined) updates.title = title;
-    if (content !== undefined) updates.content = content;
-    if (status !== undefined) updates.status = status;
-
-    if (Object.keys(updates).length === 0) {
-      return res.status(400).json({
-        error: 'No updates provided',
-        message: 'At least one field (title, content, status) must be provided'
-      });
-    }
+    const updates = validateUpdateBlogPostBody(req.body);
 
     const updatedPost = await contentService.updateBlogPost(id, req.user.userId, updates);
 
@@ -3369,4 +2930,32 @@ if (process.env.NODE_ENV !== 'test') {
   });
 }
 
-export default app;
+// On Vercel, handle OPTIONS before Express so preflight always gets CORS headers (no middleware or proxy can block it).
+function handleOptions(req, res) {
+  const origin = (req.headers && (req.headers.origin || req.headers.Origin)) || '';
+  const fallback = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || process.env.CORS_ORIGINS || '').split(',')[0].trim() || 'https://staging.automatemyblog.com';
+  const allowed =
+    /^https:\/\/(staging\.|www\.)?automatemyblog\.com$/i.test(origin) ||
+    /^https?:\/\/[^/]+\.vercel\.app$/i.test(origin) ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  const allowOrigin = (origin && allowed) ? origin : fallback;
+  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+}
+
+const serverlessHandler =
+  process.env.VERCEL && process.env.NODE_ENV !== 'test'
+    ? (req, res) => {
+        if (req.method === 'OPTIONS') {
+          handleOptions(req, res);
+          return;
+        }
+        app(req, res);
+      }
+    : app;
+
+export default serverlessHandler;

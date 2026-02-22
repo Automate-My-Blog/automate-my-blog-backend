@@ -405,6 +405,7 @@ class DatabaseAuthService {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        firstLoginAt: null, // Will be set on first login
         organizationName: organization.name,
         organizationId: organization.id,
         organizationRole: 'owner',
@@ -619,6 +620,8 @@ class DatabaseAuthService {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        firstLoginAt: user.first_login_at,
+        createdAt: user.created_at,
         organizationName: user.organization_name,
         organizationId: user.organization_id,
         organizationRole: user.organization_role,
@@ -704,6 +707,8 @@ class DatabaseAuthService {
           email: user.email,
           firstName: user.first_name,
           lastName: user.last_name,
+          firstLoginAt: user.first_login_at,
+          createdAt: user.created_at,
           organizationName: user.organization_name,
           organizationId: user.organization_id,
           organizationRole: user.organization_role,
@@ -847,6 +852,38 @@ class DatabaseAuthService {
     }
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+
+    try {
+      const decoded = this.verifyToken(token);
+      req.user = decoded;
+      next();
+    } catch (error) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: error.message
+      });
+    }
+  }
+
+  /**
+   * Flexible auth middleware: accepts Bearer header OR ?token= query param.
+   * Use for strategy routes where pitch uses EventSource (?token=) and others use Bearer.
+   * Eliminates route-order dependence for auth.
+   */
+  authMiddlewareFlexible(req, res, next) {
+    let token = null;
+    if (req.headers.authorization?.startsWith('Bearer ')) {
+      token = req.headers.authorization.substring(7);
+    } else if (req.query?.token && typeof req.query.token === 'string') {
+      token = req.query.token.trim();
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Access denied',
+        message: 'No token provided (use Authorization: Bearer <token> or ?token=<token>)'
+      });
+    }
 
     try {
       const decoded = this.verifyToken(token);

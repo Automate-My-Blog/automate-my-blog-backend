@@ -11,6 +11,13 @@ import {
   generateFounderWelcomeEmails
 } from './emailCampaigns.js';
 import { expireOldCredits } from './expireCredits.js';
+import {
+  fetchAllGoogleData,
+  fetchTrendsDataForAllUsers,
+  fetchSearchConsoleDataForAllUsers,
+  fetchAnalyticsDataForAllUsers
+} from './googleDataFetcher.js';
+import { trackContentPerformance, getPerformanceInsights } from './performanceTracker.js';
 
 /**
  * Email Campaign Scheduler
@@ -144,6 +151,28 @@ export function startEmailScheduler() {
   });
   scheduledJobs.push({ name: 'Monthly Revenue Summary', schedule: '1st of each month at 9:00 AM', job: monthlyRevenueSummaryJob });
 
+  // Job 10: Fetch all Google data (Trends, Search Console, Analytics) - Daily at 6:00 AM
+  const googleDataFetchJob = cron.schedule('0 6 * * *', async () => {
+    console.log('\n⏰ [SCHEDULED] Google Data Fetch (Trends + GSC + Analytics)');
+    try {
+      await fetchAllGoogleData();
+    } catch (error) {
+      console.error('❌ Google data fetch job failed:', error);
+    }
+  });
+  scheduledJobs.push({ name: 'Google Data Fetch', schedule: 'Daily at 6:00 AM', job: googleDataFetchJob });
+
+  // Job 11: Track content performance - Weekly on Mondays at 7:00 AM
+  const contentPerformanceJob = cron.schedule('0 7 * * 1', async () => {
+    console.log('\n⏰ [SCHEDULED] Content Performance Tracking');
+    try {
+      await trackContentPerformance();
+    } catch (error) {
+      console.error('❌ Content performance tracking job failed:', error);
+    }
+  });
+  scheduledJobs.push({ name: 'Content Performance Tracking', schedule: 'Weekly on Mondays at 7:00 AM', job: contentPerformanceJob });
+
   // Print schedule summary
   console.log('✅ Email campaign scheduler started!\n');
   console.log('📋 Scheduled Jobs:');
@@ -151,18 +180,6 @@ export function startEmailScheduler() {
     console.log(`   ${index + 1}. ${job.name} - ${job.schedule}`);
   });
   console.log('\n');
-}
-
-/**
- * Stop all scheduled jobs
- */
-export function stopEmailScheduler() {
-  console.log('🛑 Stopping email campaign scheduler...');
-  scheduledJobs.forEach(job => {
-    job.job.stop();
-  });
-  scheduledJobs = [];
-  console.log('✅ Email campaign scheduler stopped');
 }
 
 /**
@@ -193,7 +210,12 @@ export async function runJob(jobName) {
     'high_value_leads': sendHighValueLeadNotifications,
     'expire_credits': expireOldCredits,
     'monthly_revenue': sendMonthlyRevenueSummary,
-    'founder_welcome': generateFounderWelcomeEmails
+    'founder_welcome': generateFounderWelcomeEmails,
+    'google_data_fetch': fetchAllGoogleData,
+    'google_trends_fetch': fetchTrendsDataForAllUsers,
+    'google_search_console_fetch': fetchSearchConsoleDataForAllUsers,
+    'google_analytics_fetch': fetchAnalyticsDataForAllUsers,
+    'content_performance_tracking': trackContentPerformance
   };
 
   const job = jobMap[jobName];
@@ -207,7 +229,6 @@ export async function runJob(jobName) {
 
 export default {
   startEmailScheduler,
-  stopEmailScheduler,
   getSchedulerStatus,
   runJob
 };

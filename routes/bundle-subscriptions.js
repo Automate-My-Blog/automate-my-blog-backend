@@ -6,8 +6,24 @@ import OpenAI from 'openai';
 import streamManager from '../services/stream-manager.js';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// Lazy init so server can start when STRIPE_SECRET_KEY or OPENAI_API_KEY is missing.
+let _stripe = null;
+let _openai = null;
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is required in environment variables');
+  }
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  return _stripe;
+}
+function getOpenAI() {
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error('OPENAI_API_KEY is required in environment variables');
+  }
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 
 /**
  * Middleware to authenticate requests
@@ -93,7 +109,7 @@ Make it outcome-focused, not feature-focused. Focus on business results, not jus
 
     console.log('🎯 [AI] Calling OpenAI with gpt-4...');
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: 'gpt-4',
       messages: [
         { role: 'system', content: 'You are a strategic SEO consultant who writes compelling, outcome-focused marketing copy.' },
@@ -195,7 +211,7 @@ Format your response as JSON with these fields:
 Make it outcome-focused. Return only valid JSON.`;
 
   try {
-    const stream = await openai.chat.completions.create({
+    const stream = await getOpenAI().chat.completions.create({
       model: 'gpt-4',
       messages: [
         { role: 'system', content: 'You are a strategic SEO consultant who writes compelling, outcome-focused marketing copy. Respond with valid JSON only.' },
@@ -377,7 +393,7 @@ router.post('/subscribe',  async (req, res) => {
       bundleAnnual: bundlePricing.bundleAnnual
     });
 
-    const bundlePrice = await stripe.prices.create({
+    const bundlePrice = await getStripe().prices.create({
       unit_amount: Math.round(amount * 100), // Convert to cents
       currency: 'usd',
       recurring: {
@@ -402,7 +418,7 @@ router.post('/subscribe',  async (req, res) => {
 
     // Create Checkout Session
     console.log('🛒 Creating Stripe checkout session...');
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: req.user.email,
       line_items: [{
         price: bundlePrice.id,
@@ -481,8 +497,9 @@ router.get('/',  async (req, res) => {
         a.id as strategy_id,
         a.pitch,
         a.target_segment,
-        a.seo_keywords,
-        a.image_url
+        a.image_url,
+        (SELECT json_agg(json_build_object('keyword', sk.keyword, 'searchVolume', sk.search_volume, 'competition', sk.competition, 'relevanceScore', sk.relevance_score))
+         FROM seo_keywords sk WHERE sk.audience_id = a.id) as seo_keywords
       FROM strategy_purchases sp
       INNER JOIN audiences a ON sp.strategy_id = a.id
       WHERE sp.bundle_subscription_id = $1 AND sp.status = 'active'`,
@@ -543,7 +560,7 @@ router.delete('/',  async (req, res) => {
 
     // Cancel subscription in Stripe
     if (bundle.stripe_subscription_id) {
-      await stripe.subscriptions.cancel(bundle.stripe_subscription_id);
+      await getStripe().subscriptions.cancel(bundle.stripe_subscription_id);
     }
 
     // Mark as cancelled in database (webhook will handle the actual update)
