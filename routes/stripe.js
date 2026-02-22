@@ -19,6 +19,44 @@ function getStripe() {
 }
 
 /**
+ * GET /api/v1/stripe/session-status
+ * Retrieve Stripe checkout session status after redirect.
+ * If the session is a strategy purchase, activates the subscription (idempotent).
+ */
+router.get('/session-status', async (req, res) => {
+  const { session_id } = req.query;
+  const userId = req.user?.userId;
+
+  if (!session_id) {
+    return res.status(400).json({ success: false, error: 'session_id is required' });
+  }
+
+  try {
+    const session = await getStripe().checkout.sessions.retrieve(session_id);
+
+    // If this is a strategy purchase and payment is complete, activate it (idempotent fallback)
+    if (session.payment_status === 'paid' && strategyWebhooks.isStrategySubscription(session)) {
+      try {
+        await strategyWebhooks.handleStrategyCheckoutCompleted(session);
+      } catch (activationError) {
+        // Non-fatal: may already be activated by webhook
+        console.warn('⚠️ session-status activation error (may already be active):', activationError.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      payment_status: session.payment_status,
+      status: session.status,
+      customer_email: session.customer_details?.email
+    });
+  } catch (error) {
+    console.error('❌ Error retrieving session status:', error.message);
+    return res.status(500).json({ success: false, error: 'Failed to retrieve session status', message: error.message });
+  }
+});
+
+/**
  * Create Checkout Session
  * POST /api/v1/stripe/create-checkout-session
  */
