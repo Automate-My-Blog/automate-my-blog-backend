@@ -325,6 +325,7 @@ router.get('/trends/preview', async (req, res) => {
       SELECT
         a.id,
         a.customer_problem,
+        a.target_segment,
         COALESCE(
           (SELECT json_agg(keyword ORDER BY relevance_score DESC)
            FROM (
@@ -338,7 +339,13 @@ router.get('/trends/preview', async (req, res) => {
         ) as top_keywords
       FROM audiences a
       WHERE a.user_id = $1
-        AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)
+         OR a.organization_intelligence_id IN (
+           SELECT oi.id
+           FROM organization_intelligence oi
+           JOIN organizations o ON oi.organization_id = o.id
+           WHERE o.owner_user_id = $1
+         )
+      ORDER BY a.created_at DESC
       LIMIT 2
     `;
 
@@ -347,7 +354,7 @@ router.get('/trends/preview', async (req, res) => {
     if (audiencesResult.rows.length === 0) {
       res.write(`data: ${JSON.stringify({
         type: 'chunk',
-        content: 'No audiences found yet. Create a content strategy first to see personalized trending topics!'
+        content: 'No strategies found yet. Complete your website analysis first to see personalized trending topics!'
       })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'complete' })}\n\n`);
       res.end();
@@ -384,7 +391,13 @@ router.get('/trends/preview', async (req, res) => {
     // Fetch trending data for first 2-3 keywords
     const trendingData = [];
     for (const audience of audiencesResult.rows) {
-      const keywords = audience.top_keywords.slice(0, 2); // Max 2 keywords per audience
+      // Use seo_keywords if available, otherwise fall back to target_segment / customer_problem
+      let keywords = audience.top_keywords.slice(0, 2);
+      if (keywords.length === 0) {
+        const fallback = audience.target_segment || audience.customer_problem || '';
+        const fallbackKeyword = fallback.split(/[,.\n]/)[0].trim(); // First phrase
+        if (fallbackKeyword) keywords = [fallbackKeyword];
+      }
 
       for (const keyword of keywords) {
         try {
@@ -435,36 +448,48 @@ router.get('/trends/preview', async (req, res) => {
     const OpenAI = (await import('openai')).default;
     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-    const prompt = `Summarize trending topics in 2-3 sentences total. Be extremely concise.
+    const prompt = `You are analyzing Google Trends data for a user's content strategy. Generate a data-driven summary explaining the trending opportunities.
 
-DATA:
-${trendingData.map(td => `${td.trends.slice(0, 5).map(t => `"${t.query}" (+${t.value}%)`).join(', ')}`).join('; ')}
+CRITICAL: You MUST include specific numbers and percentages. Reference the actual growth rates shown below.
 
-Write EXACTLY this format:
+Structure your response as follows:
 
-**📈 TRENDING TOPICS**
+**📈 TRENDING TOPICS FOUND:**
+List each trending query with its exact growth metric:
+- "[Query Name]" (↑ [exact % or metric from data])
+- Explain what this growth means in plain terms
 
-[Number] topics including "[topic 1]", "[topic 2]", and "[topic 3]".
+**🎯 HOW TO TARGET:**
+- Search volume insight: What the numbers tell us about opportunity size
+- Content strategy: Which specific topics to prioritize based on growth rates
+- Keywords to use in your content based on these trends
 
-**🎯 WHAT TO DO NOW**
+**💡 IMPACT ON YOUR CONTENT:**
+- Expected visibility boost from targeting these trends
+- Timing advantage: Why creating content NOW matters
+- Competitive edge: How early adoption helps
 
-We will create content like "[specific article title 1]", "[specific article title 2]", and "[specific article title 3]" to target this opportunity.
+DATA FOUND:
+${trendingData.map(td => `
+Audience: ${td.audience}
+Base Keyword: "${td.keyword}"
+Rising Queries with Growth:
+${td.trends.map(t => `  • "${t.query}" - Growth: ${t.formattedValue || (t.value + '%')} ${t.value > 1000 ? '(BREAKING OUT - Massive spike)' : t.value > 500 ? '(SURGING - Major growth)' : '(RISING - Significant interest)'}`).join('\n')}
+`).join('\n')}
 
-**💡 WHY THIS MATTERS**
-
-These topics are growing fast - create content now to capture early traffic.
-
-RULES:
-- No bullets anywhere
-- Maximum 3 sentences per section
-- No explanations, just the summary`;
+REQUIREMENTS:
+- Use bullet points and clear sections
+- Include ALL growth percentages from the data
+- Explain what each metric means for their strategy
+- Be specific about how to use this data
+- Keep it actionable and data-focused`;
 
     const stream = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       stream: true,
       temperature: 0.7,
-      max_tokens: 200
+      max_tokens: 500
     });
 
     for await (const chunk of stream) {
