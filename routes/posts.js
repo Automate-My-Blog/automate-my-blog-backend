@@ -225,18 +225,20 @@ router.get('/', async (req, res) => {
     const context = extractUserContext(req);
     validateUserContext(context);
     
+    const { strategy_id } = req.query;
     let query, params;
-    
+
     if (context.isAuthenticated) {
-      // Get posts for authenticated user
+      // Get posts for authenticated user, optionally filtered by strategy
       query = `
         SELECT p.*, pr.name as project_name
         FROM blog_posts p
         LEFT JOIN projects pr ON p.project_id = pr.id
         WHERE p.user_id = $1
+        ${strategy_id ? 'AND p.strategy_id = $2' : ''}
         ORDER BY p.created_at DESC
       `;
-      params = [context.userId];
+      params = strategy_id ? [context.userId, strategy_id] : [context.userId];
     } else {
       // Get posts for session
       query = `
