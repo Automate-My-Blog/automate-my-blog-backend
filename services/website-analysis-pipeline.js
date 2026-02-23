@@ -568,14 +568,15 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     const storedCTAs = ctaResult.rows || [];
 
     const audiencesResult = await db.query(
-      `SELECT target_segment, customer_problem, customer_language, conversion_path, business_value,
+      `SELECT DISTINCT ON (customer_problem)
+              target_segment, customer_problem, customer_language, conversion_path, business_value,
               pitch, image_url, projected_revenue_low, projected_revenue_high, projected_profit_low, projected_profit_high
        FROM audiences
        WHERE organization_intelligence_id = (
          SELECT id FROM organization_intelligence WHERE organization_id = $1 AND is_current = TRUE
          ORDER BY created_at DESC LIMIT 1
        )
-       ORDER BY created_at DESC`,
+       ORDER BY customer_problem, created_at ASC`,
       [org.id]
     );
     const scenarios = (audiencesResult.rows || []).map((row) => ({
