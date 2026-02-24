@@ -752,10 +752,11 @@ router.get('/', async (req, res) => {
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
     
     const fullQuery = `
-      SELECT 
+      SELECT
         a.*,
-        COUNT(sk.id) as keywords_count,
-        COUNT(ct.id) as topics_count
+        ARRAY_AGG(DISTINCT sk.keyword) FILTER (WHERE sk.keyword IS NOT NULL) as keywords_list,
+        COUNT(DISTINCT sk.id) as keywords_count,
+        COUNT(DISTINCT ct.id) as topics_count
       FROM audiences a
       LEFT JOIN seo_keywords sk ON a.id = sk.audience_id
       LEFT JOIN content_topics ct ON a.id = ct.audience_id
@@ -834,12 +835,17 @@ router.get('/', async (req, res) => {
     const testbed = isCalendarTestbed(req);
     const audiences = result.rows.map(row => {
       const contentIdeasArr = parseContentIdeas(row.content_ideas);
+      const customerLanguage = safeParse(row.customer_language, 'customer_language', row.id) || [];
+      const keywordsList = row.keywords_list || [];
       return {
         id: row.id,
         target_segment: safeParse(row.target_segment, 'target_segment', row.id),
         customer_problem: row.customer_problem,
+        customer_language: customerLanguage,
+        seo_keywords: keywordsList,
         priority: row.priority,
         pitch: row.pitch,
+        image_url: row.image_url || null,
         topics_count: parseInt(row.topics_count),
         keywords_count: parseInt(row.keywords_count),
         content_calendar_generated_at: row.content_calendar_generated_at,
