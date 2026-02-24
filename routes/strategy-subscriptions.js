@@ -368,6 +368,7 @@ router.get('/subscribed',  async (req, res) => {
 
     const subscriptions = result.rows.map(row => ({
       id: row.id,
+      strategy_id: row.strategy_id,
       strategyId: row.strategy_id,
       billingInterval: row.billing_interval,
       amountPaid: parseFloat(row.amount_paid),

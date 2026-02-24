@@ -398,9 +398,14 @@ class ProjectsService {
         }
 
         const project = result.rows[0];
+        const businessAnalysis = project.business_analysis;
+        const businessName = project.name
+          || (businessAnalysis && (businessAnalysis.businessName || businessAnalysis.business_name || businessAnalysis.name))
+          || null;
         return {
           id: project.id,
           websiteUrl: project.website_url,
+          businessName,
           businessAnalysis: project.business_analysis,
           brandColors: project.brand_colors,
           targetAudience: project.target_audience,
