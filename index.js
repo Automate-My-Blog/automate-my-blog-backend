@@ -623,15 +623,15 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
     const recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
     
     if (!recentAnalysis) {
-      return res.json({
-        success: true,
+      return res.status(404).json({
+        success: false,
         analysis: null,
-        message: 'No analysis found for this user'
+        message: 'No cached analysis found'
       });
     }
-    
+
     console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
-    
+
     res.json({
       success: true,
       analysis: recentAnalysis,
