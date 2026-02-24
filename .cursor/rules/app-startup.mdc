@@ -1,0 +1,32 @@
+---
+description: What to do when the user asks to start or run the application locally
+alwaysApply: true
+---
+
+# App startup (local)
+
+When the user asks to **start the app**, **run the app**, **start the application**, or similar:
+
+1. **API server**  
+   Start in the background:
+   ```bash
+   npm run dev
+   ```
+   (Runs `node --watch index.js`; typically listens on port 3001.)
+
+2. **Job worker**  
+   Start in the background so job endpoints (e.g. website analysis, narrative stream) work:
+   ```bash
+   node -r dotenv/config jobs/job-worker.js
+   ```
+   Use `-r dotenv/config` so `.env` is loaded (worker does not load dotenv itself). Requires `REDIS_URL` and `DATABASE_URL` in `.env`.
+
+3. **Redis**  
+   The queue (BullMQ) needs Redis. If the user reports job/narrative 404s or queue issues:
+   - Check Redis is running (e.g. Docker container on 6379, or `redis-cli ping` if available).
+   - Local URL in `.env`: `REDIS_URL=redis://localhost:6379`. See `docs/redis-setup.md` for install/options (Homebrew, Docker).
+
+4. **Optional**  
+   If the user also asked to use latest code: `git checkout staging && git pull origin staging` before starting.
+
+After starting, confirm the API URL (e.g. `http://localhost:3001`) and that both the API and worker are running in the background.
