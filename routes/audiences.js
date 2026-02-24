@@ -1061,6 +1061,56 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Refresh a stale/expired DALL-E image for an audience
+router.post('/:id/refresh-image', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    const { id } = req.params;
+    const audienceResult = await db.query(
+      `SELECT id, target_segment, customer_problem, image_url
+       FROM audiences WHERE id = $1 AND (user_id = $2 OR session_id = $3)`,
+      [id, userContext.userId || null, userContext.sessionId || null]
+    );
+
+    if (audienceResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Audience not found' });
+    }
+
+    const audience = audienceResult.rows[0];
+
+    // Check if existing URL is still valid — skip regeneration if it is
+    if (audience.image_url) {
+      try {
+        const check = await fetch(audience.image_url, { method: 'HEAD' });
+        if (check.ok) {
+          return res.json({ success: true, image_url: audience.image_url, refreshed: false });
+        }
+      } catch { /* expired or unreachable — fall through to regenerate */ }
+    }
+
+    // Regenerate image via DALL-E
+    const scenario = {
+      targetSegment: audience.target_segment,
+      customerProblem: audience.customer_problem,
+    };
+    const newImageUrl = await openaiService.generateAudienceImage(scenario);
+
+    if (newImageUrl) {
+      await db.query(
+        'UPDATE audiences SET image_url = $1, updated_at = NOW() WHERE id = $2',
+        [newImageUrl, id]
+      );
+    }
+
+    return res.json({ success: true, image_url: newImageUrl || null, refreshed: true });
+  } catch (error) {
+    console.error('refresh-image error:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.put('/:id', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
