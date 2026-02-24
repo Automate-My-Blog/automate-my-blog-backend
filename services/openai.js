@@ -1396,46 +1396,43 @@ Return a complete HTML document with proper structure, meta tags, and styling.`;
 
       const visualTone = getToneFromBrandVoice(brandVoice);
 
-      // Create simple, clean character illustration
-      const searchPrompt = `Create a simple, clean flat illustration of a person representing this audience: ${demographics}
+      // Create photorealistic professional portrait
+      const searchPrompt = `A photorealistic professional portrait photograph representing this audience segment: ${demographics}
 
-PURPOSE: This is the cover image for an audience preview card, so the person should clearly represent the target audience.
+PURPOSE: A high-quality cover image for a digital marketing audience card. The image should convey the professional context and daily reality of this audience.
 
-STYLE:
-- Minimalist flat illustration (like modern app icons)
-- Simple, friendly cartoon character
-- Clean lines and basic shapes
-- Solid pastel colors (blue, purple, coral, or mint)
+PHOTOGRAPHY STYLE:
+- Professional DSLR photography, sharp subject focus, natural or soft studio lighting
+- Shallow depth of field with clean modern background (bokeh)
+- Polished, editorial feel — the kind used in business publications
 - Visual tone: ${visualTone}
+${searchBehavior ? `- Context cue from audience behaviour: ${searchBehavior}` : ''}
 
-PERSON (REPRESENTING THE AUDIENCE):
-- Single person that visually represents: ${demographics}
-- Standing or sitting in a simple, neutral pose
-- Simple geometric forms for body
-- Stylized non-skin-tone color (soft blue, purple, coral, mint)
-- Minimal facial features (dots for eyes, simple smile)
-- Simple, modern clothing appropriate to the demographic
-- Person should be identifiable as the target audience
+SUBJECT:
+- A single professional person who clearly represents: ${demographics}
+- Shown in their professional context (e.g. at a laptop, in a meeting, reviewing work)
+- Smart business casual or professional attire appropriate to the role
+- Confident, focused, and approachable expression
+- Diverse representation — race, gender, and age should reflect the global professional workforce
 
-BACKGROUND:
-- Completely transparent or pure white (#FFFFFF)
-- NO props, NO objects, NO environment, NO decorative elements
-- Just the person alone on transparent/white background
+SETTING:
+- Modern, contemporary professional environment: open-plan office, co-working space, home office, or neutral studio
+- Clean, uncluttered background — desk, bookshelf, city-view window, or soft-focus greenery
+- Technology and tools appropriate to the role (laptop, tablet, notebook) if relevant
 
-CONSISTENCY:
-- Same illustration style across all 4 images
-- Same level of simplification
-- Same color approach
-- Clean, professional look suitable for preview cards
-
-Focus: Simple character that clearly represents the audience demographic. This is a preview card cover, so the audience should be the prominent feature.`;
-
+IMPORTANT SAFEGUARDS — strictly follow all of these:
+- The setting MUST be a modern, prosperous, developed-world professional environment
+- Do NOT depict poverty, subsistence living, informal settlements, or underdeveloped infrastructure
+- Do NOT rely on national flags, political symbols, or regional stereotypes to represent the audience
+- Do NOT use location cues that imply a specific developing nation context
+- Focus on the PROFESSIONAL ROLE and ACTIVITY — not the person's ethnicity or national origin
+- The image must feel credible and relatable to a global business audience across all geographies`;
 
       const response = await openai.images.generate({
         model: "dall-e-3",
         prompt: searchPrompt,
         size: "1024x1024",
-        quality: "standard",
+        quality: "hd",
         n: 1,
       });
 
