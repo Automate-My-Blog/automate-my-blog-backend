@@ -372,7 +372,7 @@ if (isDev) {
       authService: {
         ...authStatus,
         connectionTest: authDbTestResult,
-        useDatabaseStorage: process.env.USE_DATABASE === 'true'
+        useDatabaseStorage: process.env.USE_DATABASE !== 'false'
       },
       environment: {
         databaseUrl: {

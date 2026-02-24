@@ -18,7 +18,10 @@ const fallbackUsers = new Map();
  */
 class DatabaseAuthService {
   constructor() {
-    this.useDatabaseStorage = process.env.USE_DATABASE === 'true';
+    // Use database when available unless explicitly disabled (USE_DATABASE=false).
+    // Defaulting to true ensures login/getUserById use the DB when DATABASE_URL is set,
+    // so users created via register (which writes to DB) are found on subsequent login.
+    this.useDatabaseStorage = process.env.USE_DATABASE !== 'false';
     this.databaseAvailable = false;
     this.connectionChecked = false;
     
