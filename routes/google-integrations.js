@@ -8,6 +8,7 @@ import oauthManager from '../services/oauth-manager.js';
 import integrationPitchGenerator from '../services/integration-pitch-generator.js';
 import DatabaseAuthService from '../services/auth-database.js';
 import { fetchTrendsForContentCalendar } from '../services/content-calendar-service.js';
+import googleContentOptimizer from '../services/google-content-optimizer.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -470,8 +471,12 @@ router.get('/trends/preview', async (req, res) => {
 
       for (const keyword of keywords) {
         try {
-          // Try original keyword first
-          let queries = await googleTrendsService.getRisingQueries(keyword, 'US', 'today 1-m', userId);
+          // Try cache first (refresh/cron use '7d') so we show cached data when available
+          let queries = await googleTrendsService.getRisingQueries(keyword, 'US', '7d', userId);
+          // If no cached data, try live fetch with 1-month window
+          if (!queries || queries.length === 0) {
+            queries = await googleTrendsService.getRisingQueries(keyword, 'US', 'today 1-m', userId);
+          }
 
           // If no results, try broader versions
           if (!queries || queries.length === 0) {
@@ -585,6 +590,36 @@ REQUIREMENTS:
 // ========================================
 // EXISTING GOOGLE API ENDPOINTS
 // ========================================
+
+/**
+ * GET /api/v1/google/trends/topics
+ * Return cached emerging/trending topics for the current user (from google_trends_cache).
+ * Use this to display "Find Emerging Topics" in the UI. Data is populated by POST /trends/refresh or the daily cron.
+ * Requires JWT.
+ * Query: limit (optional, default 20).
+ */
+router.get('/trends/topics', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication is required'
+      });
+    }
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+    const data = await googleContentOptimizer.getTrendingTopicsForUser(userId, limit);
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Google Trends topics error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get trending topics',
+      message: error.message
+    });
+  }
+});
 
 /**
  * POST /api/v1/google/trends/refresh
