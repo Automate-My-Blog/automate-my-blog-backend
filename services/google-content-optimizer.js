@@ -22,29 +22,45 @@ export class GoogleContentOptimizer {
           gtc.geo
         FROM google_trends_cache gtc
         WHERE (gtc.user_id = $1 OR gtc.user_id IS NULL)
-          AND gtc.expires_at > NOW()
+          AND (gtc.expires_at IS NULL OR gtc.expires_at > NOW())
           AND gtc.rising_queries IS NOT NULL
+          AND jsonb_array_length(gtc.rising_queries) > 0
         ORDER BY gtc.keyword, gtc.fetched_at DESC
         LIMIT $2
       `;
 
-      const result = await db.query(query, [userId, limit * 2]); // Fetch more to filter
+      const result = await db.query(query, [String(userId), limit * 2]); // Fetch more to filter
 
-      // Extract and rank rising queries
+      if (result.rows.length === 0) {
+        console.log(`📈 No cache rows for user ${userId} (check user_id and expires_at)`);
+      }
+
+      // Extract and rank rising queries (rising_queries may be JSONB object or string)
       const allQueries = [];
       for (const row of result.rows) {
-        const risingQueries = row.rising_queries || [];
+        let risingQueries = row.rising_queries;
+        if (typeof risingQueries === 'string') {
+          try {
+            risingQueries = JSON.parse(risingQueries);
+          } catch {
+            risingQueries = [];
+          }
+        }
+        risingQueries = Array.isArray(risingQueries) ? risingQueries : [];
         for (const q of risingQueries) {
+          const queryText = q.query ?? q.term ?? q.keyword ?? '';
+          const valueNum = typeof q.value === 'number' ? q.value : parseInt(q.value, 10) || 0;
+          if (!queryText) continue;
           allQueries.push({
-            query: q.query,
-            value: q.value,
+            query: queryText,
+            value: valueNum,
             keyword: row.keyword,
             fetchedAt: row.fetched_at,
             geo: row.geo,
             recommendationReason: {
               type: 'trending',
-              description: `"${q.query}" is trending with ${q.formattedValue || q.value + '%'} growth`,
-              impact: q.value > 1000 ? 'high' : q.value > 500 ? 'medium' : 'low',
+              description: `"${queryText}" is trending with ${q.formattedValue || valueNum + '%'} growth`,
+              impact: valueNum > 1000 ? 'high' : valueNum > 500 ? 'medium' : 'low',
               action: 'Create content targeting this keyword before competitors capture the traffic',
               result: 'Capture early search traffic and establish topical authority while interest is rising'
             }

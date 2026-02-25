@@ -600,7 +600,7 @@ REQUIREMENTS:
  */
 router.get('/trends/topics', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
-    const userId = req.user?.userId;
+    const userId = req.user?.userId ?? req.user?.user_id;
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -609,7 +609,7 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
       });
     }
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
-    const data = await googleContentOptimizer.getTrendingTopicsForUser(userId, limit);
+    const data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
     res.json({ success: true, data });
   } catch (error) {
     console.error('Google Trends topics error:', error);
