@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../services/database.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import projectsService from '../services/projects.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import openaiService from '../services/openai.js';
 
@@ -192,8 +193,8 @@ router.post('/adopt-session', async (req, res) => {
         brandVoice: orgData.brand_voice,
         websiteGoals: orgData.website_goals,
         websiteUrl: orgData.website_url,
-        
-        // Intelligence data  
+
+        // Intelligence data
         customerScenarios: intelData.customer_scenarios,
         businessValueAssessment: intelData.business_value_assessment,
         customerLanguagePatterns: intelData.customer_language_patterns,
@@ -212,6 +213,24 @@ router.post('/adopt-session', async (req, res) => {
         narrativeConfidence: intelData.narrative_confidence,
         keyInsights: intelData.key_insights
       };
+
+      // Persist adopted analysis to projects so GET /api/v1/user/recent-analysis returns it for the dashboard
+      const websiteUrl = orgData.website_url || adoptionData.latest_organization_data?.website_url;
+      if (websiteUrl) {
+        try {
+          const scenarios = Array.isArray(intelData.customer_scenarios)
+            ? intelData.customer_scenarios
+            : (typeof intelData.customer_scenarios === 'string'
+              ? (safeParse(intelData.customer_scenarios, 'customer_scenarios', 'adopt') || [])
+              : []);
+          const upserted = await projectsService.upsertProjectFromAnalysis(userId, websiteUrl, analysis, scenarios);
+          if (upserted.success) {
+            console.log('✅ Persisted adopted analysis to project for recent-analysis:', upserted.projectId);
+          }
+        } catch (projectErr) {
+          console.warn('Failed to persist adopted analysis to project for dashboard:', projectErr.message);
+        }
+      }
 
       // Format response following same pattern as other adoption endpoints
       const responseData = {

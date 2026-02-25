@@ -619,9 +619,69 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
   try {
     const userId = req.user.userId;
     console.log(`📊 Getting most recent analysis for user: ${userId}`);
-    
-    const recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
-    
+
+    let recentAnalysis = await projectsService.getUserMostRecentAnalysis(userId);
+
+    // Fallback: if no project, use adopted/owned organization + intelligence (e.g. after adopt-session)
+    if (!recentAnalysis) {
+      const orgResult = await db.query(`
+        SELECT o.id, o.name, o.website_url, o.business_type, o.target_audience, o.description,
+               o.brand_voice, o.website_goals, o.updated_at,
+               oi.customer_scenarios, oi.customer_language_patterns, oi.search_behavior_insights,
+               oi.raw_openai_response, oi.narrative_analysis
+        FROM organizations o
+        LEFT JOIN organization_intelligence oi ON oi.organization_id = o.id AND oi.is_current = true
+        WHERE o.owner_user_id = $1
+        ORDER BY o.updated_at DESC
+        LIMIT 1
+      `, [userId]);
+      if (orgResult.rows.length > 0) {
+        const row = orgResult.rows[0];
+        const scenarios = (() => {
+          const raw = row.customer_scenarios;
+          if (Array.isArray(raw)) return raw;
+          if (typeof raw === 'string') {
+            try {
+              const p = JSON.parse(raw);
+              return Array.isArray(p) ? p : [];
+            } catch {
+              return [];
+            }
+          }
+          return [];
+        })();
+        const rawAnalysis = row.raw_openai_response && (typeof row.raw_openai_response === 'object'
+          ? row.raw_openai_response
+          : (() => { try { return JSON.parse(row.raw_openai_response); } catch { return null; } })());
+        recentAnalysis = {
+          id: row.id,
+          websiteUrl: row.website_url,
+          businessName: row.name || (rawAnalysis && (rawAnalysis.businessName || rawAnalysis.business_name)) || null,
+          businessAnalysis: rawAnalysis,
+          targetAudience: row.target_audience,
+          contentFocus: rawAnalysis?.contentFocus ?? null,
+          brandVoice: row.brand_voice,
+          businessType: row.business_type,
+          scenarios,
+          customerPsychology: null,
+          keywords: [],
+          description: row.description,
+          decisionMakers: rawAnalysis?.decisionMakers ?? null,
+          endUsers: rawAnalysis?.endUsers ?? null,
+          businessModel: rawAnalysis?.businessModel ?? null,
+          websiteGoals: row.website_goals,
+          blogStrategy: rawAnalysis?.blogStrategy ?? null,
+          searchBehavior: row.search_behavior_insights ?? (typeof row.search_behavior_insights === 'string' ? row.search_behavior_insights : null),
+          connectionMessage: null,
+          updatedAt: row.updated_at,
+          createdAt: row.updated_at
+        };
+        console.log(`✅ Found recent analysis from organization fallback: ${recentAnalysis.websiteUrl}`);
+      }
+    } else {
+      console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
+    }
+
     if (!recentAnalysis) {
       return res.status(404).json({
         success: false,
@@ -629,8 +689,6 @@ app.get('/api/v1/user/recent-analysis', authService.authMiddleware.bind(authServ
         message: 'No cached analysis found'
       });
     }
-
-    console.log(`✅ Found recent analysis: ${recentAnalysis.websiteUrl} (updated: ${recentAnalysis.updatedAt})`);
 
     res.json({
       success: true,
