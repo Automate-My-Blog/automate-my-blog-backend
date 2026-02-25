@@ -24,8 +24,9 @@ export class GoogleContentOptimizer {
         WHERE (gtc.user_id = $1 OR gtc.user_id IS NULL)
           AND (gtc.expires_at IS NULL OR gtc.expires_at > NOW())
           AND gtc.rising_queries IS NOT NULL
-          AND jsonb_array_length(gtc.rising_queries) > 0
-        ORDER BY gtc.keyword, gtc.fetched_at DESC
+        ORDER BY gtc.keyword,
+          (CASE WHEN jsonb_array_length(COALESCE(gtc.rising_queries, '[]'::jsonb)) > 0 THEN 0 ELSE 1 END),
+          gtc.fetched_at DESC
         LIMIT $2
       `;
 
@@ -47,6 +48,7 @@ export class GoogleContentOptimizer {
           }
         }
         risingQueries = Array.isArray(risingQueries) ? risingQueries : [];
+        if (risingQueries.length === 0) continue;
         for (const q of risingQueries) {
           const queryText = q.query ?? q.term ?? q.keyword ?? '';
           const valueNum = typeof q.value === 'number' ? q.value : parseInt(q.value, 10) || 0;
