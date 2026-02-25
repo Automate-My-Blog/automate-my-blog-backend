@@ -215,6 +215,8 @@ When the frontend has a **job ID** for a `content_calendar` job (e.g. from a fut
 
 Full details: **[Content Calendar Generation — Progress & Streaming](./content-calendar-generation-progress-frontend-handoff.md)**.
 
+**Google Trends:** When the user has strategies with keywords, the backend runs a one-time "Fetching trending topics…" step before generating the calendar. Progress and job result fields for this are described in **[Content Calendar — Google Trends Integration (Frontend Handoff)](./CONTENT_CALENDAR_GOOGLE_TRENDS_FRONTEND_HANDOFF.md)**.
+
 If you don’t have a job ID (e.g. after Stripe checkout), keep using polling as in [§5](#5-ui-states--polling).
 
 ---
@@ -241,6 +243,7 @@ If you don’t have a job ID (e.g. after Stripe checkout), keep using polling as
 - [ ] When `strategies.length === 0`, show empty state CTA to subscribe.
 - [ ] On `/calendar-testbed`, add `?testbed=1` (or `X-Calendar-Testbed: 1`) to content-calendar and audiences requests.
 - [ ] (Optional) When you have a `jobId`, use job stream for progress UI — see [§7](#7-progress-streaming-optional).
+- [ ] (Optional) When showing calendar job progress, display "Fetching trending topics…" when present; when job completes, show "Calendar informed by trending topics" if result has `trendsFetched: true` — see [Content Calendar — Google Trends Integration](./CONTENT_CALENDAR_GOOGLE_TRENDS_FRONTEND_HANDOFF.md).
 
 ---
 

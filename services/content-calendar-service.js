@@ -1,6 +1,8 @@
 /**
  * Content Calendar Service
  * Generates and persists 30-day content calendar for strategies on purchase (Issue #270).
+ * When the user has strategies with keywords (Google Trends "connected"), we run a one-time
+ * trends fetch before generation so the calendar is informed by fresh trending data.
  */
 
 import db from './database.js';
@@ -15,6 +17,69 @@ export const CONTENT_CALENDAR_PHASES = Object.freeze([
 ]);
 import openaiService from './openai.js';
 import googleContentOptimizer from './google-content-optimizer.js';
+import googleTrendsService from './google-trends.js';
+
+/** Delay between Google Trends API calls to avoid rate limits (ms). */
+const TRENDS_FETCH_DELAY_MS = 2000;
+
+/** Max keywords to fetch trends for before generating calendar (keeps job time bounded). */
+const MAX_TRENDS_KEYWORDS = 10;
+
+/**
+ * Run a one-time Google Trends fetch for the user's strategy keywords and populate cache.
+ * Call this before generating the content calendar so getTrendingTopicsForUser returns fresh data.
+ * Only runs when strategies have seo_keywords; safe to call when they don't.
+ *
+ * @param {string} userId - User ID (for cache ownership)
+ * @param {string[]} strategyIds - Audience/strategy IDs to collect keywords from
+ * @returns {Promise<{ fetched: number, keywordCount: number, errorCount: number }>}
+ */
+export async function fetchTrendsForContentCalendar(userId, strategyIds) {
+  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) {
+    return { fetched: 0, keywordCount: 0, errorCount: 0 };
+  }
+
+  try {
+    const keywordsResult = await db.query(
+      `SELECT sk.keyword
+       FROM seo_keywords sk
+       WHERE sk.audience_id = ANY($1::uuid[])
+       ORDER BY sk.relevance_score DESC NULLS LAST
+       LIMIT $2`,
+      [strategyIds, MAX_TRENDS_KEYWORDS * 2]
+    );
+
+    const seen = new Set();
+    const keywords = (keywordsResult.rows || [])
+      .map((r) => r.keyword?.trim())
+      .filter((k) => k && !seen.has(k) && (seen.add(k), true))
+      .slice(0, MAX_TRENDS_KEYWORDS);
+    if (keywords.length === 0) {
+      return { fetched: 0, keywordCount: 0, errorCount: 0 };
+    }
+
+    let fetched = 0;
+    let errorCount = 0;
+
+    for (const keyword of keywords) {
+      try {
+        const queries = await googleTrendsService.getRisingQueries(keyword, 'US', '7d', userId);
+        if (queries.length > 0) fetched++;
+        await new Promise((r) => setTimeout(r, TRENDS_FETCH_DELAY_MS));
+      } catch (err) {
+        errorCount++;
+        console.warn(`Trends fetch for "${keyword}" failed:`, err.message);
+        await new Promise((r) => setTimeout(r, TRENDS_FETCH_DELAY_MS));
+      }
+    }
+
+    console.log(`📈 Content calendar: one-time trends fetch for ${keywords.length} keywords → ${fetched} cached, ${errorCount} errors`);
+    return { fetched, keywordCount: keywords.length, errorCount };
+  } catch (error) {
+    console.error('⚠️ fetchTrendsForContentCalendar failed:', error.message);
+    return { fetched: 0, keywordCount: 0, errorCount: 0 };
+  }
+}
 
 /**
  * Generate and save 30-day content ideas for a strategy (audience).
@@ -132,6 +197,7 @@ export async function generateContentCalendarsForStrategies(strategyIds, options
 }
 
 export default {
+  fetchTrendsForContentCalendar,
   generateAndSaveContentCalendar,
   generateContentCalendarsForStrategies
 };
