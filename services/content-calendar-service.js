@@ -167,9 +167,14 @@ export async function generateAndSaveContentCalendar(strategyId, userId = null) 
       return { strategyId, success: false, error: 'No ideas generated' };
     }
 
+    const trendingSnapshot = googleData?.trending?.length
+      ? googleData.trending.map((t) => ({ query: t.query, value: t.value }))
+      : null;
+
     await db.query(
-      `UPDATE audiences SET content_ideas = $1, content_calendar_generated_at = NOW(), updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify(ideas), strategyId]
+      `UPDATE audiences SET content_ideas = $1, content_calendar_generated_at = NOW(),
+       content_calendar_trending_topics = $2, updated_at = NOW() WHERE id = $3`,
+      [JSON.stringify(ideas), trendingSnapshot ? JSON.stringify(trendingSnapshot) : null, strategyId]
     );
 
     console.log(`✅ Content calendar generated for strategy ${strategyId}: ${ideas.length} ideas`);

@@ -84,7 +84,14 @@ interface ContentCalendarStrategy {
   customerProblem: string;
   contentIdeas: ContentIdea[];
   contentCalendarGeneratedAt: string | null;  // ISO when ready; null while generating
+  /** Trending topics (query, value) used when this calendar was generated; for "Topics used for this calendar" UI */
+  trendingTopicsUsed: TrendingTopicUsed[];
   subscribedAt: string;
+}
+
+interface TrendingTopicUsed {
+  query: string;
+  value: number;  // growth value from Google Trends (e.g. percentage)
 }
 
 interface ContentIdea {
@@ -107,6 +114,7 @@ Single audience/strategy including full calendar. Use for StrategyDetailsView wh
 
 - `content_ideas`: `ContentIdea[] | null` — same shape as `contentIdeas` above; `null` or `[]` when not ready.
 - `content_calendar_generated_at`: `string | null` — ISO when generated.
+- `content_calendar_trending_topics`: `Array<{ query: string; value: number }> | null` — trending topics used when the calendar was generated; `null` or empty when none were used or calendar not yet generated.
 
 ### GET /api/v1/audiences
 

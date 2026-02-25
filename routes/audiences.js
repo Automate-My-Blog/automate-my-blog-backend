@@ -1017,6 +1017,14 @@ router.get('/:id', async (req, res) => {
       contentIdeas = getFixtureContentIdeas();
     }
 
+    let trendingTopicsUsed = [];
+    if (audience.content_calendar_trending_topics != null) {
+      const raw = audience.content_calendar_trending_topics;
+      trendingTopicsUsed = Array.isArray(raw)
+        ? raw
+        : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+    }
+
     const calendarReady = contentIdeas.length > 0 || audience.content_calendar_generated_at;
     let contentCalendarJobId = null;
     if (!calendarReady && userContext.isAuthenticated && userContext.userId) {
@@ -1043,6 +1051,7 @@ router.get('/:id', async (req, res) => {
         pitch: audience.pitch,
         content_ideas: contentIdeas.length > 0 ? contentIdeas : null,
         content_calendar_generated_at: contentIdeas.length > 0 ? (audience.content_calendar_generated_at || (testbed ? new Date().toISOString() : null)) : null,
+        content_calendar_trending_topics: trendingTopicsUsed.length > 0 ? trendingTopicsUsed : null,
         ...(contentCalendarJobId && { content_calendar_job_id: contentCalendarJobId }),
         created_at: audience.created_at,
         updated_at: audience.updated_at,
