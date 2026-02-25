@@ -842,7 +842,10 @@ router.get('/', async (req, res) => {
         target_segment: safeParse(row.target_segment, 'target_segment', row.id),
         customer_problem: row.customer_problem,
         customer_language: customerLanguage,
+        conversion_path: row.conversion_path || null,
+        business_value: safeParse(row.business_value, 'business_value', row.id),
         seo_keywords: keywordsList,
+        content_ideas: contentIdeasArr,
         priority: row.priority,
         pitch: row.pitch,
         image_url: row.image_url || null,
@@ -850,7 +853,11 @@ router.get('/', async (req, res) => {
         keywords_count: parseInt(row.keywords_count),
         content_calendar_generated_at: row.content_calendar_generated_at,
         has_content_calendar: contentIdeasArr.length > 0 || testbed,
-        created_at: row.created_at
+        created_at: row.created_at,
+        ...(row.pricing_monthly != null && row.pricing_monthly !== undefined && { pricing_monthly: parseFloat(row.pricing_monthly) }),
+        ...(row.pricing_annual != null && row.pricing_annual !== undefined && { pricing_annual: parseFloat(row.pricing_annual) }),
+        ...(row.posts_recommended != null && row.posts_recommended !== undefined && { posts_recommended: row.posts_recommended }),
+        ...(row.posts_maximum != null && row.posts_maximum !== undefined && { posts_maximum: row.posts_maximum })
       };
     });
 

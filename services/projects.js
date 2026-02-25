@@ -375,6 +375,43 @@ class ProjectsService {
   }
 
   /**
+   * Create or update project from website analysis so GET /api/v1/user/recent-analysis returns it.
+   * Call when a user completes website analysis (sync or async job) so the dashboard has analysis for topic generation and strategy derivation.
+   * @param {string} userId - Required; no-op when missing (anonymous).
+   * @param {string} websiteUrl - Website URL that was analyzed.
+   * @param {object} analysisData - Analysis object (camelCase or snake_case); may include scenarios.
+   * @param {Array} [scenarios] - Optional scenarios array (overrides analysisData.scenarios if provided).
+   * @returns {Promise<{ success: boolean, projectId?: string, updated?: boolean }>}
+   */
+  async upsertProjectFromAnalysis(userId, websiteUrl, analysisData, scenarios = null) {
+    if (!userId || !websiteUrl || !analysisData) {
+      return { success: false };
+    }
+    const normalized = {
+      ...(typeof analysisData === 'object' && analysisData !== null ? analysisData : {}),
+      scenarios: scenarios != null ? scenarios : (analysisData.scenarios ?? analysisData.customerScenarios ?? [])
+    };
+    try {
+      if (this.databaseAvailable && this.useDatabaseStorage) {
+        const existing = await db.query(
+          `SELECT id FROM projects WHERE user_id = $1 AND website_url = $2 ORDER BY updated_at DESC LIMIT 1`,
+          [userId, websiteUrl]
+        );
+        if (existing.rows.length > 0) {
+          await this.updateProjectAnalysis(existing.rows[0].id, normalized);
+          return { success: true, projectId: existing.rows[0].id, updated: true };
+        }
+        const created = await this.createProject(userId, websiteUrl, normalized);
+        return { success: true, projectId: created.projectId, updated: false };
+      }
+      return { success: false };
+    } catch (error) {
+      console.error('Upsert project from analysis error:', error.message);
+      return { success: false };
+    }
+  }
+
+  /**
    * Get user's most recent project analysis (for displaying cached data)
    */
   async getUserMostRecentAnalysis(userId) {
@@ -398,9 +435,14 @@ class ProjectsService {
         }
 
         const project = result.rows[0];
+        const businessAnalysis = project.business_analysis;
+        const businessName = project.name
+          || (businessAnalysis && (businessAnalysis.businessName || businessAnalysis.business_name || businessAnalysis.name))
+          || null;
         return {
           id: project.id,
           websiteUrl: project.website_url,
+          businessName,
           businessAnalysis: project.business_analysis,
           brandColors: project.brand_colors,
           targetAudience: project.target_audience,

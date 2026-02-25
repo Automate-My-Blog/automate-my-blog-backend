@@ -24,7 +24,7 @@ class DatabaseAuthService {
     this.useDatabaseStorage = process.env.USE_DATABASE !== 'false';
     this.databaseAvailable = false;
     this.connectionChecked = false;
-    
+
     // Don't test connection in constructor to avoid race conditions
     // Connection will be tested lazily on first use
   }

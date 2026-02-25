@@ -4,18 +4,31 @@
  */
 
 import db from './database.js';
+
+/** Phases used by job-worker for progress reporting (order must match generateAndSaveContentCalendar flow). */
+export const CONTENT_CALENDAR_PHASES = Object.freeze([
+  'audience',
+  'organization',
+  'keywords',
+  'generating',
+  'saving'
+]);
 import openaiService from './openai.js';
 import googleContentOptimizer from './google-content-optimizer.js';
 
 /**
  * Generate and save 30-day content ideas for a strategy (audience).
+ * When userId is provided (e.g. from job worker), verifies the audience belongs to that user.
+ * Only persists when ideas.length >= 1 so the frontend does not see "ready" with an empty calendar.
+ *
  * @param {string} strategyId - audiences.id (strategy_id)
+ * @param {string} [userId] - If set, audience must belong to this user (production hardening)
  * @returns {Promise<{ strategyId: string, success: boolean, ideaCount?: number, error?: string }>}
  */
-export async function generateAndSaveContentCalendar(strategyId) {
+export async function generateAndSaveContentCalendar(strategyId, userId = null) {
   try {
     const audienceResult = await db.query(
-      `SELECT a.id, a.target_segment, a.customer_problem, a.business_value, a.conversion_path,
+      `SELECT a.id, a.user_id, a.target_segment, a.customer_problem, a.business_value, a.conversion_path,
               a.organization_intelligence_id, oi.organization_id
        FROM audiences a
        LEFT JOIN organization_intelligence oi ON oi.id = a.organization_intelligence_id AND oi.is_current = TRUE
@@ -28,6 +41,9 @@ export async function generateAndSaveContentCalendar(strategyId) {
     }
 
     const audience = audienceResult.rows[0];
+    if (userId != null && String(audience.user_id) !== String(userId)) {
+      return { strategyId, success: false, error: 'Audience does not belong to job user' };
+    }
     let orgContext = {};
 
     if (audience.organization_id) {
@@ -81,6 +97,11 @@ export async function generateAndSaveContentCalendar(strategyId) {
 
     const ideas = await openaiService.generateContentCalendarIdeas(audience, orgContext, seoKeywords, googleData);
 
+    if (!Array.isArray(ideas) || ideas.length < 1) {
+      console.warn(`Content calendar produced no ideas for strategy ${strategyId}, not persisting`);
+      return { strategyId, success: false, error: 'No ideas generated' };
+    }
+
     await db.query(
       `UPDATE audiences SET content_ideas = $1, content_calendar_generated_at = NOW(), updated_at = NOW() WHERE id = $2`,
       [JSON.stringify(ideas), strategyId]
@@ -97,12 +118,14 @@ export async function generateAndSaveContentCalendar(strategyId) {
 /**
  * Generate calendars for multiple strategies. Continues on per-strategy failure.
  * @param {string[]} strategyIds
+ * @param {{ userId?: string }} [options] - userId from job context; used to verify audience ownership
  * @returns {Promise<{ results: Array<{ strategyId: string, success: boolean, ideaCount?: number, error?: string }> }>}
  */
-export async function generateContentCalendarsForStrategies(strategyIds) {
+export async function generateContentCalendarsForStrategies(strategyIds, options = {}) {
+  const userId = options.userId ?? null;
   const results = [];
   for (const id of strategyIds) {
-    const r = await generateAndSaveContentCalendar(id);
+    const r = await generateAndSaveContentCalendar(id, userId);
     results.push(r);
   }
   return { results };

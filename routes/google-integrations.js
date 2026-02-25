@@ -117,7 +117,7 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     const { service } = req.params;
     const userId = req.user.userId;
 
-    // Special handling for Google Trends (always "connected" - uses public API)
+    // Google Trends: no OAuth; dashboard home tile uses { connected: true/false }
     if (service === 'trends') {
       return res.json({
         success: true,
@@ -286,10 +286,11 @@ router.get('/integration-pitch/stream', authService.authMiddleware.bind(authServ
  * GET /api/v1/google/trends/preview
  * Fetch actual trending topics for the user and stream LLM summary
  * Shows immediate value when connecting Google Trends
- * SSE endpoint
+ * SSE endpoint. Events: chunk, complete, error.
+ * SECURITY: Do not log or expose the token query parameter.
  */
 router.get('/trends/preview', async (req, res) => {
-  // Extract token from query parameter (EventSource can't send headers)
+  // Token from query only (EventSource cannot send headers). Never log req.query or token.
   const token = req.query.token;
 
   if (!token) {
@@ -503,7 +504,8 @@ REQUIREMENTS:
     res.end();
 
   } catch (error) {
-    console.error('Error generating trends preview:', error);
+    // Do not log token or req.query
+    console.error('Error generating trends preview:', error.message || error);
     res.write(`data: ${JSON.stringify({
       type: 'error',
       content: 'Failed to fetch trending topics. Please try again later.'
@@ -518,23 +520,24 @@ REQUIREMENTS:
 
 /**
  * GET /api/v1/google/trends/rising-queries
- * Get rising search queries from Google Trends
- *
- * Query params:
- * - keyword (required): The keyword to search for
- * - geo (optional): Geographic region (default: 'US')
- * - timeframe (optional): Time range (default: '7d')
+ * Get rising search queries from Google Trends.
+ * Dashboard: strategy cards use keyword + timeframe=30d.
+ * Response: { success, data: [{ query, value }] } (extra fields allowed).
  */
 router.get('/trends/rising-queries', async (req, res) => {
   try {
-    const { keyword, geo = 'US', timeframe = '7d' } = req.query;
+    const { keyword, geo = 'US', timeframe = '30d' } = req.query;
 
     if (!keyword) {
       return res.status(400).json({ error: 'keyword parameter required' });
     }
 
     const result = await googleTrendsService.getRisingQueries(keyword, geo, timeframe);
-    res.json({ success: true, data: result });
+    // Shape for dashboard: at least { query, value } per item
+    const data = Array.isArray(result)
+      ? result.map((item) => ({ query: item.query, value: item.value }))
+      : [];
+    res.json({ success: true, data });
   } catch (error) {
     console.error('Error fetching Google Trends:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -567,13 +570,9 @@ router.get('/trends/related-topics', async (req, res) => {
 
 /**
  * GET /api/v1/google/trends/interest-over-time
- * Get interest over time from Google Trends
- *
- * Query params:
- * - keyword (required): The keyword to search for
- * - startDate (required): Start date (YYYY-MM-DD)
- * - endDate (required): End date (YYYY-MM-DD)
- * - geo (optional): Geographic region (default: 'US')
+ * Get interest over time from Google Trends.
+ * Dashboard: performance card chart. Response shape for frontend normalization:
+ * { success, data: { timelineData } } with points having formattedTime, date, value, interest.
  */
 router.get('/trends/interest-over-time', async (req, res) => {
   try {
@@ -583,8 +582,16 @@ router.get('/trends/interest-over-time', async (req, res) => {
       return res.status(400).json({ error: 'keyword, startDate, and endDate parameters required' });
     }
 
-    const result = await googleTrendsService.getInterestOverTime(keyword, startDate, endDate, geo);
-    res.json({ success: true, data: result });
+    const raw = await googleTrendsService.getInterestOverTime(keyword, startDate, endDate, geo);
+    const timelineData = Array.isArray(raw)
+      ? raw.map((p) => ({
+          formattedTime: p.date,
+          date: p.date,
+          value: p.value,
+          interest: p.value
+        }))
+      : [];
+    res.json({ success: true, data: { timelineData } });
   } catch (error) {
     console.error('Error fetching Google Trends:', error);
     res.status(500).json({ success: false, error: error.message });
