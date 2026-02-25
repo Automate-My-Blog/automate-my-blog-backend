@@ -134,13 +134,14 @@ export class UserNotFoundError extends Error {
  * does not exist in DB (e.g. JWT for deleted user), we fall back to session-only when
  * sessionId is present so anonymous flow still works; otherwise throw UserNotFoundError.
  *
- * @param {string} type - 'website_analysis' | 'content_generation' | 'analyze_voice_sample'
+ * @param {string} type - 'website_analysis' | 'content_generation' | 'analyze_voice_sample' | 'content_calendar'
  * @param {object} input - Job payload (stored for retry)
  * @param {object} context - { userId?, sessionId?, tenantId? }
+ * @param {object} [queueOptions] - Optional BullMQ job options (e.g. attempts, backoff)
  * @returns {Promise<{ jobId: string }>}
  * @throws {UserNotFoundError} when context.userId is set, user does not exist, and no sessionId
  */
-export async function createJob(type, input, context = {}) {
+export async function createJob(type, input, context = {}, queueOptions = {}) {
   if (!JOB_TYPES.includes(type)) throw new Error(`Invalid job type: ${type}`);
   let { userId, sessionId, tenantId } = context;
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
@@ -166,16 +167,36 @@ export async function createJob(type, input, context = {}) {
   );
 
   const queue = getQueue();
-  await queue.add(type, { jobId }, { jobId });
+  await queue.add(type, { jobId }, { jobId, ...queueOptions });
 
   return { jobId };
 }
 
 /**
+ * Check if a content_calendar job is already queued or running for the same user and strategy set.
+ * Used to avoid duplicate jobs (e.g. Stripe webhook retries).
+ * @param {string} userId
+ * @param {string[]} strategyIds
+ * @returns {Promise<boolean>}
+ */
+export async function hasContentCalendarJobInProgress(userId, strategyIds) {
+  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) return false;
+  const r = await db.query(
+    `SELECT 1 FROM jobs
+     WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+       AND user_id = $1 AND (input->'strategyIds') = to_jsonb($2::text[])
+     LIMIT 1`,
+    [userId, strategyIds]
+  );
+  return r.rows.length > 0;
+}
+
+/**
  * Create a content calendar generation job. Call after strategy purchase (individual or bundle).
+ * Uses retries (3 attempts, exponential backoff) for production resilience.
  * @param {string[]} strategyIds - Array of audience IDs (strategy_id = audiences.id)
  * @param {string} userId - UUID of user (required)
- * @returns {Promise<{ jobId: string }|null>} jobId if enqueued, null if Redis unavailable
+ * @returns {Promise<{ jobId: string }|null>} jobId if enqueued, null if Redis unavailable or duplicate skipped
  */
 export async function createContentCalendarJob(strategyIds, userId) {
   if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) {
@@ -185,7 +206,15 @@ export async function createContentCalendarJob(strategyIds, userId) {
   if (!u.rows.length) throw new UserNotFoundError(userId);
 
   try {
-    return await createJob('content_calendar', { strategyIds }, { userId });
+    const inProgress = await hasContentCalendarJobInProgress(userId, strategyIds);
+    if (inProgress) {
+      console.warn('[job-queue] content_calendar job already in progress for user', userId, 'strategies', strategyIds);
+      return null;
+    }
+    return await createJob('content_calendar', { strategyIds }, { userId }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 }
+    });
   } catch (e) {
     if (e instanceof ServiceUnavailableError || e?.message?.includes('REDIS')) {
       console.warn('[job-queue] Redis unavailable, skipping content_calendar job:', e?.message);
