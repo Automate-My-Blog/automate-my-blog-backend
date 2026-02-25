@@ -124,8 +124,19 @@ List of user’s audiences with calendar indicator. Use for list badges and navi
 
 - `has_content_calendar`: `boolean` — `true` when `content_ideas` has data.
 - `content_calendar_generated_at`: `string | null`.
+- `content_calendar_trending_topics`: `Array<{ query: string; value: number }> | null` — trending topics used when the calendar was last generated; `null` when none or not yet generated.
 
 Use `has_content_calendar` to show a “Calendar ready” badge; no badge or “Generating…” when `false`.
+
+### Where trending topics appear
+
+| Endpoint | Field | When populated |
+|----------|--------|----------------|
+| `GET /api/v1/strategies/content-calendar` | Each strategy: `trendingTopicsUsed` | Snapshot saved when that strategy's calendar was last generated (regenerate or first generation). |
+| `GET /api/v1/audiences/:id` | `audience.content_calendar_trending_topics` | Same snapshot. |
+| `GET /api/v1/audiences` | Each audience: `content_calendar_trending_topics` | Same snapshot. |
+
+**If trending is always empty after regeneration:** Ensure migration 045 is applied (`content_calendar_trending_topics` on `audiences`). Trending is only saved when the worker had data from strategy keywords (Google Trends cache). Check that the strategy has `seo_keywords` and the worker ran `fetchTrendsForContentCalendar` before generating.
 
 ---
 

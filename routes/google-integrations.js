@@ -7,6 +7,7 @@ import googleAnalyticsService from '../services/google-analytics.js';
 import oauthManager from '../services/oauth-manager.js';
 import integrationPitchGenerator from '../services/integration-pitch-generator.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import { fetchTrendsForContentCalendar } from '../services/content-calendar-service.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -584,6 +585,64 @@ REQUIREMENTS:
 // ========================================
 // EXISTING GOOGLE API ENDPOINTS
 // ========================================
+
+/**
+ * POST /api/v1/google/trends/refresh
+ * Force a refresh of Google Trends (Find Emerging Topics) for the current user.
+ * Fetches rising queries for the user's strategy keywords and populates the cache
+ * so trending preview and content calendar use fresh data. Otherwise runs on schedule (daily).
+ * Requires JWT.
+ */
+router.post('/trends/refresh', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication is required to refresh trending topics'
+      });
+    }
+
+    const strategyResult = await db.query(
+      `SELECT DISTINCT a.id
+       FROM audiences a
+       WHERE a.user_id = $1
+         AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
+      [userId]
+    );
+    const strategyIds = strategyResult.rows.map((r) => r.id);
+
+    if (strategyIds.length === 0) {
+      return res.status(200).json({
+        success: true,
+        fetched: 0,
+        keywordCount: 0,
+        errorCount: 0,
+        message: 'No strategies with keywords found. Add keywords to your strategies to refresh emerging topics.'
+      });
+    }
+
+    const result = await fetchTrendsForContentCalendar(userId, strategyIds);
+
+    res.json({
+      success: true,
+      fetched: result.fetched,
+      keywordCount: result.keywordCount,
+      errorCount: result.errorCount,
+      message: result.keywordCount === 0
+        ? 'No keywords to fetch. Add SEO keywords to your strategies.'
+        : `Refreshed emerging topics for ${result.keywordCount} keyword(s). ${result.fetched} cached, ${result.errorCount} errors.`
+    });
+  } catch (error) {
+    console.error('Google Trends refresh error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to refresh trending topics',
+      message: error.message
+    });
+  }
+});
 
 /**
  * GET /api/v1/google/trends/rising-queries

@@ -46,6 +46,8 @@
 
 **Recommendation:** Require auth for all three data endpoints (e.g. `authMiddleware`) so only logged-in users can trigger live/cache fills. Optionally keep a short public cache TTL for anonymous reads if product requires it, with strict rate limiting.
 
+**On-demand refresh:** `POST /api/v1/google/trends/refresh` (JWT required) forces a fetch of emerging topics for the current user's strategy keywords and populates the cache. Use this so the frontend can offer "Refresh emerging topics" instead of waiting for the daily cron.
+
 ---
 
 ## 3. Cache Layer

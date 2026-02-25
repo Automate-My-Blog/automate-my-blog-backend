@@ -837,6 +837,13 @@ router.get('/', async (req, res) => {
       const contentIdeasArr = parseContentIdeas(row.content_ideas);
       const customerLanguage = safeParse(row.customer_language, 'customer_language', row.id) || [];
       const keywordsList = row.keywords_list || [];
+      let trendingTopicsUsed = [];
+      if (row.content_calendar_trending_topics != null) {
+        const raw = row.content_calendar_trending_topics;
+        trendingTopicsUsed = Array.isArray(raw)
+          ? raw
+          : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+      }
       return {
         id: row.id,
         target_segment: safeParse(row.target_segment, 'target_segment', row.id),
@@ -853,6 +860,7 @@ router.get('/', async (req, res) => {
         keywords_count: parseInt(row.keywords_count),
         content_calendar_generated_at: row.content_calendar_generated_at,
         has_content_calendar: contentIdeasArr.length > 0 || testbed,
+        content_calendar_trending_topics: trendingTopicsUsed.length > 0 ? trendingTopicsUsed : null,
         created_at: row.created_at,
         ...(row.pricing_monthly != null && row.pricing_monthly !== undefined && { pricing_monthly: parseFloat(row.pricing_monthly) }),
         ...(row.pricing_annual != null && row.pricing_annual !== undefined && { pricing_annual: parseFloat(row.pricing_annual) }),
