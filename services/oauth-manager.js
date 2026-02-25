@@ -51,6 +51,50 @@ export class OAuthManager {
   }
 
   /**
+   * Store per-user Google OAuth app credentials (client_id, client_secret) for self-serve.
+   * Used for search_console and analytics when user provides their own OAuth client.
+   * Do not log or expose client_secret.
+   */
+  async storeAppCredentials(userId, serviceName, clientId, clientSecret) {
+    const clientIdEncrypted = this.encryptToken(clientId);
+    const clientSecretEncrypted = this.encryptToken(clientSecret);
+
+    const query = `
+      INSERT INTO user_google_app_credentials
+        (user_id, service_name, client_id_encrypted, client_secret_encrypted)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (user_id, service_name)
+      DO UPDATE SET
+        client_id_encrypted = EXCLUDED.client_id_encrypted,
+        client_secret_encrypted = EXCLUDED.client_secret_encrypted,
+        updated_at = CURRENT_TIMESTAMP
+    `;
+
+    await db.query(query, [userId, serviceName, clientIdEncrypted, clientSecretEncrypted]);
+  }
+
+  /**
+   * Get per-user Google OAuth app credentials if stored (for self-serve).
+   * Returns { client_id, client_secret } or null.
+   */
+  async getAppCredentials(userId, serviceName) {
+    const query = `
+      SELECT client_id_encrypted, client_secret_encrypted
+      FROM user_google_app_credentials
+      WHERE user_id = $1 AND service_name = $2
+    `;
+
+    const result = await db.query(query, [userId, serviceName]);
+    if (!result.rows?.length) return null;
+
+    const row = result.rows[0];
+    return {
+      client_id: this.decryptToken(row.client_id_encrypted),
+      client_secret: this.decryptToken(row.client_secret_encrypted)
+    };
+  }
+
+  /**
    * Store OAuth tokens for user
    */
   async storeCredentials(userId, serviceName, tokens, scopes, serviceConfig = {}) {
@@ -131,19 +175,26 @@ export class OAuthManager {
   }
 
   /**
-   * Refresh OAuth token
+   * Refresh OAuth token. Uses per-user app credentials when present (self-serve), else env.
    */
   async refreshCredentials(userId, serviceName, existingCred) {
     try {
       const refreshToken = this.decryptToken(existingCred.refresh_token_encrypted);
 
-      // Call Google OAuth2 token endpoint
+      let clientId = process.env.GOOGLE_CLIENT_ID;
+      let clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      const appCreds = await this.getAppCredentials(userId, serviceName);
+      if (appCreds?.client_id && appCreds?.client_secret) {
+        clientId = appCreds.client_id;
+        clientSecret = appCreds.client_secret;
+      }
+
       const response = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
-          client_id: process.env.GOOGLE_CLIENT_ID,
-          client_secret: process.env.GOOGLE_CLIENT_SECRET,
+          client_id: clientId,
+          client_secret: clientSecret,
           refresh_token: refreshToken,
           grant_type: 'refresh_token'
         })
