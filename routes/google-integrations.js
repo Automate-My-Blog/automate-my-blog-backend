@@ -17,13 +17,72 @@ const GOOGLE_SCOPES = {
   analytics: ['https://www.googleapis.com/auth/analytics.readonly']
 };
 
+/** Map URL service to DB service_name for app credentials */
+const SERVICE_TO_DB_NAME = {
+  search_console: 'google_search_console',
+  analytics: 'google_analytics'
+};
+
+/**
+ * Resolve client_id and client_secret for a user+service: self-serve app credentials if stored, else env.
+ */
+async function getGoogleOAuthClientConfig(userId, service) {
+  const dbName = SERVICE_TO_DB_NAME[service];
+  if (!dbName) return null;
+  const appCreds = await oauthManager.getAppCredentials(userId, dbName);
+  if (appCreds?.client_id && appCreds?.client_secret) {
+    return { clientId: appCreds.client_id, clientSecret: appCreds.client_secret };
+  }
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    return {
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET
+    };
+  }
+  return null;
+}
+
 // ========================================
 // OAUTH ENDPOINTS
 // ========================================
 
 /**
+ * POST /api/v1/google/oauth/credentials
+ * Self-serve: store the user's OAuth client credentials for Search Console or Analytics.
+ * JWT required. Do not log or expose client_secret.
+ */
+router.post('/oauth/credentials', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { service, client_id: clientId, client_secret: clientSecret } = req.body || {};
+
+    if (!service || !clientId || !clientSecret) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: service, client_id, client_secret'
+      });
+    }
+
+    if (service !== 'search_console' && service !== 'analytics') {
+      return res.status(400).json({
+        success: false,
+        error: 'service must be "search_console" or "analytics"'
+      });
+    }
+
+    const dbName = SERVICE_TO_DB_NAME[service];
+    await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('OAuth credentials store error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/v1/google/oauth/authorize/:service
- * Initiate OAuth flow for a Google service
+ * Initiate OAuth flow for a Google service. Uses per-user app credentials when stored (self-serve), else env.
  */
 router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
@@ -36,8 +95,6 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 
     // Special handling for Google Trends (no OAuth needed)
     if (service === 'trends') {
-      // Google Trends uses public API, no credentials to store
-      // Just return success - the frontend will mark it as "connected"
       const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
       return res.json({
         success: true,
@@ -47,9 +104,17 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
       });
     }
 
+    const config = await getGoogleOAuthClientConfig(userId, service);
+    if (!config) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or submit credentials via POST /api/v1/google/oauth/credentials.'
+      });
+    }
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      config.clientId,
+      config.clientSecret,
       `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
     );
 
@@ -62,14 +127,14 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 
     res.json({ success: true, authUrl });
   } catch (error) {
-    console.error('OAuth authorization error:', error);
+    console.error('OAuth authorization error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
 });
 
 /**
  * GET /api/v1/google/oauth/callback
- * OAuth callback handler
+ * OAuth callback handler. Uses same client_id/secret as authorize (per-user if stored, else env).
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
@@ -81,16 +146,19 @@ router.get('/oauth/callback', async (req, res) => {
 
     const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
 
+    const config = await getGoogleOAuthClientConfig(userId, service);
+    if (!config) {
+      throw new Error('Google OAuth client not configured for this user');
+    }
+
     const oauth2Client = new google.auth.OAuth2(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
+      config.clientId,
+      config.clientSecret,
       `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
     );
 
-    // Exchange code for tokens
     const { tokens } = await oauth2Client.getToken(code);
 
-    // Store encrypted tokens
     await oauthManager.storeCredentials(
       userId,
       `google_${service}`,
@@ -98,11 +166,10 @@ router.get('/oauth/callback', async (req, res) => {
       GOOGLE_SCOPES[service]
     );
 
-    // Redirect to success page
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/settings/google-integrations?connected=${service}`);
   } catch (error) {
-    console.error('OAuth callback error:', error);
+    console.error('OAuth callback error:', error.message);
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
     res.redirect(`${frontendUrl}/settings/google-integrations?error=${encodeURIComponent(error.message)}`);
   }
