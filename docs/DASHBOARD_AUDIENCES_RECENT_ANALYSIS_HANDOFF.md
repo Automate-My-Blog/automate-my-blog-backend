@@ -44,6 +44,27 @@ So the backend can assume that the dashboard will call **recent-analysis** for l
 
 ---
 
+## 3.1 Frontend: Anonymous analysis → sign-in (adopt-session)
+
+**Website analysis often happens before the user is logged in.** The backend stores that analysis under a **session** (e.g. `x-session-id`). After the user **signs up or logs in**, the frontend must tell the backend to attach that session’s data to the user so the dashboard and **GET /api/v1/user/recent-analysis** work.
+
+| Step | Frontend action |
+|------|------------------|
+| **During onboarding (anonymous)** | Send `x-session-id: <sessionId>` on analysis (and related) requests. Store `sessionId` in state or storage so it survives until after login. |
+| **Right after login or signup** | If you have a stored `sessionId` that was used for website analysis (or topics), call **POST /api/v1/analysis/adopt-session** once with the new JWT and body `{ "session_id": "<sessionId>" }`. |
+| **After adopt-session** | Discard or clear the anonymous session in the UI. Use the JWT for all further requests. **GET /api/v1/user/recent-analysis** will then return the adopted analysis; the dashboard carousel and “Generate Content Topics” will work. |
+
+**Endpoint**
+
+- **POST /api/v1/analysis/adopt-session**
+- **Auth:** `Authorization: Bearer <JWT>` (user must be logged in).
+- **Body:** `{ "session_id": "<sessionId>" }` (the same session ID used for anonymous analysis).
+- **Response:** `200` with `adopted: { organizations, intelligence }` and an `analysis` object. The backend also persists this analysis to the user’s project so **GET /api/v1/user/recent-analysis** returns it.
+
+**If you skip adopt-session:** The user’s anonymous org/intel stay tied only to the session. **GET /api/v1/user/recent-analysis** returns 404 and the dashboard has no analysis or strategies from that run. So calling adopt-session when you have a pre-login `sessionId` is required for “analysis done before sign-in” to appear on the dashboard.
+
+---
+
 ## 4. GET /api/v1/audiences
 
 **Purpose:** Return the list of audience strategies for the current user so the dashboard carousel can show them.

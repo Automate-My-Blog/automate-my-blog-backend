@@ -18,10 +18,12 @@ const fallbackUsers = new Map();
  */
 class DatabaseAuthService {
   constructor() {
-    this.useDatabaseStorage = process.env.USE_DATABASE === 'true';
+    // Use database when available by default so registration (DB) and login (DB) stay in sync.
+    // Set USE_DATABASE=false to force in-memory auth (e.g. tests).
+    this.useDatabaseStorage = process.env.USE_DATABASE !== 'false';
     this.databaseAvailable = false;
     this.connectionChecked = false;
-    
+
     // Don't test connection in constructor to avoid race conditions
     // Connection will be tested lazily on first use
   }
