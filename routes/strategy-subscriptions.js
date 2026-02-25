@@ -2,14 +2,104 @@ import express from 'express';
 import db from '../services/database.js';
 import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
+import * as strategyWebhooks from '../services/strategy-subscription-webhooks.js';
+import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
-const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+// Lazy init so server can start when STRIPE_SECRET_KEY is missing.
+let _stripe = null;
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is required in environment variables');
+  }
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  return _stripe;
+}
 
 /**
- * Note: Authentication is handled at the router level in index.js
- * All routes here assume req.user is already set by authService.authMiddleware
+ * Register strategy subscription routes on the given router.
+ * Authentication is handled at the router level in index.js.
+ * Call this first when building the combined strategy router so literal paths are registered before :id routes.
+ *
+ * @param {express.Router} router
  */
+export function registerRoutes(router) {
+  /**
+   * GET /api/v1/strategies/content-calendar
+ * Return unified 30-day content calendar across all subscribed strategies (Issue #270).
+ * Query: ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD (optional, defaults to next 30 days)
+ * Query: ?testbed=1 - Calendar testbed mode: skip subscription requirement, use fixture content when empty (requires ENABLE_CALENDAR_TESTBED=1)
+ */
+router.get('/content-calendar', async (req, res) => {
+  if (!req.user?.userId) {
+    return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+  }
+  try {
+    const userId = req.user.userId;
+    const testbed = isCalendarTestbed(req);
+
+    let result;
+    if (testbed) {
+      // Testbed: use subscribed strategies if any; otherwise fall back to user's audiences (no purchase required)
+      result = await db.query(
+        `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
+                a.content_calendar_generated_at, a.content_calendar_trending_topics, sp.created_at as subscribed_at
+         FROM audiences a
+         LEFT JOIN strategy_purchases sp ON sp.strategy_id = a.id AND sp.user_id = $1 AND sp.status = 'active'
+         WHERE a.user_id = $1
+         ORDER BY sp.created_at DESC NULLS LAST, a.created_at DESC
+         LIMIT 10`,
+        [userId]
+      );
+    } else {
+      result = await db.query(
+        `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
+                a.content_calendar_generated_at, a.content_calendar_trending_topics, sp.created_at as subscribed_at
+         FROM strategy_purchases sp
+         JOIN audiences a ON a.id = sp.strategy_id
+         WHERE sp.user_id = $1 AND sp.status = 'active'
+         ORDER BY sp.created_at DESC`,
+        [userId]
+      );
+    }
+
+    const fixtureIdeas = testbed ? getFixtureContentIdeas() : null;
+
+    const strategies = result.rows.map((row) => {
+      let contentIdeas = row.content_ideas != null
+        ? (typeof row.content_ideas === 'string' ? (() => { try { return JSON.parse(row.content_ideas); } catch { return []; } })() : row.content_ideas)
+        : [];
+      contentIdeas = Array.isArray(contentIdeas) ? contentIdeas : [];
+      const segment = typeof row.target_segment === 'string' ? (() => { try { return JSON.parse(row.target_segment); } catch { return {}; } })() : (row.target_segment || {});
+      let trendingTopicsUsed = [];
+      if (row.content_calendar_trending_topics != null) {
+        const raw = row.content_calendar_trending_topics;
+        trendingTopicsUsed = Array.isArray(raw)
+          ? raw
+          : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+      }
+
+      return {
+        strategyId: row.strategy_id,
+        targetSegment: segment,
+        customerProblem: row.customer_problem,
+        contentIdeas: contentIdeas.length > 0 ? contentIdeas : (fixtureIdeas || []),
+        contentCalendarGeneratedAt: contentIdeas.length > 0 ? row.content_calendar_generated_at : (testbed ? new Date().toISOString() : null),
+        trendingTopicsUsed,
+        subscribedAt: row.subscribed_at
+      };
+    });
+
+    res.json({
+      success: true,
+      strategies,
+      totalStrategies: strategies.length,
+      ...(testbed && { _testbed: true })
+    });
+  } catch (error) {
+    console.error('Error fetching content calendar:', error);
+    res.status(500).json({ error: 'Failed to fetch content calendar', message: error.message });
+  }
+});
 
 /**
  * GET /api/v1/strategies/:id/pricing
@@ -64,6 +154,9 @@ router.get('/:id/pricing', async (req, res) => {
  */
 router.post('/:id/subscribe',  async (req, res) => {
   try {
+    if (!req.user?.userId) {
+      return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+    }
     const { id: strategyId } = req.params;
     const { billingInterval } = req.body; // 'monthly' or 'annual'
     const userId = req.user.userId;
@@ -139,7 +232,7 @@ router.post('/:id/subscribe',  async (req, res) => {
 
     const demographics = targetSegment?.demographics || 'Audience Strategy';
 
-    const stripePrice = await stripe.prices.create({
+    const stripePrice = await getStripe().prices.create({
       unit_amount: Math.round(amount * 100), // Convert to cents
       currency: 'usd',
       recurring: {
@@ -182,7 +275,7 @@ router.post('/:id/subscribe',  async (req, res) => {
     // Sanitize URL
     frontendUrl = frontendUrl.trim().replace(/\/+$/, '');
 
-    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}`;
+    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${frontendUrl}/dashboard?tab=audience-segments`;
 
     console.log('🔗 Stripe Checkout URLs:', {
@@ -193,7 +286,7 @@ router.post('/:id/subscribe',  async (req, res) => {
     });
 
     // Create Checkout Session
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: req.user.email,
       line_items: [{
         price: stripePrice.id,
@@ -284,6 +377,7 @@ router.get('/subscribed',  async (req, res) => {
 
     const subscriptions = result.rows.map(row => ({
       id: row.id,
+      strategy_id: row.strategy_id,
       strategyId: row.strategy_id,
       billingInterval: row.billing_interval,
       amountPaid: parseFloat(row.amount_paid),
@@ -315,6 +409,57 @@ router.get('/subscribed',  async (req, res) => {
       userId: req.user?.userId
     });
     res.status(500).json({ error: 'Failed to fetch subscriptions' });
+  }
+});
+
+/**
+ * POST /api/v1/strategies/activate-purchase
+ * Idempotent fallback to activate a strategy subscription after Stripe redirect.
+ * Called by the frontend when the webhook may not have fired yet (local dev, race).
+ */
+router.post('/activate-purchase', async (req, res) => {
+  const { session_id, strategy_id } = req.body;
+  const userId = req.user?.userId;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized - User not authenticated' });
+  }
+
+  if (!session_id || !strategy_id) {
+    return res.status(400).json({ error: 'session_id and strategy_id are required' });
+  }
+
+  try {
+    // Idempotency: already activated?
+    const existing = await db.query(
+      `SELECT id FROM strategy_purchases WHERE user_id=$1 AND strategy_id=$2 AND status='active'`,
+      [userId, strategy_id]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ success: true, alreadyActivated: true });
+    }
+
+    // Retrieve and verify the Stripe session
+    const session = await getStripe().checkout.sessions.retrieve(session_id);
+    if (session.payment_status !== 'paid') {
+      return res.status(402).json({ error: 'Payment not completed', status: session.payment_status });
+    }
+    if (session.metadata?.user_id !== userId.toString()) {
+      return res.status(403).json({ error: 'Session does not belong to this user' });
+    }
+
+    // Reuse existing webhook handler (same code path as real webhook)
+    await strategyWebhooks.handleStrategyCheckoutCompleted(session);
+    return res.json({ success: true, activated: true });
+  } catch (error) {
+    console.error('❌ Error in activate-purchase:', {
+      message: error.message,
+      stack: error.stack,
+      userId,
+      session_id,
+      strategy_id
+    });
+    return res.status(500).json({ error: 'Failed to activate purchase', message: error.message });
   }
 });
 
@@ -435,5 +580,9 @@ router.post('/:id/decrement',  async (req, res) => {
     res.status(500).json({ error: 'Failed to decrement posts' });
   }
 });
+}
 
+// Default export for backwards compatibility (index uses composite router; tests may use this)
+const router = express.Router();
+registerRoutes(router);
 export default router;

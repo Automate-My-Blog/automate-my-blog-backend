@@ -1,8 +1,25 @@
 import express from 'express';
 import db from '../services/database.js';
 import openaiService from '../services/openai.js';
+import { createContentCalendarJob } from '../services/job-queue.js';
+import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
 
 const router = express.Router();
+
+/** Parse content_ideas from DB (JSONB can be string or already-parsed array). Returns array or empty array. */
+function parseContentIdeas(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
 
 // Safe JSON parsing to handle corrupted database records with monitoring
 const safeParse = (jsonString, fieldName, recordId) => {
@@ -170,6 +187,17 @@ const validateUserContext = (context) => {
     });
   }
 };
+
+/** When creating an audience with user_id, ensure the user exists in the DB (avoids FK violation). */
+async function ensureUserExistsForAudience(userId) {
+  if (!userId) return;
+  const r = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (r.rows.length === 0) {
+    const err = new Error('User not found. Your account may not exist in this environment—try signing in again or use the same backend you signed up with.');
+    err.code = 'USER_NOT_FOUND';
+    throw err;
+  }
+}
 
 // Validation function to prevent data corruption with monitoring
 const validateAudienceData = (data) => {
@@ -413,6 +441,13 @@ const attemptSessionAdoption = async (userContext) => {
 router.post('/', async (req, res) => {
   try {
     const userContext = extractUserContext(req);
+    if (!userContext.isAuthenticated && !userContext.sessionId && req.headers.authorization?.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid or expired token',
+        message: 'The token could not be verified. It may be expired, or it was issued by a different environment (e.g. staging vs local). Sign in again against this backend.'
+      });
+    }
     validateUserContext(userContext);
 
     // Debug logging for audience creation
@@ -427,6 +462,10 @@ router.post('/', async (req, res) => {
       customer_language_type: typeof req.body.customer_language,
       business_value_type: typeof req.body.business_value
     });
+
+    if (userContext.userId) {
+      await ensureUserExistsForAudience(userContext.userId);
+    }
 
     const {
       organization_intelligence_id,
@@ -610,6 +649,15 @@ router.post('/', async (req, res) => {
         message: 'Authentication or session ID (x-session-id header) is required'
       });
     }
+    if (error.code === 'USER_NOT_FOUND' || (error.code === '23503' && error.constraint === 'audiences_user_id_fkey')) {
+      return res.status(401).json({
+        success: false,
+        error: 'User not found',
+        message: error.code === 'USER_NOT_FOUND'
+          ? error.message
+          : 'User not found. Your account may not exist in this environment—try signing in again or use the same backend you signed up with.'
+      });
+    }
     console.error('Create audience error:', error);
     res.status(500).json({
       success: false,
@@ -704,10 +752,11 @@ router.get('/', async (req, res) => {
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
     
     const fullQuery = `
-      SELECT 
+      SELECT
         a.*,
-        COUNT(sk.id) as keywords_count,
-        COUNT(ct.id) as topics_count
+        ARRAY_AGG(DISTINCT sk.keyword) FILTER (WHERE sk.keyword IS NOT NULL) as keywords_list,
+        COUNT(DISTINCT sk.id) as keywords_count,
+        COUNT(DISTINCT ct.id) as topics_count
       FROM audiences a
       LEFT JOIN seo_keywords sk ON a.id = sk.audience_id
       LEFT JOIN content_topics ct ON a.id = ct.audience_id
@@ -783,16 +832,42 @@ router.get('/', async (req, res) => {
 
     // Using safeParse function defined at top of file
 
-    const audiences = result.rows.map(row => ({
-      id: row.id,
-      target_segment: safeParse(row.target_segment, 'target_segment', row.id),
-      customer_problem: row.customer_problem,
-      priority: row.priority,
-      pitch: row.pitch,
-      topics_count: parseInt(row.topics_count),
-      keywords_count: parseInt(row.keywords_count),
-      created_at: row.created_at
-    }));
+    const testbed = isCalendarTestbed(req);
+    const audiences = result.rows.map(row => {
+      const contentIdeasArr = parseContentIdeas(row.content_ideas);
+      const customerLanguage = safeParse(row.customer_language, 'customer_language', row.id) || [];
+      const keywordsList = row.keywords_list || [];
+      let trendingTopicsUsed = [];
+      if (row.content_calendar_trending_topics != null) {
+        const raw = row.content_calendar_trending_topics;
+        trendingTopicsUsed = Array.isArray(raw)
+          ? raw
+          : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+      }
+      return {
+        id: row.id,
+        target_segment: safeParse(row.target_segment, 'target_segment', row.id),
+        customer_problem: row.customer_problem,
+        customer_language: customerLanguage,
+        conversion_path: row.conversion_path || null,
+        business_value: safeParse(row.business_value, 'business_value', row.id),
+        seo_keywords: keywordsList,
+        content_ideas: contentIdeasArr,
+        priority: row.priority,
+        pitch: row.pitch,
+        image_url: row.image_url || null,
+        topics_count: parseInt(row.topics_count),
+        keywords_count: parseInt(row.keywords_count),
+        content_calendar_generated_at: row.content_calendar_generated_at,
+        has_content_calendar: contentIdeasArr.length > 0 || testbed,
+        content_calendar_trending_topics: trendingTopicsUsed.length > 0 ? trendingTopicsUsed : null,
+        created_at: row.created_at,
+        ...(row.pricing_monthly != null && row.pricing_monthly !== undefined && { pricing_monthly: parseFloat(row.pricing_monthly) }),
+        ...(row.pricing_annual != null && row.pricing_annual !== undefined && { pricing_annual: parseFloat(row.pricing_annual) }),
+        ...(row.posts_recommended != null && row.posts_recommended !== undefined && { posts_recommended: row.posts_recommended }),
+        ...(row.posts_maximum != null && row.posts_maximum !== undefined && { posts_maximum: row.posts_maximum })
+      };
+    });
 
     const response = {
       success: true,
@@ -823,6 +898,69 @@ router.get('/', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve audiences',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/v1/audiences/:id/request-content-calendar
+ * Trigger content calendar generation for an audience; returns jobId for stream/polling.
+ * Requires authenticated user. If a content_calendar job is already queued/running for this audience, returns its jobId.
+ */
+router.post('/:id/request-content-calendar', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    if (!userContext.isAuthenticated || !userContext.userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Unauthorized',
+        message: 'Authentication is required to request content calendar generation'
+      });
+    }
+    const audienceId = req.params.id;
+
+    const audienceRow = await db.query(
+      'SELECT id, user_id FROM audiences WHERE id = $1 AND user_id = $2',
+      [audienceId, userContext.userId]
+    );
+    if (audienceRow.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Audience not found',
+        message: 'The requested audience does not exist or you do not have access to it'
+      });
+    }
+
+    const existingJob = await db.query(
+      `SELECT id FROM jobs
+       WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+         AND user_id = $1 AND (input->'strategyIds') @> to_jsonb(ARRAY[$2]::text[])
+       ORDER BY created_at DESC LIMIT 1`,
+      [userContext.userId, audienceId]
+    );
+    if (existingJob.rows.length > 0) {
+      return res.status(200).json({
+        success: true,
+        jobId: existingJob.rows[0].id,
+        message: 'Content calendar job already in progress'
+      });
+    }
+
+    const result = await createContentCalendarJob([audienceId], userContext.userId);
+    if (!result) {
+      return res.status(503).json({
+        success: false,
+        error: 'Service unavailable',
+        message: 'Job queue is temporarily unavailable. Please try again shortly.'
+      });
+    }
+    return res.status(201).json({ success: true, jobId: result.jobId });
+  } catch (error) {
+    console.error('Request content calendar error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to request content calendar',
       message: error.message
     });
   }
@@ -859,12 +997,20 @@ router.get('/:id', async (req, res) => {
 
     const audience = audienceResult.rows[0];
 
-    const topicsResult = await db.query(`
-      SELECT id, title, description, category
-      FROM content_topics 
-      WHERE audience_id = $1
-      ORDER BY created_at DESC
-    `, [id]);
+    // content_topics: select only columns in base schema (no 'category' - not in core table)
+    let topicsRows = [];
+    try {
+      const topicsResult = await db.query(`
+        SELECT id, title, description, subheader, engagement_score
+        FROM content_topics
+        WHERE audience_id = $1
+        ORDER BY created_at DESC
+      `, [id]);
+      topicsRows = topicsResult.rows;
+    } catch (topicsErr) {
+      // Schema mismatch (e.g. column "category" does not exist in some DBs)
+      console.warn('content_topics query failed, returning empty topics:', topicsErr?.message);
+    }
 
     const keywordsResult = await db.query(`
       SELECT id, keyword, search_volume, competition, relevance_score
@@ -872,6 +1018,33 @@ router.get('/:id', async (req, res) => {
       WHERE audience_id = $1
       ORDER BY relevance_score DESC
     `, [id]);
+
+    let contentIdeas = parseContentIdeas(audience.content_ideas);
+    const testbed = isCalendarTestbed(req);
+    if (testbed && contentIdeas.length === 0) {
+      contentIdeas = getFixtureContentIdeas();
+    }
+
+    let trendingTopicsUsed = [];
+    if (audience.content_calendar_trending_topics != null) {
+      const raw = audience.content_calendar_trending_topics;
+      trendingTopicsUsed = Array.isArray(raw)
+        ? raw
+        : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+    }
+
+    const calendarReady = contentIdeas.length > 0 || audience.content_calendar_generated_at;
+    let contentCalendarJobId = null;
+    if (!calendarReady && userContext.isAuthenticated && userContext.userId) {
+      const jobRow = await db.query(
+        `SELECT id FROM jobs
+         WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+           AND user_id = $1 AND (input->'strategyIds') @> to_jsonb(ARRAY[$2]::text[])
+         ORDER BY created_at DESC LIMIT 1`,
+        [userContext.userId, id]
+      );
+      if (jobRow.rows.length > 0) contentCalendarJobId = jobRow.rows[0].id;
+    }
 
     res.json({
       success: true,
@@ -884,9 +1057,13 @@ router.get('/:id', async (req, res) => {
         business_value: safeParse(audience.business_value, 'business_value_get', audience.id),
         priority: audience.priority,
         pitch: audience.pitch,
+        content_ideas: contentIdeas.length > 0 ? contentIdeas : null,
+        content_calendar_generated_at: contentIdeas.length > 0 ? (audience.content_calendar_generated_at || (testbed ? new Date().toISOString() : null)) : null,
+        content_calendar_trending_topics: trendingTopicsUsed.length > 0 ? trendingTopicsUsed : null,
+        ...(contentCalendarJobId && { content_calendar_job_id: contentCalendarJobId }),
         created_at: audience.created_at,
         updated_at: audience.updated_at,
-        topics: topicsResult.rows,
+        topics: topicsRows,
         keywords: keywordsResult.rows
       }
     });
@@ -905,6 +1082,56 @@ router.get('/:id', async (req, res) => {
       error: 'Failed to retrieve audience',
       message: error.message
     });
+  }
+});
+
+// Refresh a stale/expired DALL-E image for an audience
+router.post('/:id/refresh-image', async (req, res) => {
+  try {
+    const userContext = extractUserContext(req);
+    validateUserContext(userContext);
+
+    const { id } = req.params;
+    const audienceResult = await db.query(
+      `SELECT id, target_segment, customer_problem, image_url
+       FROM audiences WHERE id = $1 AND (user_id = $2 OR session_id = $3)`,
+      [id, userContext.userId || null, userContext.sessionId || null]
+    );
+
+    if (audienceResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Audience not found' });
+    }
+
+    const audience = audienceResult.rows[0];
+
+    // Check if existing URL is still valid — skip regeneration if it is
+    if (audience.image_url) {
+      try {
+        const check = await fetch(audience.image_url, { method: 'HEAD' });
+        if (check.ok) {
+          return res.json({ success: true, image_url: audience.image_url, refreshed: false });
+        }
+      } catch { /* expired or unreachable — fall through to regenerate */ }
+    }
+
+    // Regenerate image via DALL-E
+    const scenario = {
+      targetSegment: audience.target_segment,
+      customerProblem: audience.customer_problem,
+    };
+    const newImageUrl = await openaiService.generateAudienceImage(scenario);
+
+    if (newImageUrl) {
+      await db.query(
+        'UPDATE audiences SET image_url = $1, updated_at = NOW() WHERE id = $2',
+        [newImageUrl, id]
+      );
+    }
+
+    return res.json({ success: true, image_url: newImageUrl || null, refreshed: true });
+  } catch (error) {
+    console.error('refresh-image error:', error.message);
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

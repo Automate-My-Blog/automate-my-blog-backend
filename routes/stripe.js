@@ -7,7 +7,54 @@ import emailService from '../services/email.js';
 import strategyWebhooks from '../services/strategy-subscription-webhooks.js';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy init so server can start (health, CORS) when STRIPE_SECRET_KEY is missing.
+let _stripe = null;
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is required in environment variables');
+  }
+  if (!_stripe) _stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  return _stripe;
+}
+
+/**
+ * GET /api/v1/stripe/session-status
+ * Retrieve Stripe checkout session status after redirect.
+ * If the session is a strategy purchase, activates the subscription (idempotent).
+ */
+router.get('/session-status', async (req, res) => {
+  const { session_id } = req.query;
+  const userId = req.user?.userId;
+
+  if (!session_id) {
+    return res.status(400).json({ success: false, error: 'session_id is required' });
+  }
+
+  try {
+    const session = await getStripe().checkout.sessions.retrieve(session_id);
+
+    // If this is a strategy purchase and payment is complete, activate it (idempotent fallback)
+    if (session.payment_status === 'paid' && strategyWebhooks.isStrategySubscription(session)) {
+      try {
+        await strategyWebhooks.handleStrategyCheckoutCompleted(session);
+      } catch (activationError) {
+        // Non-fatal: may already be activated by webhook
+        console.warn('⚠️ session-status activation error (may already be active):', activationError.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+      payment_status: session.payment_status,
+      status: session.status,
+      customer_email: session.customer_details?.email
+    });
+  } catch (error) {
+    console.error('❌ Error retrieving session status:', error.message);
+    return res.status(500).json({ success: false, error: 'Failed to retrieve session status', message: error.message });
+  }
+});
 
 /**
  * Create Checkout Session
@@ -46,7 +93,7 @@ router.post('/create-checkout-session', async (req, res) => {
     console.log(`Success URL: ${successUrl}`);
     console.log(`Cancel URL: ${cancelUrl}`);
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       customer_email: userEmail,
       line_items: [
         {
@@ -91,7 +138,7 @@ router.post('/webhook', async (req, res) => {
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(
+    event = Stripe.webhooks.constructEvent(
       req.body,
       sig,
       process.env.STRIPE_WEBHOOK_SECRET
@@ -138,7 +185,10 @@ async function handleCheckoutCompleted(session) {
 
   // Check if this is a strategy subscription (individual or bundle)
   if (strategyWebhooks.isStrategySubscription(session)) {
-    console.log('🎯 Strategy subscription detected, delegating to strategy webhook handler');
+    console.log('🎯 Strategy subscription detected, delegating to strategy webhook handler', {
+      sessionId: session.id,
+      metadata: session.metadata
+    });
     await strategyWebhooks.handleStrategyCheckoutCompleted(session);
     return; // Early return - strategy subscriptions handled separately
   }

@@ -1,0 +1,15 @@
+CALL SUMMARY — Strategy sync
+
+Attendees: Captain, Crew
+Date: 2026-02-12
+
+Bearing: We're simplifying. One priority per team. No more drift.
+
+Decisions:
+- Drop daily standup. Replace with one async update: "What's your one thing?"
+- All external comms: one message per email. End with a question. Clear?
+- Chart due Friday. Each lead sends one page. Ship shape.
+
+Next: Lock the chart and share with all hands. Steady as she goes.
+
+Action: Captain to send recap by EOD. Crew to confirm bearing.

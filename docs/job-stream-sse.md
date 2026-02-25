@@ -113,6 +113,34 @@ For `website_analysis` jobs, **progress-update** events include a **phase** fiel
 
 The **detail** field may include context like `"5 audiences"` when processing multiple items. Use **phase** for the granular "thinking" text and **currentStep** for the main step label.
 
+## Content calendar granular progress
+
+For `content_calendar` jobs, **progress-update** events include granular phases so the UI can show step-by-step progress (and, for multiple strategies, "Strategy X of Y").
+
+### progress-update.data fields (content_calendar)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| progress | number | 0–100 |
+| currentStep | string | Human-readable label, e.g. "Strategy 1 of 3: Generating 30-day ideas with AI..." |
+| estimatedTimeRemaining | number \| null | Seconds (or null when done) |
+| phase | string | One of: `audience`, `organization`, `keywords`, `generating`, `saving` |
+| strategyIndex | number | 0-based index of current strategy (when multiple) |
+| strategyTotal | number | Total number of strategies in the job |
+| strategyId | string \| null | Current audience/strategy id (for debugging or deep links) |
+
+### Phases per strategy
+
+| phase | currentStep (single strategy) |
+|-------|-------------------------------|
+| audience | Loading audience... |
+| organization | Loading organization context... |
+| keywords | Loading SEO keywords... |
+| generating | Generating 30-day ideas with AI... |
+| saving | Saving calendar... |
+
+For multiple strategies, **currentStep** is prefixed with `"Strategy X of Y: "` (e.g. "Strategy 2 of 3: Generating 30-day ideas with AI..."). Progress runs from 5% (starting) through 95% (last phase of last strategy), then 100% with currentStep "Complete" before the **complete** event.
+
 ## Files
 
 - `routes/jobs.js` — GET `/:jobId/stream`, auth, stream-manager.subscribeToJob, 10 min maxAgeMs

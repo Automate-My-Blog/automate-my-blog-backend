@@ -41,6 +41,7 @@
   ],
   "env": {
     "NODE_ENV": "production",
-    "VERCEL": "1"
+    "VERCEL": "1",
+    "ENABLE_CALENDAR_TESTBED": "1"
   }
 }

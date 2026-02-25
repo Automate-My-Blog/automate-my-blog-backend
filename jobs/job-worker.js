@@ -1,5 +1,5 @@
 /**
- * BullMQ worker for async jobs: website_analysis, content_generation.
+ * BullMQ worker for async jobs: website_analysis, content_generation, analyze_voice_sample.
  * Run as a separate process: node jobs/job-worker.js
  * Requires REDIS_URL and DATABASE_URL.
  */
@@ -17,6 +17,7 @@ import {
   isRedisUrlValid
 } from '../services/job-queue.js';
 import { getJobEventsChannel, getJobNarrativeChannel } from '../utils/job-stream-channels.js';
+import projectsService from '../services/projects.js';
 
 const raw = process.env.REDIS_URL || '';
 const url = normalizeRedisUrl(raw);
@@ -227,6 +228,132 @@ async function processContentGeneration(jobId, input, context) {
   };
 }
 
+async function processAnalyzeVoiceSample(jobId, input) {
+  const { voiceSampleId, organizationId } = input || {};
+  if (!voiceSampleId || !organizationId) {
+    throw new Error('analyze_voice_sample job requires voiceSampleId and organizationId in input');
+  }
+  const { default: voiceAnalyzerService } = await import('../services/voice-analyzer.js');
+  await voiceAnalyzerService.analyzeVoiceSample(voiceSampleId);
+  return { success: true, voiceSampleId, organizationId };
+}
+
+async function processContentCalendar(jobId, input, context) {
+  const userId = context.userId;
+  if (!userId) throw new Error('content_calendar job requires userId');
+
+  const { strategyIds } = input || {};
+  if (!Array.isArray(strategyIds) || strategyIds.length === 0) {
+    throw new Error('content_calendar job requires non-empty strategyIds in input');
+  }
+
+  const contentCalendarDays = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
+  const totalStrategies = strategyIds.length;
+  const {
+    generateContentCalendarsForStrategies,
+    fetchTrendsForContentCalendar,
+    CONTENT_CALENDAR_PHASES
+  } = await import('../services/content-calendar-service.js');
+  const phasesPerStrategy = CONTENT_CALENDAR_PHASES.length;
+  const totalSteps = totalStrategies * phasesPerStrategy;
+
+  const progressFromStep = (strategyIndex, phase) => {
+    const phaseIndex = CONTENT_CALENDAR_PHASES.indexOf(phase);
+    const step = strategyIndex * phasesPerStrategy + (phaseIndex >= 0 ? phaseIndex : 0);
+    return Math.min(95, 5 + Math.round((step / totalSteps) * 90));
+  };
+
+  const onProgress = ({ phase, message, strategyIndex, strategyTotal, strategyId }) => {
+    const progress = progressFromStep(strategyIndex ?? 0, phase);
+    const currentStepLabel = (strategyTotal ?? 1) > 1
+      ? `Strategy ${(strategyIndex ?? 0) + 1} of ${strategyTotal}: ${message}`
+      : message;
+    const estimatedRemaining = Math.max(10, Math.round((1 - progress / 100) * 90));
+    updateJobProgress(jobId, {
+      progress,
+      current_step: currentStepLabel,
+      estimated_seconds_remaining: estimatedRemaining
+    }).catch((e) => console.warn('Content calendar progress update failed:', e.message));
+    publishJobStreamEvent(connection, jobId, 'progress-update', {
+      progress,
+      currentStep: currentStepLabel,
+      estimatedTimeRemaining: estimatedRemaining,
+      phase,
+      strategyIndex: strategyIndex ?? 0,
+      strategyTotal: strategyTotal ?? 1,
+      strategyId: strategyId ?? null
+    });
+  };
+
+  await updateJobProgress(jobId, {
+    progress: 5,
+    current_step: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
+    estimated_seconds_remaining: 60
+  }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 5,
+    currentStep: totalStrategies > 1 ? `Starting (${totalStrategies} strategies)...` : `Generating ${contentCalendarDays}-day content calendar...`,
+    estimatedTimeRemaining: 60
+  });
+
+  // One-time trends fetch when user has strategies with keywords (Trends "connected") so calendar is informed by fresh data
+  let trendsSummary = { trendsFetched: false, trendsKeywordCount: 0, trendsFetchedCount: 0 };
+  try {
+    const trendsResult = await fetchTrendsForContentCalendar(userId, strategyIds);
+    if (trendsResult.keywordCount > 0) {
+      trendsSummary = {
+        trendsFetched: true,
+        trendsKeywordCount: trendsResult.keywordCount,
+        trendsFetchedCount: trendsResult.fetched
+      };
+      await updateJobProgress(jobId, {
+        progress: 8,
+        current_step: 'Fetching trending topics...',
+        estimated_seconds_remaining: 55
+      }).catch(() => {});
+      publishJobStreamEvent(connection, jobId, 'progress-update', {
+        progress: 8,
+        currentStep: 'Fetching trending topics...',
+        estimatedTimeRemaining: 55,
+        phase: 'trends',
+        trendsKeywordCount: trendsResult.keywordCount,
+        trendsFetchedCount: trendsResult.fetched
+      });
+    }
+  } catch (e) {
+    console.warn('Content calendar: trends pre-fetch failed (continuing without):', e.message);
+  }
+
+  const { results } = await generateContentCalendarsForStrategies(strategyIds, { userId, onProgress });
+
+  const succeeded = results.filter((r) => r.success).length;
+  const failed = results.filter((r) => !r.success);
+
+  await updateJobProgress(jobId, {
+    progress: 100,
+    current_step: 'Complete',
+    estimated_seconds_remaining: null
+  }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 100,
+    currentStep: 'Complete',
+    estimatedTimeRemaining: null
+  });
+
+  if (failed.length > 0) {
+    console.warn(`content_calendar job: ${failed.length} strategy(ies) failed:`, failed.map((f) => f.strategyId));
+  }
+
+  return {
+    success: succeeded > 0,
+    strategyCount: strategyIds.length,
+    succeeded,
+    failed: failed.length,
+    results,
+    ...trendsSummary
+  };
+}
+
 const processor = async (bullJob) => {
   const { jobId } = bullJob.data;
   const row = await getJobRow(jobId);
@@ -274,6 +401,10 @@ const processor = async (bullJob) => {
       result = await processWebsiteAnalysis(jobId, input, context);
     } else if (row.type === 'content_generation') {
       result = await processContentGeneration(jobId, input, context);
+    } else if (row.type === 'analyze_voice_sample') {
+      result = await processAnalyzeVoiceSample(jobId, input);
+    } else if (row.type === 'content_calendar') {
+      result = await processContentCalendar(jobId, input, context);
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }
@@ -294,6 +425,23 @@ const processor = async (bullJob) => {
         ...result,
         analysis: { ...result.analysis, scenarios: result.scenarios }
       };
+    }
+
+    // Persist website analysis to project so GET /api/v1/user/recent-analysis returns it for the dashboard
+    if (row.type === 'website_analysis' && context.userId && result?.analysis && input?.url) {
+      try {
+        const upserted = await projectsService.upsertProjectFromAnalysis(
+          context.userId,
+          input.url,
+          result.analysis,
+          result.scenarios
+        );
+        if (upserted.success) {
+          console.log('✅ [job-worker] Persisted website analysis to project for dashboard:', upserted.projectId);
+        }
+      } catch (projectErr) {
+        console.warn('[job-worker] Failed to persist analysis to project for dashboard:', projectErr.message);
+      }
     }
 
     await updateJobProgress(jobId, {

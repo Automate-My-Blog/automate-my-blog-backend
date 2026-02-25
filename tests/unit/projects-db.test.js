@@ -187,6 +187,7 @@ describe('projects (DB path)', () => {
       expect(out).not.toBeNull();
       expect(out.id).toBe('proj-1');
       expect(out.websiteUrl).toBe('https://example.com');
+      expect(out.businessName).toBe('Acme'); // from business_analysis.name
       expect(out.scenarios).toEqual(['a']);
     });
 

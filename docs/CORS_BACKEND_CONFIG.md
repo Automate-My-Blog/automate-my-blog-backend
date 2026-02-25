@@ -70,6 +70,10 @@ If the backend code allows the origin and handles OPTIONS but you still see "No 
 
 - **Deployment Protection** can answer OPTIONS before the request reaches your serverless function, and that response may not include CORS headers. In **Vercel** → Project → **Settings** → **Deployment Protection**, check **OPTIONS Allowlist** and add paths (e.g. `/api/*`) so OPTIONS requests are forwarded to your app, which then responds with CORS headers.
 
+### When Origin is missing on preflight
+
+If the `Origin` header is missing on OPTIONS (e.g. stripped by a proxy), set **`CORS_OPTIONS_FALLBACK_ORIGIN`** in the backend environment so the preflight response still includes CORS headers. Example for staging: `CORS_OPTIONS_FALLBACK_ORIGIN=https://staging.automatemyblog.com`. The backend also allows any `https` origin whose host is `automatemyblog.com` or a subdomain (e.g. `staging.automatemyblog.com`).
+
 ---
 
 The frontend cannot fix CORS; the server must send the `Access-Control-Allow-Origin` header (or allow the origin in its CORS config).

@@ -9,6 +9,7 @@ import * as jobQueue from '../services/job-queue.js';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
@@ -31,15 +32,73 @@ async function getJobStatusWithRetry(jobId, ctx) {
   return null;
 }
 
+/** Parse sessionId from request URL (fallback when req.query not populated, e.g. Vercel serverless). */
+function sessionIdFromUrl(req) {
+  const url = req.originalUrl || req.url || '';
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return params.get('sessionId') || params.get('sessionid') || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Get query object from URL string (fallback when req.query is empty on GET, e.g. some serverless). */
+function queryFromUrlSync(req) {
+  const url = req.originalUrl || req.url || '';
+  if (!url || typeof url !== 'string') return null;
+  const q = url.indexOf('?');
+  if (q === -1) return null;
+  try {
+    const params = new URLSearchParams(url.slice(q));
+    return Object.fromEntries(params.entries());
+  } catch {
+    return null;
+  }
+}
+
 function getJobContext(req) {
   let userId = req.user?.userId ?? null;
-  const sessionId = req.headers['x-session-id'] || req.body?.sessionId || req.query?.sessionId || null;
-  if (!userId && req.query?.token) {
-    try {
-      const decoded = authService.verifyToken(String(req.query.token).trim());
-      if (decoded?.userId) userId = decoded.userId;
-    } catch {
-      // leave userId null
+  // Prefer header/body, then req.query, then URL string (EventSource can only send sessionId in URL).
+  let rawSessionId =
+    req.headers['x-session-id'] ||
+    req.body?.sessionId ||
+    req.query?.sessionId ||
+    req.query?.sessionid ||
+    sessionIdFromUrl(req) ||
+    null;
+  if (rawSessionId == null && req.method === 'GET') {
+    const q = queryFromUrlSync(req);
+    if (q) rawSessionId = q.sessionId || q.sessionid || null;
+  }
+  const sessionId =
+    rawSessionId == null
+      ? null
+      : (Array.isArray(rawSessionId) ? rawSessionId[0] : rawSessionId)
+        .toString()
+        .trim() || null;
+  if (!userId) {
+    let token = req.query?.token ?? null;
+    if (!token && (req.originalUrl || req.url || '').includes('token=')) {
+      try {
+        const url = req.originalUrl || req.url || '';
+        const q = url.indexOf('?');
+        if (q !== -1) token = new URLSearchParams(url.slice(q)).get('token');
+      } catch { /* ignore */ }
+    }
+    if (!token && req.method === 'GET') {
+      const q = queryFromUrlSync(req);
+      if (q?.token) token = q.token;
+    }
+    if (token) {
+      try {
+        const decoded = authService.verifyToken(String(token).trim());
+        if (decoded?.userId) userId = decoded.userId;
+      } catch {
+        // leave userId null
+      }
     }
   }
   return { userId, sessionId };
@@ -64,24 +123,37 @@ router.get('/', (req, res) => {
   res.json({ ok: true, message: 'Jobs API', endpoints: ['POST /website-analysis', 'POST /content-generation', 'GET /:jobId/status', 'GET /:jobId/stream', 'GET /:jobId/narrative-stream', 'POST /:jobId/retry', 'POST /:jobId/cancel'] });
 });
 
+function isUserNotFoundError(e) {
+  return e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey');
+}
+
+function isRedisUnavailableError(e) {
+  return e.message?.includes('REDIS_URL');
+}
+
+function isBadRequestError(e) {
+  return e.statusCode === 400;
+}
+
 /** Map job-layer errors to HTTP; preserves existing job API shape { success: false, error, message }. */
 function sendJobError(res, e, defaultMessage = 'Internal error') {
-  if (e.name === 'UserNotFoundError' || (e.code === '23503' && e.constraint === 'jobs_user_id_fkey')) {
+  if (isUserNotFoundError(e)) {
     return res.status(401).json({
       success: false,
       error: 'Unauthorized',
       message: 'User not found; token may be for a deleted or invalid user'
     });
   }
-  if (e.message?.includes('REDIS_URL')) {
+  if (e instanceof ServiceUnavailableError || isRedisUnavailableError(e)) {
     return res.status(503).json({
       success: false,
       error: 'Service unavailable',
       message: e.message || 'Job queue is not configured (REDIS_URL required)'
     });
   }
-  if (e.statusCode === 400) {
-    return res.status(400).json({
+  if (e instanceof InvariantViolation || isBadRequestError(e)) {
+    const statusCode = e instanceof InvariantViolation && e.statusCode >= 400 && e.statusCode < 600 ? e.statusCode : 400;
+    return res.status(statusCode).json({
       success: false,
       error: 'Bad request',
       message: e.message || 'Bad request'

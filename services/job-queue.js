@@ -1,23 +1,25 @@
 /**
  * Job queue service (BullMQ + Redis)
  * Create jobs, get status, retry, cancel. Worker updates DB directly.
+ *
+ * Allowed state transitions:
+ * - Retry: only when status === 'failed' → reset to queued and re-enqueue.
+ * - Cancel: only when status in ('queued', 'running') → set cancelled_at; worker marks failed.
  */
 
 import { Queue } from 'bullmq';
 import IORedis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
+import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const QUEUE_NAME = 'amb-jobs';
-const JOB_TYPES = ['website_analysis', 'content_generation'];
-
-/** Allowed job status values (matches DB constraint). */
-export const JOB_STATUSES = Object.freeze(['queued', 'running', 'succeeded', 'failed']);
+const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample', 'content_calendar'];
 
 /** Only failed jobs can be retried. */
-const RETRIABLE_STATUS = 'failed';
+export const RETRIABLE_STATUS = 'failed';
 /** Only queued or running jobs can be cancelled (worker checks cancelled_at). */
-const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
+export const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
 
 let _connection = null;
 let _queue = null;
@@ -74,28 +76,31 @@ function getQueue() {
 function ensureRedis() {
   const raw = process.env.REDIS_URL;
   const url = normalizeRedisUrl(raw);
-  if (!url) throw new Error('REDIS_URL is required for job queue');
+  if (!url) {
+    throw new ServiceUnavailableError('REDIS_URL is required for job queue');
+  }
   if (!isRedisUrlValid(url)) {
-    throw new Error(
+    throw new ServiceUnavailableError(
       'REDIS_URL must be a full TCP URL (e.g. rediss://default:token@host.upstash.io:6379), not a path or empty host'
     );
   }
-  if (!getConnection()) throw new Error('REDIS_URL is required for job queue');
+  if (!getConnection()) {
+    throw new ServiceUnavailableError('REDIS_URL is required for job queue');
+  }
 }
 
 /**
- * Ownership: user_id match XOR session_id match. 404 if no match.
+ * Ownership: caller has access if they match by user_id or by session_id. 404 if no match.
+ * Compare as strings so query/header sessionId and DB session_id (e.g. UUID) match reliably.
  */
 async function getJobForAccess(jobId, { userId, sessionId }) {
-  const q = await db.query(
-    `SELECT * FROM jobs WHERE id = $1`,
-    [jobId]
-  );
+  const q = await db.query(`SELECT * FROM jobs WHERE id = $1`, [jobId]);
   const row = q.rows[0];
   if (!row) return null;
-  const ownByUser = userId && row.user_id && row.user_id === userId;
-  const ownBySession = sessionId && row.session_id && row.session_id === sessionId;
-  if (!ownByUser && !ownBySession) return null;
+  const ownByUser = userId != null && String(row.user_id) === String(userId);
+  const ownBySession = sessionId != null && sessionId !== '' && String(row.session_id) === String(sessionId);
+  const hasAccess = ownByUser || ownBySession;
+  if (!hasAccess) return null;
   return row;
 }
 
@@ -129,13 +134,14 @@ export class UserNotFoundError extends Error {
  * does not exist in DB (e.g. JWT for deleted user), we fall back to session-only when
  * sessionId is present so anonymous flow still works; otherwise throw UserNotFoundError.
  *
- * @param {string} type - 'website_analysis' | 'content_generation'
+ * @param {string} type - 'website_analysis' | 'content_generation' | 'analyze_voice_sample' | 'content_calendar'
  * @param {object} input - Job payload (stored for retry)
  * @param {object} context - { userId?, sessionId?, tenantId? }
+ * @param {object} [queueOptions] - Optional BullMQ job options (e.g. attempts, backoff)
  * @returns {Promise<{ jobId: string }>}
  * @throws {UserNotFoundError} when context.userId is set, user does not exist, and no sessionId
  */
-export async function createJob(type, input, context = {}) {
+export async function createJob(type, input, context = {}, queueOptions = {}) {
   if (!JOB_TYPES.includes(type)) throw new Error(`Invalid job type: ${type}`);
   let { userId, sessionId, tenantId } = context;
   if (!userId && !sessionId) throw new Error('Either userId or sessionId is required');
@@ -161,9 +167,77 @@ export async function createJob(type, input, context = {}) {
   );
 
   const queue = getQueue();
-  await queue.add(type, { jobId }, { jobId });
+  await queue.add(type, { jobId }, { jobId, ...queueOptions });
 
   return { jobId };
+}
+
+/**
+ * Check if a content_calendar job is already queued or running for the same user and strategy set.
+ * Used to avoid duplicate jobs (e.g. Stripe webhook retries).
+ * @param {string} userId
+ * @param {string[]} strategyIds
+ * @returns {Promise<boolean>}
+ */
+export async function hasContentCalendarJobInProgress(userId, strategyIds) {
+  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) return false;
+  const r = await db.query(
+    `SELECT 1 FROM jobs
+     WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+       AND user_id = $1 AND (input->'strategyIds') = to_jsonb($2::text[])
+     LIMIT 1`,
+    [userId, strategyIds]
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * Create a content calendar generation job. Call after strategy purchase (individual or bundle).
+ * Uses retries (3 attempts, exponential backoff) for production resilience.
+ * @param {string[]} strategyIds - Array of audience IDs (strategy_id = audiences.id)
+ * @param {string} userId - UUID of user (required)
+ * @returns {Promise<{ jobId: string }|null>} jobId if enqueued, null if Redis unavailable or duplicate skipped
+ */
+export async function createContentCalendarJob(strategyIds, userId) {
+  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) {
+    throw new Error('userId and non-empty strategyIds are required');
+  }
+  const u = await db.query('SELECT id FROM users WHERE id = $1', [userId]);
+  if (!u.rows.length) throw new UserNotFoundError(userId);
+
+  try {
+    const inProgress = await hasContentCalendarJobInProgress(userId, strategyIds);
+    if (inProgress) {
+      console.warn('[job-queue] content_calendar job already in progress for user', userId, 'strategies', strategyIds);
+      return null;
+    }
+    return await createJob('content_calendar', { strategyIds }, { userId }, {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 }
+    });
+  } catch (e) {
+    if (e instanceof ServiceUnavailableError || e?.message?.includes('REDIS')) {
+      console.warn('[job-queue] Redis unavailable, skipping content_calendar job:', e?.message);
+      return null;
+    }
+    throw e;
+  }
+}
+
+/**
+ * Create a voice sample analysis job. Call after inserting a voice_samples row.
+ * @param {string} voiceSampleId - UUID of voice_samples.id
+ * @param {string} organizationId - UUID of organization (tenant_id)
+ * @param {string} userId - UUID of user (required for voice jobs)
+ * @returns {Promise<{ jobId: string }>}
+ */
+export async function createVoiceAnalysisJob(voiceSampleId, organizationId, userId) {
+  if (!userId) throw new Error('userId is required for voice analysis job');
+  return createJob(
+    'analyze_voice_sample',
+    { voiceSampleId, organizationId },
+    { userId, tenantId: organizationId }
+  );
 }
 
 /**
@@ -186,9 +260,7 @@ export async function retryJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
   if (row.status !== RETRIABLE_STATUS) {
-    const err = new Error('Job is not in failed state');
-    err.statusCode = 400;
-    throw err;
+    throw new InvariantViolation('Job is not in failed state', 400);
   }
 
   await db.query(
@@ -212,9 +284,7 @@ export async function cancelJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
   if (!CANCELLABLE_STATUSES.includes(row.status)) {
-    const err = new Error('Job is not cancellable');
-    err.statusCode = 400;
-    throw err;
+    throw new InvariantViolation('Job is not cancellable', 400);
   }
 
   await db.query(

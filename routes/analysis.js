@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../services/database.js';
 import DatabaseAuthService from '../services/auth-database.js';
+import projectsService from '../services/projects.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
 import openaiService from '../services/openai.js';
 
@@ -108,13 +109,13 @@ router.post('/adopt-session', async (req, res) => {
       // Commit the transaction
       await db.query('COMMIT');
 
-      const adoptionData = adoptionResult.rows[0] || { 
-        adopted_organizations_count: 0, 
+      const adoptionData = adoptionResult.rows[0] || {
+        adopted_organizations_count: 0,
         adopted_intelligence_count: 0,
         latest_organization_data: null,
         latest_intelligence_data: null
       };
-      
+
       console.log(`✅ Organization intelligence session adoption completed:`, {
         organizationsAdopted: adoptionData.adopted_organizations_count,
         intelligenceRecordsAdopted: adoptionData.adopted_intelligence_count,
@@ -123,8 +124,63 @@ router.post('/adopt-session', async (req, res) => {
       });
 
       // Combine organization and intelligence data for analysis response
-      const orgData = adoptionData.latest_organization_data || {};
-      const intelData = adoptionData.latest_intelligence_data || {};
+      let orgData = adoptionData.latest_organization_data || {};
+      let intelData = adoptionData.latest_intelligence_data || {};
+
+      // Fallback: when the session's org came from a cache hit (owned by another user,
+      // session_id = NULL), the DB function finds nothing to adopt. Look up the org/intel
+      // via the user's own audience rows, which were backfilled from the cached intelligence.
+      const _orgFromDB = adoptionData.latest_organization_data;
+      const _orgIsEmpty = !_orgFromDB || Object.keys(_orgFromDB).length === 0;
+      if (adoptionData.adopted_organizations_count === 0 && _orgIsEmpty) {
+        try {
+          const fallbackResult = await db.query(
+            `SELECT
+               o.id, o.name, o.business_type, o.industry_category, o.business_model,
+               o.description, o.target_audience, o.brand_voice, o.website_goals, o.website_url,
+               oi.customer_scenarios, oi.business_value_assessment,
+               oi.customer_language_patterns, oi.search_behavior_insights, oi.seo_opportunities,
+               oi.content_strategy_recommendations, oi.competitive_intelligence,
+               oi.analysis_confidence_score, oi.data_sources, oi.ai_model_used,
+               oi.raw_openai_response, oi.is_current, oi.narrative_analysis,
+               oi.narrative_confidence, oi.key_insights
+             FROM audiences a
+             JOIN organization_intelligence oi ON a.organization_intelligence_id = oi.id
+             JOIN organizations o ON oi.organization_id = o.id
+             WHERE a.user_id = $1
+             ORDER BY a.created_at DESC
+             LIMIT 1`,
+            [userId]
+          );
+          if (fallbackResult.rows.length > 0) {
+            const row = fallbackResult.rows[0];
+            console.log(`🔍 Analysis adopt-session: found org via audience fallback (cache-hit path): ${row.name}`);
+            orgData = {
+              name: row.name, business_type: row.business_type,
+              industry_category: row.industry_category, business_model: row.business_model,
+              description: row.description, target_audience: row.target_audience,
+              brand_voice: row.brand_voice, website_goals: row.website_goals,
+              website_url: row.website_url
+            };
+            intelData = {
+              customer_scenarios: row.customer_scenarios,
+              business_value_assessment: row.business_value_assessment,
+              customer_language_patterns: row.customer_language_patterns,
+              search_behavior_insights: row.search_behavior_insights,
+              seo_opportunities: row.seo_opportunities,
+              content_strategy_recommendations: row.content_strategy_recommendations,
+              competitive_intelligence: row.competitive_intelligence,
+              analysis_confidence_score: row.analysis_confidence_score,
+              data_sources: row.data_sources, ai_model_used: row.ai_model_used,
+              raw_openai_response: row.raw_openai_response, is_current: row.is_current,
+              narrative_analysis: row.narrative_analysis,
+              narrative_confidence: row.narrative_confidence, key_insights: row.key_insights
+            };
+          }
+        } catch (fallbackErr) {
+          console.warn('⚠️ Analysis adopt-session audience fallback failed:', fallbackErr.message);
+        }
+      }
       
       const analysis = {
         // Organization data
@@ -137,8 +193,8 @@ router.post('/adopt-session', async (req, res) => {
         brandVoice: orgData.brand_voice,
         websiteGoals: orgData.website_goals,
         websiteUrl: orgData.website_url,
-        
-        // Intelligence data  
+
+        // Intelligence data
         customerScenarios: intelData.customer_scenarios,
         businessValueAssessment: intelData.business_value_assessment,
         customerLanguagePatterns: intelData.customer_language_patterns,
@@ -157,6 +213,24 @@ router.post('/adopt-session', async (req, res) => {
         narrativeConfidence: intelData.narrative_confidence,
         keyInsights: intelData.key_insights
       };
+
+      // Persist adopted analysis to projects so GET /api/v1/user/recent-analysis returns it for the dashboard
+      const websiteUrl = orgData.website_url || adoptionData.latest_organization_data?.website_url;
+      if (websiteUrl) {
+        try {
+          const scenarios = Array.isArray(intelData.customer_scenarios)
+            ? intelData.customer_scenarios
+            : (typeof intelData.customer_scenarios === 'string'
+              ? (safeParse(intelData.customer_scenarios, 'customer_scenarios', 'adopt') || [])
+              : []);
+          const upserted = await projectsService.upsertProjectFromAnalysis(userId, websiteUrl, analysis, scenarios);
+          if (upserted.success) {
+            console.log('✅ Persisted adopted analysis to project for recent-analysis:', upserted.projectId);
+          }
+        } catch (projectErr) {
+          console.warn('Failed to persist adopted analysis to project for dashboard:', projectErr.message);
+        }
+      }
 
       // Format response following same pattern as other adoption endpoints
       const responseData = {

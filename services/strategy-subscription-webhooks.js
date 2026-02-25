@@ -2,12 +2,13 @@
  * Strategy Subscription Webhook Handlers
  *
  * Handles Stripe webhook events for strategy subscriptions and bundles:
- * - checkout.session.completed: Create subscription records
+ * - checkout.session.completed: Create subscription records, enqueue content calendar generation
  * - customer.subscription.updated: Reset post quotas on renewal
  * - customer.subscription.deleted: Mark subscriptions as cancelled
  */
 
 import db from './database.js';
+import { createContentCalendarJob } from './job-queue.js';
 
 /**
  * Handle strategy subscription checkout completion
@@ -125,6 +126,16 @@ async function handleBundleSubscriptionCreated(session) {
     await client.query('COMMIT');
     console.log(`✅ Linked ${strategiesResult.rows.length} strategies to bundle subscription`);
 
+    const strategyIds = strategiesResult.rows.map((s) => s.id);
+    try {
+      const jobResult = await createContentCalendarJob(strategyIds, userId);
+      if (jobResult?.jobId) {
+        console.log(`📅 Enqueued content calendar job ${jobResult.jobId} for ${strategyIds.length} strategy(ies)`);
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to enqueue content calendar job:', e?.message);
+    }
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error('❌ Failed to create bundle subscription:', error);
@@ -138,9 +149,18 @@ async function handleBundleSubscriptionCreated(session) {
  * Create individual strategy subscription record
  */
 async function handleIndividualStrategySubscriptionCreated(session) {
-  const metadata = session.metadata;
+  const metadata = session.metadata || {};
   const userId = metadata.user_id;
   const strategyId = metadata.strategy_id;
+
+  if (!userId || !strategyId) {
+    console.error('❌ Strategy checkout missing metadata:', { userId, strategyId, metadata });
+    throw new Error('Strategy checkout session missing user_id or strategy_id in metadata');
+  }
+
+  // amount_total can be null for some subscription checkouts; avoid NaN for amount_paid
+  const amountCents = session.amount_total != null ? session.amount_total : 0;
+  const amountPaid = amountCents / 100;
 
   try {
     await db.query(
@@ -163,18 +183,27 @@ async function handleIndividualStrategySubscriptionCreated(session) {
       [
         userId,
         strategyId,
-        metadata.billing_interval,
-        session.amount_total / 100, // Convert from cents
-        parseInt(metadata.posts_recommended || 8),
-        parseInt(metadata.posts_maximum || 40),
-        parseInt(metadata.posts_maximum || 40), // Start with full quota
-        session.subscription,
-        session.payment_intent,
-        session.customer
+        metadata.billing_interval || 'monthly',
+        amountPaid,
+        parseInt(metadata.posts_recommended || 8, 10),
+        parseInt(metadata.posts_maximum || 40, 10),
+        parseInt(metadata.posts_maximum || 40, 10), // Start with full quota
+        session.subscription || null,
+        session.payment_intent || null,
+        session.customer || null
       ]
     );
 
-    console.log(`✅ Created individual strategy subscription for strategy ${strategyId}, user ${userId}`);
+    console.log(`✅ Created individual strategy subscription for strategy ${strategyId}, user ${userId} (amount_paid=${amountPaid})`);
+
+    try {
+      const jobResult = await createContentCalendarJob([strategyId], userId);
+      if (jobResult?.jobId) {
+        console.log(`📅 Enqueued content calendar job ${jobResult.jobId} for strategy ${strategyId}`);
+      }
+    } catch (e) {
+      console.warn('⚠️ Failed to enqueue content calendar job:', e?.message);
+    }
 
   } catch (error) {
     console.error('❌ Failed to create individual strategy subscription:', error);
