@@ -17,6 +17,7 @@ import {
   isRedisUrlValid
 } from '../services/job-queue.js';
 import { getJobEventsChannel, getJobNarrativeChannel } from '../utils/job-stream-channels.js';
+import projectsService from '../services/projects.js';
 
 const raw = process.env.REDIS_URL || '';
 const url = normalizeRedisUrl(raw);
@@ -391,6 +392,23 @@ const processor = async (bullJob) => {
         ...result,
         analysis: { ...result.analysis, scenarios: result.scenarios }
       };
+    }
+
+    // Persist website analysis to project so GET /api/v1/user/recent-analysis returns it for the dashboard
+    if (row.type === 'website_analysis' && context.userId && result?.analysis && input?.url) {
+      try {
+        const upserted = await projectsService.upsertProjectFromAnalysis(
+          context.userId,
+          input.url,
+          result.analysis,
+          result.scenarios
+        );
+        if (upserted.success) {
+          console.log('✅ [job-worker] Persisted website analysis to project for dashboard:', upserted.projectId);
+        }
+      } catch (projectErr) {
+        console.warn('[job-worker] Failed to persist analysis to project for dashboard:', projectErr.message);
+      }
     }
 
     await updateJobProgress(jobId, {
