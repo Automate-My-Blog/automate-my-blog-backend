@@ -4,6 +4,15 @@
  */
 
 import db from './database.js';
+
+/** Phases used by job-worker for progress reporting (order must match generateAndSaveContentCalendar flow). */
+export const CONTENT_CALENDAR_PHASES = Object.freeze([
+  'audience',
+  'organization',
+  'keywords',
+  'generating',
+  'saving'
+]);
 import openaiService from './openai.js';
 import googleContentOptimizer from './google-content-optimizer.js';
 
