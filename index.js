@@ -751,6 +751,18 @@ app.post('/api/analyze-website', async (req, res, next) => {
       console.error('Failed to save organization intelligence to database:', saveError.message);
     }
 
+    // Persist analysis to projects so GET /api/v1/user/recent-analysis returns it for the dashboard
+    if (userId) {
+      try {
+        const upserted = await projectsService.upsertProjectFromAnalysis(userId, url, analysis);
+        if (upserted.success) {
+          console.log('✅ Persisted website analysis to project for dashboard:', upserted.projectId);
+        }
+      } catch (projectError) {
+        console.warn('Failed to persist analysis to project for dashboard:', projectError.message);
+      }
+    }
+
     // Generate narrative analysis via job queue
     let narrativeData = { narrativeGenerating: true };
 
