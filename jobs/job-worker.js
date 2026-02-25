@@ -249,7 +249,11 @@ async function processContentCalendar(jobId, input, context) {
 
   const contentCalendarDays = parseInt(process.env.CONTENT_CALENDAR_DAYS, 10) || 7;
   const totalStrategies = strategyIds.length;
-  const { generateContentCalendarsForStrategies, CONTENT_CALENDAR_PHASES } = await import('../services/content-calendar-service.js');
+  const {
+    generateContentCalendarsForStrategies,
+    fetchTrendsForContentCalendar,
+    CONTENT_CALENDAR_PHASES
+  } = await import('../services/content-calendar-service.js');
   const phasesPerStrategy = CONTENT_CALENDAR_PHASES.length;
   const totalSteps = totalStrategies * phasesPerStrategy;
 
@@ -292,6 +296,34 @@ async function processContentCalendar(jobId, input, context) {
     estimatedTimeRemaining: 60
   });
 
+  // One-time trends fetch when user has strategies with keywords (Trends "connected") so calendar is informed by fresh data
+  let trendsSummary = { trendsFetched: false, trendsKeywordCount: 0, trendsFetchedCount: 0 };
+  try {
+    const trendsResult = await fetchTrendsForContentCalendar(userId, strategyIds);
+    if (trendsResult.keywordCount > 0) {
+      trendsSummary = {
+        trendsFetched: true,
+        trendsKeywordCount: trendsResult.keywordCount,
+        trendsFetchedCount: trendsResult.fetched
+      };
+      await updateJobProgress(jobId, {
+        progress: 8,
+        current_step: 'Fetching trending topics...',
+        estimated_seconds_remaining: 55
+      }).catch(() => {});
+      publishJobStreamEvent(connection, jobId, 'progress-update', {
+        progress: 8,
+        currentStep: 'Fetching trending topics...',
+        estimatedTimeRemaining: 55,
+        phase: 'trends',
+        trendsKeywordCount: trendsResult.keywordCount,
+        trendsFetchedCount: trendsResult.fetched
+      });
+    }
+  } catch (e) {
+    console.warn('Content calendar: trends pre-fetch failed (continuing without):', e.message);
+  }
+
   const { results } = await generateContentCalendarsForStrategies(strategyIds, { userId, onProgress });
 
   const succeeded = results.filter((r) => r.success).length;
@@ -317,7 +349,8 @@ async function processContentCalendar(jobId, input, context) {
     strategyCount: strategyIds.length,
     succeeded,
     failed: failed.length,
-    results
+    results,
+    ...trendsSummary
   };
 }
 
