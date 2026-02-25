@@ -4,8 +4,32 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const ENCRYPTION_KEY = process.env.OAUTH_ENCRYPTION_KEY; // 32-byte hex key
+const ENCRYPTION_KEY = process.env.OAUTH_ENCRYPTION_KEY; // 32-byte key as 64 hex chars
 const ALGORITHM = 'aes-256-gcm';
+
+const REQUIRED_KEY_BYTES = 32;
+const REQUIRED_KEY_HEX_LENGTH = REQUIRED_KEY_BYTES * 2; // 64
+
+function getEncryptionKeyBuffer() {
+  if (!ENCRYPTION_KEY || typeof ENCRYPTION_KEY !== 'string') {
+    throw new Error('OAUTH_ENCRYPTION_KEY not configured in environment');
+  }
+  const trimmed = ENCRYPTION_KEY.trim();
+  if (trimmed.length !== REQUIRED_KEY_HEX_LENGTH) {
+    throw new Error(
+      `OAUTH_ENCRYPTION_KEY invalid key length: must be exactly ${REQUIRED_KEY_HEX_LENGTH} hex characters (32 bytes for AES-256). ` +
+      `Current length: ${trimmed.length}. Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+    );
+  }
+  const buf = Buffer.from(trimmed, 'hex');
+  if (buf.length !== REQUIRED_KEY_BYTES) {
+    throw new Error(
+      `OAUTH_ENCRYPTION_KEY must be a hex string (0-9, a-f). Invalid character(s) or wrong length. ` +
+      `Use exactly ${REQUIRED_KEY_HEX_LENGTH} hex chars. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+    );
+  }
+  return buf;
+}
 
 /**
  * OAuth Manager Service
@@ -16,12 +40,9 @@ export class OAuthManager {
    * Encrypt token with AES-256-GCM
    */
   encryptToken(token) {
-    if (!ENCRYPTION_KEY) {
-      throw new Error('OAUTH_ENCRYPTION_KEY not configured in environment');
-    }
-
+    const keyBuf = getEncryptionKeyBuffer();
     const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+    const cipher = crypto.createCipheriv(ALGORITHM, keyBuf, iv);
     let encrypted = cipher.update(token, 'utf8', 'hex');
     encrypted += cipher.final('hex');
     const authTag = cipher.getAuthTag();
@@ -33,14 +54,11 @@ export class OAuthManager {
    * Decrypt token
    */
   decryptToken(encryptedToken) {
-    if (!ENCRYPTION_KEY) {
-      throw new Error('OAUTH_ENCRYPTION_KEY not configured in environment');
-    }
-
+    const keyBuf = getEncryptionKeyBuffer();
     const [ivHex, authTagHex, encrypted] = encryptedToken.split(':');
     const decipher = crypto.createDecipheriv(
       ALGORITHM,
-      Buffer.from(ENCRYPTION_KEY, 'hex'),
+      keyBuf,
       Buffer.from(ivHex, 'hex')
     );
     decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
