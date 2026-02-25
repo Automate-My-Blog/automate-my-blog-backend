@@ -42,7 +42,7 @@ router.get('/content-calendar', async (req, res) => {
       // Testbed: use subscribed strategies if any; otherwise fall back to user's audiences (no purchase required)
       result = await db.query(
         `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
-                a.content_calendar_generated_at, sp.created_at as subscribed_at
+                a.content_calendar_generated_at, a.content_calendar_trending_topics, sp.created_at as subscribed_at
          FROM audiences a
          LEFT JOIN strategy_purchases sp ON sp.strategy_id = a.id AND sp.user_id = $1 AND sp.status = 'active'
          WHERE a.user_id = $1
@@ -53,7 +53,7 @@ router.get('/content-calendar', async (req, res) => {
     } else {
       result = await db.query(
         `SELECT a.id as strategy_id, a.target_segment, a.customer_problem, a.content_ideas,
-                a.content_calendar_generated_at, sp.created_at as subscribed_at
+                a.content_calendar_generated_at, a.content_calendar_trending_topics, sp.created_at as subscribed_at
          FROM strategy_purchases sp
          JOIN audiences a ON a.id = sp.strategy_id
          WHERE sp.user_id = $1 AND sp.status = 'active'
@@ -70,12 +70,21 @@ router.get('/content-calendar', async (req, res) => {
         : [];
       contentIdeas = Array.isArray(contentIdeas) ? contentIdeas : [];
       const segment = typeof row.target_segment === 'string' ? (() => { try { return JSON.parse(row.target_segment); } catch { return {}; } })() : (row.target_segment || {});
+      let trendingTopicsUsed = [];
+      if (row.content_calendar_trending_topics != null) {
+        const raw = row.content_calendar_trending_topics;
+        trendingTopicsUsed = Array.isArray(raw)
+          ? raw
+          : (typeof raw === 'string' ? (() => { try { const p = JSON.parse(raw); return Array.isArray(p) ? p : []; } catch { return []; } })() : []);
+      }
+
       return {
         strategyId: row.strategy_id,
         targetSegment: segment,
         customerProblem: row.customer_problem,
         contentIdeas: contentIdeas.length > 0 ? contentIdeas : (fixtureIdeas || []),
         contentCalendarGeneratedAt: contentIdeas.length > 0 ? row.content_calendar_generated_at : (testbed ? new Date().toISOString() : null),
+        trendingTopicsUsed,
         subscribedAt: row.subscribed_at
       };
     });
