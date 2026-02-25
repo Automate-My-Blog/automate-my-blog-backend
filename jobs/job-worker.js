@@ -292,7 +292,7 @@ async function processContentCalendar(jobId, input, context) {
     estimatedTimeRemaining: 60
   });
 
-  const { results } = await generateContentCalendarsForStrategies(strategyIds, { onProgress });
+  const { results } = await generateContentCalendarsForStrategies(strategyIds, { userId, onProgress });
 
   const succeeded = results.filter((r) => r.success).length;
   const failed = results.filter((r) => !r.success);
