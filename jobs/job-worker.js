@@ -1,5 +1,5 @@
 /**
- * BullMQ worker for async jobs: website_analysis, content_generation, analyze_voice_sample.
+ * BullMQ worker for async jobs: website_analysis, content_generation, analyze_voice_sample, content_calendar, content_calendar_post.
  * Run as a separate process: node jobs/job-worker.js
  * Requires REDIS_URL and DATABASE_URL.
  */
@@ -354,6 +354,88 @@ async function processContentCalendar(jobId, input, context) {
   };
 }
 
+async function processContentCalendarPost(jobId, input, context) {
+  const userId = context.userId;
+  if (!userId) throw new Error('content_calendar_post requires userId');
+
+  const { audienceId, dayNumber } = input || {};
+  if (!audienceId || dayNumber == null) {
+    throw new Error('content_calendar_post requires audienceId and dayNumber');
+  }
+
+  const {
+    getContentCalendarPostContext,
+    setContentCalendarPostBlogId
+  } = await import('../services/content-calendar-service.js');
+  const enhancedBlogGenerationService = (await import('../services/enhanced-blog-generation.js')).default;
+  const billingService = (await import('../services/billing.js')).default;
+
+  const ctx = await getContentCalendarPostContext(audienceId, dayNumber);
+  if (String(ctx.userId) !== String(userId)) {
+    throw new Error('Audience does not belong to job user');
+  }
+
+  const hasCredits = await billingService.hasCredits(userId);
+  if (!hasCredits) {
+    const err = new Error('Insufficient credits');
+    err.code = 'INSUFFICIENT_CREDITS';
+    throw err;
+  }
+
+  await updateJobProgress(jobId, {
+    progress: 10,
+    current_step: 'Writing...',
+    estimated_seconds_remaining: 60
+  }).catch(() => {});
+  publishJobStreamEvent(connection, jobId, 'progress-update', {
+    progress: 10,
+    currentStep: 'Writing...',
+    estimatedTimeRemaining: 60
+  });
+
+  const onPartialResult = (segment, data) => {
+    publishJobStreamEvent(connection, jobId, segment, data);
+  };
+
+  const result = await enhancedBlogGenerationService.generateCompleteEnhancedBlog(
+    ctx.topic,
+    ctx.businessInfo,
+    ctx.organizationId,
+    {
+      includeVisuals: true,
+      onPartialResult,
+      autoSave: true
+    }
+  );
+
+  let savedPost = null;
+  try {
+    savedPost = await enhancedBlogGenerationService.saveEnhancedBlogPost(
+      userId,
+      ctx.organizationId,
+      result,
+      { status: 'draft' }
+    );
+    try {
+      await billingService.useCredit(userId, 'generation');
+    } catch (e) {
+      console.warn('Credit deduct failed:', e.message);
+    }
+    await setContentCalendarPostBlogId(audienceId, dayNumber, savedPost.id);
+  } catch (e) {
+    console.warn('Save or calendar update failed:', e.message);
+    throw e;
+  }
+
+  return {
+    success: true,
+    blogPostId: savedPost?.id,
+    audienceId,
+    dayNumber,
+    title: result?.title
+  };
+}
+
 const processor = async (bullJob) => {
   const { jobId } = bullJob.data;
   const row = await getJobRow(jobId);
@@ -405,6 +487,8 @@ const processor = async (bullJob) => {
       result = await processAnalyzeVoiceSample(jobId, input);
     } else if (row.type === 'content_calendar') {
       result = await processContentCalendar(jobId, input, context);
+    } else if (row.type === 'content_calendar_post') {
+      result = await processContentCalendarPost(jobId, input, context);
     } else {
       throw new Error(`Unknown job type: ${row.type}`);
     }
