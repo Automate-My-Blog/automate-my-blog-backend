@@ -11,10 +11,21 @@ const REQUIRED_KEY_BYTES = 32;
 const REQUIRED_KEY_HEX_LENGTH = REQUIRED_KEY_BYTES * 2; // 64
 
 function getEncryptionKeyBuffer() {
-  if (!ENCRYPTION_KEY || typeof ENCRYPTION_KEY !== 'string') {
-    throw new Error('OAUTH_ENCRYPTION_KEY not configured in environment');
+  const raw = process.env.OAUTH_ENCRYPTION_KEY;
+  if (raw === undefined || raw === null) {
+    throw new Error(
+      'OAUTH_ENCRYPTION_KEY is not set. Add it in Vercel: Project → Settings → Environment Variables, for the environment that serves this deployment (e.g. Preview for staging). Then redeploy.'
+    );
   }
-  const trimmed = ENCRYPTION_KEY.trim();
+  if (typeof raw !== 'string') {
+    throw new Error('OAUTH_ENCRYPTION_KEY must be a string');
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      'OAUTH_ENCRYPTION_KEY is set but empty. In Vercel, check the variable value (no quotes, 64 hex characters). For staging, ensure it is enabled for Preview environment and redeploy.'
+    );
+  }
   if (trimmed.length !== REQUIRED_KEY_HEX_LENGTH) {
     throw new Error(
       `OAUTH_ENCRYPTION_KEY invalid key length: must be exactly ${REQUIRED_KEY_HEX_LENGTH} hex characters (32 bytes for AES-256). ` +
