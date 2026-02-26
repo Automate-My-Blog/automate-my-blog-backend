@@ -201,8 +201,154 @@ export async function generateContentCalendarsForStrategies(strategyIds, options
   return { results };
 }
 
+/**
+ * Get content calendar items due "today" (day N relative to content_calendar_generated_at) for
+ * audiences that have an active strategy subscription. Only returns (audience_id, day_number, user_id)
+ * for which there is no row in content_calendar_posts (so the scheduler can claim and enqueue).
+ * Used by the daily content calendar post scheduler.
+ *
+ * @returns {Promise<Array<{ audienceId: string, dayNumber: number, userId: string }>>}
+ */
+export async function getDueContentCalendarItems() {
+  const result = await db.query(
+    `WITH due AS (
+       SELECT
+         a.id AS audience_id,
+         a.user_id,
+         (CURRENT_DATE - (a.content_calendar_generated_at::date)) + 1 AS day_number
+       FROM audiences a
+       INNER JOIN strategy_purchases sp ON sp.strategy_id = a.id AND sp.user_id = a.user_id AND sp.status = 'active'
+       WHERE a.content_ideas IS NOT NULL
+         AND jsonb_array_length(a.content_ideas::jsonb) >= 1
+         AND a.content_calendar_generated_at IS NOT NULL
+         AND a.user_id IS NOT NULL
+     )
+     SELECT d.audience_id, d.day_number, d.user_id::text
+     FROM due d
+     LEFT JOIN content_calendar_posts ccp ON ccp.audience_id = d.audience_id AND ccp.day_number = d.day_number
+     WHERE ccp.id IS NULL
+       AND d.day_number >= 1 AND d.day_number <= 30`
+  );
+
+  return (result.rows || []).map((r) => ({
+    audienceId: r.audience_id,
+    dayNumber: r.day_number,
+    userId: r.user_id
+  }));
+}
+
+/**
+ * Claim a (audience_id, day_number) slot by inserting into content_calendar_posts.
+ * Returns true if this process claimed the slot (insert succeeded); false if already claimed.
+ *
+ * @param {string} audienceId
+ * @param {number} dayNumber
+ * @returns {Promise<boolean>}
+ */
+export async function claimContentCalendarSlot(audienceId, dayNumber) {
+  const r = await db.query(
+    `INSERT INTO content_calendar_posts (audience_id, day_number)
+     VALUES ($1, $2)
+     ON CONFLICT (audience_id, day_number) DO NOTHING
+     RETURNING id`,
+    [audienceId, dayNumber]
+  );
+  return (r.rowCount ?? 0) > 0;
+}
+
+/**
+ * Load audience, organization, and the content idea for a given day to build inputs for
+ * enhanced blog generation. Used by the content_calendar_post job worker.
+ *
+ * @param {string} audienceId - audiences.id
+ * @param {number} dayNumber - 1-based day (1–30)
+ * @returns {Promise<{ userId: string, organizationId: string, businessInfo: object, topic: object }>}
+ */
+export async function getContentCalendarPostContext(audienceId, dayNumber) {
+  const audienceResult = await db.query(
+    `SELECT a.id, a.user_id, a.content_ideas, a.organization_intelligence_id, oi.organization_id
+     FROM audiences a
+     LEFT JOIN organization_intelligence oi ON oi.id = a.organization_intelligence_id AND oi.is_current = TRUE
+     WHERE a.id = $1`,
+    [audienceId]
+  );
+
+  if (!audienceResult.rows.length) {
+    throw new Error('Audience not found');
+  }
+
+  const audience = audienceResult.rows[0];
+  let contentIdeas = audience.content_ideas;
+  if (typeof contentIdeas === 'string') {
+    try {
+      contentIdeas = JSON.parse(contentIdeas);
+    } catch {
+      contentIdeas = [];
+    }
+  }
+  if (!Array.isArray(contentIdeas)) contentIdeas = [];
+
+  const idea = contentIdeas.find((i) => Number(i.dayNumber) === Number(dayNumber));
+  if (!idea) {
+    throw new Error(`No content idea for day ${dayNumber}`);
+  }
+
+  if (!audience.organization_id) {
+    throw new Error('Audience has no organization; cannot generate post');
+  }
+
+  let businessInfo = { businessType: 'Business', targetAudience: 'General' };
+  if (audience.organization_id) {
+    const orgResult = await db.query(
+      `SELECT business_type, target_audience FROM organizations WHERE id = $1`,
+      [audience.organization_id]
+    );
+    if (orgResult.rows[0]) {
+      businessInfo = {
+        businessType: orgResult.rows[0].business_type || 'Business',
+        targetAudience: orgResult.rows[0].target_audience || 'General'
+      };
+    }
+  }
+
+  const topic = {
+    title: idea.title || 'Blog post',
+    trend: idea.searchIntent || idea.title,
+    subheader: idea.format || '',
+    seoBenefit: idea.searchIntent || idea.title,
+    ...(Array.isArray(idea.keywords) && idea.keywords.length > 0 && { keywords: idea.keywords })
+  };
+
+  return {
+    userId: audience.user_id,
+    organizationId: audience.organization_id,
+    businessInfo,
+    topic,
+    idea
+  };
+}
+
+/**
+ * Record the created blog post for a content calendar slot.
+ *
+ * @param {string} audienceId
+ * @param {number} dayNumber
+ * @param {string} blogPostId
+ */
+export async function setContentCalendarPostBlogId(audienceId, dayNumber, blogPostId) {
+  await db.query(
+    `UPDATE content_calendar_posts SET blog_post_id = $1, updated_at = NOW()
+     WHERE audience_id = $2 AND day_number = $3`,
+    [blogPostId, audienceId, dayNumber]
+  );
+}
+
 export default {
   fetchTrendsForContentCalendar,
   generateAndSaveContentCalendar,
-  generateContentCalendarsForStrategies
+  generateContentCalendarsForStrategies,
+  getDueContentCalendarItems,
+  claimContentCalendarSlot,
+  getContentCalendarPostContext,
+  setContentCalendarPostBlogId
 };

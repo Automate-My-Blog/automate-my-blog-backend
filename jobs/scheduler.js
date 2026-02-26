@@ -18,6 +18,7 @@ import {
   fetchAnalyticsDataForAllUsers
 } from './googleDataFetcher.js';
 import { trackContentPerformance, getPerformanceInsights } from './performanceTracker.js';
+import { processContentCalendarScheduledPosts } from './contentCalendarScheduler.js';
 
 /**
  * Email Campaign Scheduler
@@ -173,6 +174,20 @@ export function startEmailScheduler() {
   });
   scheduledJobs.push({ name: 'Content Performance Tracking', schedule: 'Weekly on Mondays at 7:00 AM', job: contentPerformanceJob });
 
+  // Job 12: Content calendar scheduled posts - Daily at 8:00 AM (create posts for "today's" calendar day)
+  const contentCalendarPostsJob = cron.schedule('0 8 * * *', async () => {
+    console.log('\n⏰ [SCHEDULED] Content Calendar Scheduled Posts');
+    try {
+      const { enqueued, due, errors } = await processContentCalendarScheduledPosts();
+      if (errors.length > 0) {
+        console.warn('📅 Content calendar scheduler had errors:', errors.slice(0, 5));
+      }
+    } catch (error) {
+      console.error('❌ Content calendar scheduled posts job failed:', error);
+    }
+  });
+  scheduledJobs.push({ name: 'Content Calendar Scheduled Posts', schedule: 'Daily at 8:00 AM', job: contentCalendarPostsJob });
+
   // Print schedule summary
   console.log('✅ Email campaign scheduler started!\n');
   console.log('📋 Scheduled Jobs:');
@@ -215,7 +230,8 @@ export async function runJob(jobName) {
     'google_trends_fetch': fetchTrendsDataForAllUsers,
     'google_search_console_fetch': fetchSearchConsoleDataForAllUsers,
     'google_analytics_fetch': fetchAnalyticsDataForAllUsers,
-    'content_performance_tracking': trackContentPerformance
+    'content_performance_tracking': trackContentPerformance,
+    'content_calendar_scheduled_posts': processContentCalendarScheduledPosts
   };
 
   const job = jobMap[jobName];

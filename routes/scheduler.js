@@ -130,6 +130,12 @@ router.get('/jobs', (req, res) => {
       description: 'Send monthly revenue and metrics summary to admin',
       schedule: '1st of each month at 9:00 AM',
       endpoint: 'POST /api/v1/scheduler/run/monthly_revenue'
+    },
+    {
+      name: 'content_calendar_scheduled_posts',
+      description: 'Enqueue blog post generation for content calendar days due today (one post per subscribed strategy)',
+      schedule: 'Daily at 8:00 AM',
+      endpoint: 'POST /api/v1/scheduler/run/content_calendar_scheduled_posts'
     }
   ];
 
