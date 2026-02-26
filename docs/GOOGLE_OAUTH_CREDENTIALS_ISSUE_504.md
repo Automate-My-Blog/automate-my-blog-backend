@@ -1,35 +1,30 @@
 # Google OAuth credentials and frontend issue #504
 
-For [automate-my-blog-frontend#504](https://github.com/Automate-My-Blog/automate-my-blog-frontend/issues/504), point 6 asks to set real credentials in Vercel env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+For [automate-my-blog-frontend#504](https://github.com/Automate-My-Blog/automate-my-blog-frontend/issues/504), point 6: credentials are stored in the **encrypted store** (no Vercel env vars required).
 
-## Per-client credentials on the frontend
+## Encrypted store (no env vars)
 
-When each **client** (tenant or deployment) has its own Google OAuth app, set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the **frontend** Vercel env. The frontend then starts the OAuth flow by calling:
+Credentials are stored in the backend database, encrypted at rest:
 
-- **POST /api/v1/google/oauth/authorize/:service**  
-  Body: `{ "client_id": "<from env>", "client_secret": "<from env>" }`  
-  Backend stores them temporarily in Redis (keyed by OAuth state) and returns `{ authUrl }`. The user is redirected to Google; on callback, the backend uses the stored credentials to exchange the code and store tokens. Credentials are not persisted.
+1. **Per-user:** Any user can submit their own OAuth app credentials via **POST /api/v1/google/oauth/credentials** with body `{ service, client_id, client_secret }`. Stored in `user_google_app_credentials`.
+2. **Platform:** A **super_admin** can store one set per service for the whole app via **POST /api/v1/google/oauth/credentials** with body `{ service, client_id, client_secret, platform: true }`. Stored in `platform_google_app_credentials`. All users then use these for that service unless they have per-user credentials.
 
-**Backend requirements for per-client (frontend) flow:**
+**Resolution order:** per-user store → platform store → env fallback (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`). Prefer the encrypted store so you don’t need Vercel env vars.
+
+## Backend env (still required)
 
 | Variable | Required | Notes |
 |----------|----------|--------|
-| `GOOGLE_REDIRECT_URI` | Yes | Backend callback URL, e.g. `https://<backend-host>/api/v1/google/oauth/callback`. Add this in Google Cloud Console as authorized redirect URI. |
-| `REDIS_URL` | Yes | Used to pass credentials from authorize request to callback (short-lived). |
-| `OAUTH_ENCRYPTION_KEY` | Yes | Encrypts stored OAuth tokens. |
+| `GOOGLE_REDIRECT_URI` | Yes | Backend OAuth callback URL, e.g. `https://<backend>/api/v1/google/oauth/callback`. Add in Google Cloud Console as authorized redirect URI. |
+| `OAUTH_ENCRYPTION_KEY` | Yes | 64 hex chars. Encrypts tokens and app credentials at rest. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No* | *Optional fallback if nothing is in the encrypted store. |
 
-The backend does **not** need `GOOGLE_CLIENT_ID` or `GOOGLE_CLIENT_SECRET` in its env when using this flow.
+## Frontend flow
 
-## Alternative: credentials on the backend
-
-- **Backend env (platform-wide):** Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, and `OAUTH_ENCRYPTION_KEY` in the backend Vercel env. The frontend uses **GET /api/v1/google/oauth/authorize/:service** (no body) to get `authUrl`.
-- **Per-user (self-serve):** Users submit their own OAuth app credentials via **POST /api/v1/google/oauth/credentials**. Stored encrypted in `user_google_app_credentials`. Frontend then uses GET /oauth/authorize/:service.
-
-## Backend endpoints for the frontend
-
-- **GET /api/v1/google/oauth/config** (no auth): `{ success: true, clientConfigured: boolean }`. `clientConfigured` is true when the backend has platform credentials in env. When using per-client credentials on the frontend, the frontend can ignore this and always call POST /oauth/authorize with its env-derived credentials.
-- **POST /api/v1/google/oauth/authorize/:service** (auth required): Body `{ client_id, client_secret }`. Use when credentials are in the frontend (per-client). Requires Redis and `GOOGLE_REDIRECT_URI` on the backend.
+- **Connect:** Call **GET** `/api/v1/google/oauth/authorize/:service` (no body). Backend resolves credentials from encrypted store (or env) and returns `{ authUrl }`. Redirect the user to `authUrl`.
+- **Config check:** **GET** `/api/v1/google/oauth/config` returns `{ clientConfigured: boolean }` (true when platform store or env has credentials). Use to show/hide “Connect Google” or a setup message.
+- No frontend env vars for Google OAuth; credentials live only in the backend encrypted store (or backend env as fallback).
 
 ## Summary for issue 504
 
-- **Point 6 (set real credentials in Vercel):** You can set them on the **frontend** (per-client): set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in the frontend Vercel env, and start the flow with **POST /api/v1/google/oauth/authorize/:service** with body `{ client_id, client_secret }`. Backend must have `GOOGLE_REDIRECT_URI`, `REDIS_URL`, and `OAUTH_ENCRYPTION_KEY` set.
+- **Point 6:** Do **not** set `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in Vercel if you use the encrypted store. A super_admin stores them once via **POST /api/v1/google/oauth/credentials** with `platform: true`. Frontend uses **GET /oauth/authorize/:service** to start the flow.
