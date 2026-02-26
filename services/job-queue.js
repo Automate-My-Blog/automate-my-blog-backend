@@ -14,7 +14,7 @@ import db from './database.js';
 import { InvariantViolation, ServiceUnavailableError } from '../lib/errors.js';
 
 const QUEUE_NAME = 'amb-jobs';
-const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample', 'content_calendar'];
+const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_sample', 'content_calendar', 'content_calendar_post'];
 
 /** Only failed jobs can be retried. */
 export const RETRIABLE_STATUS = 'failed';
