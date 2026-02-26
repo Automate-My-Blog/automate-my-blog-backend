@@ -73,6 +73,8 @@ Copy `.env.example` to `.env` and fill in values. Key variables:
 | `STRIPE_SECRET_KEY` | For billing | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | For webhooks | Stripe webhook signing secret |
 
+For **Google OAuth** (Search Console, Analytics), credentials are stored in the **encrypted store** (no Vercel env vars required): super_admin calls POST `/api/v1/google/oauth/credentials` with `platform: true` once, or users store their own via the same endpoint. Backend needs `GOOGLE_REDIRECT_URI` and `OAUTH_ENCRYPTION_KEY`. See [docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md).
+
 See `.env.example` for the full list.
 
 ## Installation

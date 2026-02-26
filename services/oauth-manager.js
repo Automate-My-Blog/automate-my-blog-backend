@@ -113,6 +113,49 @@ export class OAuthManager {
   }
 
   /**
+   * Store platform-wide Google OAuth app credentials (one set per service). Super_admin only.
+   * Do not log or expose client_secret.
+   */
+  async storePlatformAppCredentials(serviceName, clientId, clientSecret) {
+    const clientIdEncrypted = this.encryptToken(clientId);
+    const clientSecretEncrypted = this.encryptToken(clientSecret);
+
+    const query = `
+      INSERT INTO platform_google_app_credentials
+        (service_name, client_id_encrypted, client_secret_encrypted)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (service_name)
+      DO UPDATE SET
+        client_id_encrypted = EXCLUDED.client_id_encrypted,
+        client_secret_encrypted = EXCLUDED.client_secret_encrypted,
+        updated_at = CURRENT_TIMESTAMP
+    `;
+
+    await db.query(query, [serviceName, clientIdEncrypted, clientSecretEncrypted]);
+  }
+
+  /**
+   * Get platform-wide Google OAuth app credentials if stored.
+   * Returns { client_id, client_secret } or null.
+   */
+  async getPlatformAppCredentials(serviceName) {
+    const query = `
+      SELECT client_id_encrypted, client_secret_encrypted
+      FROM platform_google_app_credentials
+      WHERE service_name = $1
+    `;
+
+    const result = await db.query(query, [serviceName]);
+    if (!result.rows?.length) return null;
+
+    const row = result.rows[0];
+    return {
+      client_id: this.decryptToken(row.client_id_encrypted),
+      client_secret: this.decryptToken(row.client_secret_encrypted)
+    };
+  }
+
+  /**
    * Store OAuth tokens for user
    */
   async storeCredentials(userId, serviceName, tokens, scopes, serviceConfig = {}) {
@@ -193,7 +236,7 @@ export class OAuthManager {
   }
 
   /**
-   * Refresh OAuth token. Uses per-user app credentials when present (self-serve), else env.
+   * Refresh OAuth token. Uses per-user app credentials, then platform (encrypted store), then env.
    */
   async refreshCredentials(userId, serviceName, existingCred) {
     try {
@@ -205,6 +248,12 @@ export class OAuthManager {
       if (appCreds?.client_id && appCreds?.client_secret) {
         clientId = appCreds.client_id;
         clientSecret = appCreds.client_secret;
+      } else {
+        const platformCreds = await this.getPlatformAppCredentials(serviceName);
+        if (platformCreds?.client_id && platformCreds?.client_secret) {
+          clientId = platformCreds.client_id;
+          clientSecret = platformCreds.client_secret;
+        }
       }
 
       const response = await fetch('https://oauth2.googleapis.com/token', {

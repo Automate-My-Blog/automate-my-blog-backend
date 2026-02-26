@@ -86,6 +86,44 @@ export class GoogleAnalyticsService {
   }
 
   /**
+   * Get event count for a specific event name on a page (e.g. internal_link_click, cta_click).
+   * @param {string} propertyId - GA4 Property ID
+   * @param {string} pagePath - The page path (e.g. '/blog/my-post')
+   * @param {string} startDate - Start date (YYYY-MM-DD)
+   * @param {string} endDate - End date (YYYY-MM-DD)
+   * @param {string} eventName - GA4 event name (e.g. 'internal_link_click', 'cta_click')
+   * @returns {Promise<number>} Event count (0 if no data)
+   */
+  async getPageEventCount(propertyId, pagePath, startDate, endDate, eventName) {
+    if (!this.analyticsDataClient) {
+      return 0;
+    }
+
+    try {
+      const [response] = await this.analyticsDataClient.runReport({
+        property: `properties/${propertyId}`,
+        dateRanges: [{ startDate, endDate }],
+        dimensions: [{ name: 'pagePath' }, { name: 'eventName' }],
+        metrics: [{ name: 'eventCount' }],
+        dimensionFilter: {
+          andGroup: {
+            expressions: [
+              { filter: { fieldName: 'pagePath', stringFilter: { value: pagePath } } },
+              { filter: { fieldName: 'eventName', stringFilter: { value: eventName } } }
+            ]
+          }
+        }
+      });
+
+      const row = response.rows?.[0];
+      return row ? parseInt(row.metricValues[0]?.value || '0', 10) : 0;
+    } catch (error) {
+      console.error('Google Analytics event count error:', error.message);
+      return 0;
+    }
+  }
+
+  /**
    * Get traffic sources breakdown
    * @param {string} propertyId - GA4 Property ID
    * @param {string} startDate - Start date (YYYY-MM-DD)

@@ -26,7 +26,7 @@ const SERVICE_TO_DB_NAME = {
 };
 
 /**
- * Resolve client_id and client_secret for a user+service: self-serve app credentials if stored, else env.
+ * Resolve client_id and client_secret: per-user encrypted store, then platform encrypted store, then env.
  */
 async function getGoogleOAuthClientConfig(userId, service) {
   const dbName = SERVICE_TO_DB_NAME[service];
@@ -34,6 +34,10 @@ async function getGoogleOAuthClientConfig(userId, service) {
   const appCreds = await oauthManager.getAppCredentials(userId, dbName);
   if (appCreds?.client_id && appCreds?.client_secret) {
     return { clientId: appCreds.client_id, clientSecret: appCreds.client_secret };
+  }
+  const platformCreds = await oauthManager.getPlatformAppCredentials(dbName);
+  if (platformCreds?.client_id && platformCreds?.client_secret) {
+    return { clientId: platformCreds.client_id, clientSecret: platformCreds.client_secret };
   }
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     return {
@@ -49,14 +53,32 @@ async function getGoogleOAuthClientConfig(userId, service) {
 // ========================================
 
 /**
+ * GET /api/v1/google/oauth/config
+ * Public: whether the backend has Google OAuth client configured (encrypted store or env).
+ * Frontend can use this to show/hide "Connect Google" or display a setup message.
+ */
+router.get('/oauth/config', async (_req, res) => {
+  let clientConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  if (!clientConfigured) {
+    const sc = await oauthManager.getPlatformAppCredentials('google_search_console');
+    const ga = await oauthManager.getPlatformAppCredentials('google_analytics');
+    clientConfigured = !!(sc?.client_id && sc?.client_secret) || !!(ga?.client_id && ga?.client_secret);
+  }
+  res.json({ success: true, clientConfigured });
+});
+
+/**
  * POST /api/v1/google/oauth/credentials
- * Self-serve: store the user's OAuth client credentials for Search Console or Analytics.
+ * Store OAuth client credentials in encrypted store (per-user or platform).
+ * Body: { service, client_id, client_secret } and optionally { platform: true }.
+ * - Per-user (default): any authenticated user stores their own credentials.
+ * - Platform: { platform: true } stores one set for the whole app; super_admin only.
  * JWT required. Do not log or expose client_secret.
  */
 router.post('/oauth/credentials', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { service, client_id: clientId, client_secret: clientSecret } = req.body || {};
+    const { service, client_id: clientId, client_secret: clientSecret, platform } = req.body || {};
 
     if (!service || !clientId || !clientSecret) {
       return res.status(400).json({
@@ -73,7 +95,18 @@ router.post('/oauth/credentials', authService.authMiddleware.bind(authService), 
     }
 
     const dbName = SERVICE_TO_DB_NAME[service];
-    await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
+
+    if (platform === true) {
+      if (req.user?.role !== 'super_admin') {
+        return res.status(403).json({
+          success: false,
+          error: 'Platform credentials can only be set by super_admin'
+        });
+      }
+      await oauthManager.storePlatformAppCredentials(dbName, clientId.trim(), clientSecret.trim());
+    } else {
+      await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
+    }
 
     res.status(200).json({ success: true });
   } catch (error) {
@@ -110,7 +143,7 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
     if (!config) {
       return res.status(400).json({
         success: false,
-        error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or submit credentials via POST /api/v1/google/oauth/credentials.'
+        error: 'Google OAuth not configured. Store credentials via POST /api/v1/google/oauth/credentials (per-user or platform with platform: true for super_admin).'
       });
     }
 
@@ -136,7 +169,7 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 
 /**
  * GET /api/v1/google/oauth/callback
- * OAuth callback handler. Uses same client_id/secret as authorize (per-user if stored, else env).
+ * OAuth callback handler. Uses credentials from encrypted store (per-user or platform) or env.
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
@@ -755,6 +788,109 @@ router.get('/trends/interest-over-time', async (req, res) => {
     res.json({ success: true, data: { timelineData } });
   } catch (error) {
     console.error('Error fetching Google Trends:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * GET /api/v1/google/funnel
+ * Per-post funnel metrics: Search Impressions → Search Clicks → Time on Site → Internal Links Clicked → CTA Clicks.
+ * Requires pageUrl, siteUrl (for GSC), propertyId (for GA), and date range. Returns partial funnel when only GSC or only GA is connected.
+ *
+ * Query params:
+ * - pageUrl (required): The post's URL (full URL for GSC; path for GA pagePath—use same value if your site uses one format for both)
+ * - siteUrl (required): Site URL in GSC (e.g. https://example.com or sc-domain:example.com)
+ * - propertyId (required): GA4 Property ID
+ * - startDate (required): YYYY-MM-DD
+ * - endDate (required): YYYY-MM-DD
+ */
+router.get('/funnel', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { pageUrl, siteUrl, propertyId, startDate, endDate } = req.query;
+
+    if (!pageUrl || !siteUrl || !propertyId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'pageUrl, siteUrl, propertyId, startDate, and endDate are required'
+      });
+    }
+
+    const userId = req.user.userId;
+    const funnel = {
+      search_impressions: null,
+      search_clicks: null,
+      time_on_site_seconds: null,
+      internal_links_clicked: null,
+      cta_clicks: null
+    };
+    const meta = { start_date: startDate, end_date: endDate, gsc_connected: false, ga_connected: false };
+
+    // GSC: Search Impressions + Search Clicks
+    const gscCredentials = await oauthManager.getCredentials(userId, 'google_search_console');
+    if (gscCredentials) {
+      meta.gsc_connected = true;
+      await googleSearchConsoleService.initializeAuth(gscCredentials);
+      const gscResult = await googleSearchConsoleService.getPagePerformance(
+        siteUrl,
+        pageUrl,
+        startDate,
+        endDate
+      );
+      if (gscResult?.data) {
+        funnel.search_impressions = gscResult.data.impressions ?? 0;
+        funnel.search_clicks = gscResult.data.clicks ?? 0;
+      } else {
+        funnel.search_impressions = 0;
+        funnel.search_clicks = 0;
+      }
+    }
+
+    // GA: Time on Site, Internal Links Clicked, CTA Clicks
+    const gaCredentials = await oauthManager.getCredentials(userId, 'google_analytics');
+    if (gaCredentials) {
+      meta.ga_connected = true;
+      await googleAnalyticsService.initializeAuth(gaCredentials);
+      const gaPerf = await googleAnalyticsService.getPagePerformance(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate
+      );
+      if (gaPerf?.avgSessionDuration != null) {
+        funnel.time_on_site_seconds = Math.round(gaPerf.avgSessionDuration);
+      } else {
+        funnel.time_on_site_seconds = 0;
+      }
+      const internalLinks = await googleAnalyticsService.getPageEventCount(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate,
+        'internal_link_click'
+      );
+      const ctaClicks = await googleAnalyticsService.getPageEventCount(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate,
+        'cta_click'
+      );
+      funnel.internal_links_clicked = internalLinks;
+      funnel.cta_clicks = ctaClicks;
+    }
+
+    res.json({ success: true, funnel, meta });
+  } catch (error) {
+    console.error('Google funnel error:', error);
+
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect Google Search Console or Analytics.',
+        needsReconnect: true
+      });
+    }
+
     res.status(500).json({ success: false, error: error.message });
   }
 });
