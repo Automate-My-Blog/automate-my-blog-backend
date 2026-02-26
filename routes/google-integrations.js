@@ -117,7 +117,7 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      process.env.GOOGLE_REDIRECT_URI
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -140,13 +140,13 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
-    const { code, state, service } = req.query;
+    const { code, state } = req.query;
 
     if (!code || !state) {
       throw new Error('Missing code or state parameter');
     }
 
-    const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+    const { userId, service } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
 
     const config = await getGoogleOAuthClientConfig(userId, service);
     if (!config) {
@@ -156,7 +156,7 @@ router.get('/oauth/callback', async (req, res) => {
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      process.env.GOOGLE_REDIRECT_URI
     );
 
     const { tokens } = await oauth2Client.getToken(code);
