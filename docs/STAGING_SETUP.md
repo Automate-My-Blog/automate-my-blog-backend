@@ -74,11 +74,9 @@ Production (`main`) keeps using the existing **Production** env vars; deployment
 | `OPENAI_API_KEY` | Same or separate key for staging |
 | `SUPER_ADMIN_EMAILS` | Optional; staging super admins |
 | `CORS_ORIGINS` | Optional; add staging frontend URL if not covered by `*.vercel.app` |
-| `GOOGLE_CLIENT_ID` | For Google OAuth (Search Console/Analytics); set on **backend** only—see [GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](./GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md) |
-| `GOOGLE_CLIENT_SECRET` | With `GOOGLE_CLIENT_ID`; backend only |
-| `GOOGLE_REDIRECT_URI` | Backend callback URL, e.g. `https://<staging-api>/api/v1/google/oauth/callback` |
-| `OAUTH_ENCRYPTION_KEY` | 64 hex chars; encrypts OAuth tokens and per-user credentials |
-| Others | `YOUTUBE_API_KEY`, `NEWS_API_KEY`, `GOOGLE_TRENDS_API_KEY`, etc. as needed |
+| `GOOGLE_REDIRECT_URI` | Backend OAuth callback URL, e.g. `https://<staging-api>/api/v1/google/oauth/callback` |
+| `OAUTH_ENCRYPTION_KEY` | 64 hex chars; encrypts OAuth tokens and app credentials (required for Google OAuth) |
+| Others | Google OAuth app credentials go in the **encrypted store** (POST `/oauth/credentials` with `platform: true` by super_admin)—see [GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](./GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md). `YOUTUBE_API_KEY`, `NEWS_API_KEY`, `GOOGLE_TRENDS_API_KEY`, etc. as needed |
 
 ---
 
