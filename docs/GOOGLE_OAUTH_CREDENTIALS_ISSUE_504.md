@@ -15,7 +15,7 @@ Credentials are stored in the backend database, encrypted at rest:
 
 | Variable | Required | Notes |
 |----------|----------|--------|
-| `GOOGLE_REDIRECT_URI` | Yes | Backend OAuth callback URL, e.g. `https://<backend>/api/v1/google/oauth/callback`. Add in Google Cloud Console as authorized redirect URI. |
+| `GOOGLE_REDIRECT_URI` | Yes | Base callback URL only, e.g. `https://<backend>/api/v1/google/oauth/callback`. No query string; no trailing space. Must match exactly what you add in Google Cloud Console → Credentials → OAuth 2.0 Client → Authorized redirect URIs. |
 | `OAUTH_ENCRYPTION_KEY` | Yes | 64 hex chars. Encrypts tokens and app credentials at rest. |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | No* | *Optional fallback if nothing is in the encrypted store. |
 

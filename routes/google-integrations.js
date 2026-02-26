@@ -19,6 +19,13 @@ const GOOGLE_SCOPES = {
   analytics: ['https://www.googleapis.com/auth/analytics.readonly']
 };
 
+/** Base OAuth callback URL (trimmed). Must match exactly what is in Google Cloud Console. No query string. */
+function getGoogleRedirectUri() {
+  const uri = (process.env.GOOGLE_REDIRECT_URI || '').trim();
+  if (!uri) return '';
+  return uri.replace(/\?.*$/, ''); // strip any existing query
+}
+
 /** Map URL service to DB service_name for app credentials */
 const SERVICE_TO_DB_NAME = {
   search_console: 'google_search_console',
@@ -147,10 +154,17 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
       });
     }
 
+    const redirectUri = getGoogleRedirectUri();
+    if (!redirectUri) {
+      return res.status(500).json({
+        success: false,
+        error: 'GOOGLE_REDIRECT_URI is not set. Set it in Vercel (e.g. https://<api>/api/v1/google/oauth/callback) for this environment.'
+      });
+    }
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      redirectUri
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -173,23 +187,31 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
-    const { code, state, service } = req.query;
+    const { code, state } = req.query;
 
     if (!code || !state) {
       throw new Error('Missing code or state parameter');
     }
 
-    const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+    const statePayload = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+    const { userId, service } = statePayload;
+    if (!userId || !service) {
+      throw new Error('Invalid state: missing userId or service');
+    }
 
     const config = await getGoogleOAuthClientConfig(userId, service);
     if (!config) {
       throw new Error('Google OAuth client not configured for this user');
     }
 
+    const redirectUri = getGoogleRedirectUri();
+    if (!redirectUri) {
+      throw new Error('GOOGLE_REDIRECT_URI is not set');
+    }
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      redirectUri
     );
 
     const { tokens } = await oauth2Client.getToken(code);
