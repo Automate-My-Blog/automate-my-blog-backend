@@ -9,9 +9,14 @@ import integrationPitchGenerator from '../services/integration-pitch-generator.j
 import DatabaseAuthService from '../services/auth-database.js';
 import { fetchTrendsForContentCalendar } from '../services/content-calendar-service.js';
 import googleContentOptimizer from '../services/google-content-optimizer.js';
+import { getConnection } from '../services/job-queue.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
+
+/** Redis key prefix and TTL for per-client (frontend) OAuth credentials during the flow */
+const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
+const OAUTH_STATE_TTL_SEC = 600;
 
 const GOOGLE_SCOPES = {
   trends: [], // No OAuth needed, uses API key
@@ -47,6 +52,20 @@ async function getGoogleOAuthClientConfig(userId, service) {
 // ========================================
 // OAUTH ENDPOINTS
 // ========================================
+
+/**
+ * GET /api/v1/google/oauth/config
+ * Public: whether the backend has platform Google OAuth client configured (env vars).
+ * Frontend can use this to show/hide "Connect Google" or display a setup message.
+ * Does not expose secrets. Per-user credentials (POST /oauth/credentials) still work when this is false.
+ */
+router.get('/oauth/config', (_req, res) => {
+  const clientConfigured = !!(
+    process.env.GOOGLE_CLIENT_ID &&
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  res.json({ success: true, clientConfigured });
+});
 
 /**
  * POST /api/v1/google/oauth/credentials
@@ -135,8 +154,83 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 });
 
 /**
+ * POST /api/v1/google/oauth/authorize/:service
+ * Start OAuth flow using per-client credentials from the frontend (e.g. frontend env GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+ * Body: { client_id, client_secret }. Backend stores them in Redis keyed by state for the callback; does not persist.
+ * Requires REDIS_URL and GOOGLE_REDIRECT_URI. Do not log client_secret.
+ */
+router.post('/oauth/authorize/:service', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { service } = req.params;
+    const userId = req.user.userId;
+    const { client_id: clientId, client_secret: clientSecret } = req.body || {};
+
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing client_id or client_secret in body (per-client credentials from frontend)'
+      });
+    }
+
+    if (!GOOGLE_SCOPES[service]) {
+      return res.status(400).json({ success: false, error: 'Invalid service' });
+    }
+    if (service === 'trends') {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.json({
+        success: true,
+        noOAuthRequired: true,
+        message: 'Google Trends connected successfully',
+        redirectUrl: `${frontendUrl}/settings/google-integrations?connected=trends`
+      });
+    }
+
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    if (!redirectUri) {
+      return res.status(500).json({
+        success: false,
+        error: 'GOOGLE_REDIRECT_URI must be set on the backend for OAuth callback'
+      });
+    }
+
+    const redis = getConnection();
+    if (!redis) {
+      return res.status(503).json({
+        success: false,
+        error: 'Redis is required for per-client OAuth. Set REDIS_URL, or use GET /oauth/authorize with backend credentials.'
+      });
+    }
+
+    const state = Buffer.from(JSON.stringify({ userId, service })).toString('base64');
+    const key = OAUTH_STATE_KEY_PREFIX + state;
+    await redis.setex(key, OAUTH_STATE_TTL_SEC, JSON.stringify({
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim()
+    }));
+
+    const oauth2Client = new google.auth.OAuth2(
+      clientId.trim(),
+      clientSecret.trim(),
+      `${redirectUri}?service=${service}`
+    );
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: GOOGLE_SCOPES[service],
+      state,
+      prompt: 'consent'
+    });
+
+    res.json({ success: true, authUrl });
+  } catch (error) {
+    console.error('OAuth authorization error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/v1/google/oauth/callback
- * OAuth callback handler. Uses same client_id/secret as authorize (per-user if stored, else env).
+ * OAuth callback handler. Uses credentials from Redis (per-client flow) when present, else per-user or backend env.
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
@@ -148,7 +242,22 @@ router.get('/oauth/callback', async (req, res) => {
 
     const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
 
-    const config = await getGoogleOAuthClientConfig(userId, service);
+    let config = null;
+    const redis = getConnection();
+    if (redis) {
+      const key = OAUTH_STATE_KEY_PREFIX + state;
+      const raw = await redis.get(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.clientId && parsed.clientSecret) config = parsed;
+          await redis.del(key);
+        } catch (_) { /* ignore */ }
+      }
+    }
+    if (!config) {
+      config = await getGoogleOAuthClientConfig(userId, service);
+    }
     if (!config) {
       throw new Error('Google OAuth client not configured for this user');
     }
