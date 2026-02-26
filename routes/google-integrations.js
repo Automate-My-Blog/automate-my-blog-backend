@@ -9,9 +9,14 @@ import integrationPitchGenerator from '../services/integration-pitch-generator.j
 import DatabaseAuthService from '../services/auth-database.js';
 import { fetchTrendsForContentCalendar } from '../services/content-calendar-service.js';
 import googleContentOptimizer from '../services/google-content-optimizer.js';
+import { getConnection } from '../services/job-queue.js';
 
 const router = express.Router();
 const authService = new DatabaseAuthService();
+
+/** Redis key prefix and TTL for per-client (frontend) OAuth credentials during the flow */
+const OAUTH_STATE_KEY_PREFIX = 'google_oauth_state:';
+const OAUTH_STATE_TTL_SEC = 600;
 
 const GOOGLE_SCOPES = {
   trends: [], // No OAuth needed, uses API key
@@ -26,7 +31,7 @@ const SERVICE_TO_DB_NAME = {
 };
 
 /**
- * Resolve client_id and client_secret: per-user encrypted store, then platform encrypted store, then env.
+ * Resolve client_id and client_secret for a user+service: self-serve app credentials if stored, else env.
  */
 async function getGoogleOAuthClientConfig(userId, service) {
   const dbName = SERVICE_TO_DB_NAME[service];
@@ -34,10 +39,6 @@ async function getGoogleOAuthClientConfig(userId, service) {
   const appCreds = await oauthManager.getAppCredentials(userId, dbName);
   if (appCreds?.client_id && appCreds?.client_secret) {
     return { clientId: appCreds.client_id, clientSecret: appCreds.client_secret };
-  }
-  const platformCreds = await oauthManager.getPlatformAppCredentials(dbName);
-  if (platformCreds?.client_id && platformCreds?.client_secret) {
-    return { clientId: platformCreds.client_id, clientSecret: platformCreds.client_secret };
   }
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     return {
@@ -54,31 +55,27 @@ async function getGoogleOAuthClientConfig(userId, service) {
 
 /**
  * GET /api/v1/google/oauth/config
- * Public: whether the backend has Google OAuth client configured (encrypted store or env).
+ * Public: whether the backend has platform Google OAuth client configured (env vars).
  * Frontend can use this to show/hide "Connect Google" or display a setup message.
+ * Does not expose secrets. Per-user credentials (POST /oauth/credentials) still work when this is false.
  */
-router.get('/oauth/config', async (_req, res) => {
-  let clientConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
-  if (!clientConfigured) {
-    const sc = await oauthManager.getPlatformAppCredentials('google_search_console');
-    const ga = await oauthManager.getPlatformAppCredentials('google_analytics');
-    clientConfigured = !!(sc?.client_id && sc?.client_secret) || !!(ga?.client_id && ga?.client_secret);
-  }
+router.get('/oauth/config', (_req, res) => {
+  const clientConfigured = !!(
+    process.env.GOOGLE_CLIENT_ID &&
+    process.env.GOOGLE_CLIENT_SECRET
+  );
   res.json({ success: true, clientConfigured });
 });
 
 /**
  * POST /api/v1/google/oauth/credentials
- * Store OAuth client credentials in encrypted store (per-user or platform).
- * Body: { service, client_id, client_secret } and optionally { platform: true }.
- * - Per-user (default): any authenticated user stores their own credentials.
- * - Platform: { platform: true } stores one set for the whole app; super_admin only.
+ * Self-serve: store the user's OAuth client credentials for Search Console or Analytics.
  * JWT required. Do not log or expose client_secret.
  */
 router.post('/oauth/credentials', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { service, client_id: clientId, client_secret: clientSecret, platform } = req.body || {};
+    const { service, client_id: clientId, client_secret: clientSecret } = req.body || {};
 
     if (!service || !clientId || !clientSecret) {
       return res.status(400).json({
@@ -95,18 +92,7 @@ router.post('/oauth/credentials', authService.authMiddleware.bind(authService), 
     }
 
     const dbName = SERVICE_TO_DB_NAME[service];
-
-    if (platform === true) {
-      if (req.user?.role !== 'super_admin') {
-        return res.status(403).json({
-          success: false,
-          error: 'Platform credentials can only be set by super_admin'
-        });
-      }
-      await oauthManager.storePlatformAppCredentials(dbName, clientId.trim(), clientSecret.trim());
-    } else {
-      await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
-    }
+    await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
 
     res.status(200).json({ success: true });
   } catch (error) {
@@ -143,7 +129,7 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
     if (!config) {
       return res.status(400).json({
         success: false,
-        error: 'Google OAuth not configured. Store credentials via POST /api/v1/google/oauth/credentials (per-user or platform with platform: true for super_admin).'
+        error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or submit credentials via POST /api/v1/google/oauth/credentials.'
       });
     }
 
@@ -168,8 +154,83 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 });
 
 /**
+ * POST /api/v1/google/oauth/authorize/:service
+ * Start OAuth flow using per-client credentials from the frontend (e.g. frontend env GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).
+ * Body: { client_id, client_secret }. Backend stores them in Redis keyed by state for the callback; does not persist.
+ * Requires REDIS_URL and GOOGLE_REDIRECT_URI. Do not log client_secret.
+ */
+router.post('/oauth/authorize/:service', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { service } = req.params;
+    const userId = req.user.userId;
+    const { client_id: clientId, client_secret: clientSecret } = req.body || {};
+
+    if (!clientId || !clientSecret) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing client_id or client_secret in body (per-client credentials from frontend)'
+      });
+    }
+
+    if (!GOOGLE_SCOPES[service]) {
+      return res.status(400).json({ success: false, error: 'Invalid service' });
+    }
+    if (service === 'trends') {
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+      return res.json({
+        success: true,
+        noOAuthRequired: true,
+        message: 'Google Trends connected successfully',
+        redirectUrl: `${frontendUrl}/settings/google-integrations?connected=trends`
+      });
+    }
+
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    if (!redirectUri) {
+      return res.status(500).json({
+        success: false,
+        error: 'GOOGLE_REDIRECT_URI must be set on the backend for OAuth callback'
+      });
+    }
+
+    const redis = getConnection();
+    if (!redis) {
+      return res.status(503).json({
+        success: false,
+        error: 'Redis is required for per-client OAuth. Set REDIS_URL, or use GET /oauth/authorize with backend credentials.'
+      });
+    }
+
+    const state = Buffer.from(JSON.stringify({ userId, service })).toString('base64');
+    const key = OAUTH_STATE_KEY_PREFIX + state;
+    await redis.setex(key, OAUTH_STATE_TTL_SEC, JSON.stringify({
+      clientId: clientId.trim(),
+      clientSecret: clientSecret.trim()
+    }));
+
+    const oauth2Client = new google.auth.OAuth2(
+      clientId.trim(),
+      clientSecret.trim(),
+      `${redirectUri}?service=${service}`
+    );
+
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: GOOGLE_SCOPES[service],
+      state,
+      prompt: 'consent'
+    });
+
+    res.json({ success: true, authUrl });
+  } catch (error) {
+    console.error('OAuth authorization error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/v1/google/oauth/callback
- * OAuth callback handler. Uses credentials from encrypted store (per-user or platform) or env.
+ * OAuth callback handler. Uses credentials from Redis (per-client flow) when present, else per-user or backend env.
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
@@ -181,7 +242,22 @@ router.get('/oauth/callback', async (req, res) => {
 
     const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
 
-    const config = await getGoogleOAuthClientConfig(userId, service);
+    let config = null;
+    const redis = getConnection();
+    if (redis) {
+      const key = OAUTH_STATE_KEY_PREFIX + state;
+      const raw = await redis.get(key);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.clientId && parsed.clientSecret) config = parsed;
+          await redis.del(key);
+        } catch (_) { /* ignore */ }
+      }
+    }
+    if (!config) {
+      config = await getGoogleOAuthClientConfig(userId, service);
+    }
     if (!config) {
       throw new Error('Google OAuth client not configured for this user');
     }
@@ -788,109 +864,6 @@ router.get('/trends/interest-over-time', async (req, res) => {
     res.json({ success: true, data: { timelineData } });
   } catch (error) {
     console.error('Error fetching Google Trends:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-/**
- * GET /api/v1/google/funnel
- * Per-post funnel metrics: Search Impressions → Search Clicks → Time on Site → Internal Links Clicked → CTA Clicks.
- * Requires pageUrl, siteUrl (for GSC), propertyId (for GA), and date range. Returns partial funnel when only GSC or only GA is connected.
- *
- * Query params:
- * - pageUrl (required): The post's URL (full URL for GSC; path for GA pagePath—use same value if your site uses one format for both)
- * - siteUrl (required): Site URL in GSC (e.g. https://example.com or sc-domain:example.com)
- * - propertyId (required): GA4 Property ID
- * - startDate (required): YYYY-MM-DD
- * - endDate (required): YYYY-MM-DD
- */
-router.get('/funnel', authService.authMiddleware.bind(authService), async (req, res) => {
-  try {
-    const { pageUrl, siteUrl, propertyId, startDate, endDate } = req.query;
-
-    if (!pageUrl || !siteUrl || !propertyId || !startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'pageUrl, siteUrl, propertyId, startDate, and endDate are required'
-      });
-    }
-
-    const userId = req.user.userId;
-    const funnel = {
-      search_impressions: null,
-      search_clicks: null,
-      time_on_site_seconds: null,
-      internal_links_clicked: null,
-      cta_clicks: null
-    };
-    const meta = { start_date: startDate, end_date: endDate, gsc_connected: false, ga_connected: false };
-
-    // GSC: Search Impressions + Search Clicks
-    const gscCredentials = await oauthManager.getCredentials(userId, 'google_search_console');
-    if (gscCredentials) {
-      meta.gsc_connected = true;
-      await googleSearchConsoleService.initializeAuth(gscCredentials);
-      const gscResult = await googleSearchConsoleService.getPagePerformance(
-        siteUrl,
-        pageUrl,
-        startDate,
-        endDate
-      );
-      if (gscResult?.data) {
-        funnel.search_impressions = gscResult.data.impressions ?? 0;
-        funnel.search_clicks = gscResult.data.clicks ?? 0;
-      } else {
-        funnel.search_impressions = 0;
-        funnel.search_clicks = 0;
-      }
-    }
-
-    // GA: Time on Site, Internal Links Clicked, CTA Clicks
-    const gaCredentials = await oauthManager.getCredentials(userId, 'google_analytics');
-    if (gaCredentials) {
-      meta.ga_connected = true;
-      await googleAnalyticsService.initializeAuth(gaCredentials);
-      const gaPerf = await googleAnalyticsService.getPagePerformance(
-        propertyId,
-        pageUrl,
-        startDate,
-        endDate
-      );
-      if (gaPerf?.avgSessionDuration != null) {
-        funnel.time_on_site_seconds = Math.round(gaPerf.avgSessionDuration);
-      } else {
-        funnel.time_on_site_seconds = 0;
-      }
-      const internalLinks = await googleAnalyticsService.getPageEventCount(
-        propertyId,
-        pageUrl,
-        startDate,
-        endDate,
-        'internal_link_click'
-      );
-      const ctaClicks = await googleAnalyticsService.getPageEventCount(
-        propertyId,
-        pageUrl,
-        startDate,
-        endDate,
-        'cta_click'
-      );
-      funnel.internal_links_clicked = internalLinks;
-      funnel.cta_clicks = ctaClicks;
-    }
-
-    res.json({ success: true, funnel, meta });
-  } catch (error) {
-    console.error('Google funnel error:', error);
-
-    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
-      return res.status(401).json({
-        success: false,
-        error: 'OAuth token expired or invalid. Please reconnect Google Search Console or Analytics.',
-        needsReconnect: true
-      });
-    }
-
     res.status(500).json({ success: false, error: error.message });
   }
 });
