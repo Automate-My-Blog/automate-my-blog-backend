@@ -808,6 +808,11 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     // Normalize CTAs for narrative prompt (expects cta_text; DB returns .text)
     const ctaForNarrative = (storedCTAs || []).map((c) => ({ cta_text: c.text ?? c.cta_text ?? '' }));
 
+    // Emit phase sub-labels during narrative generation so the checklist sub-text rotates
+    const onNarrativeProgress = (phase) => {
+      void report(0, PROGRESS_STEPS[0], 78, 20, { phase });
+    };
+
     // Generate narrative from all the data
     const narrativeAnalysis = await openaiService.generateWebsiteAnalysisNarrative(
       {
@@ -823,7 +828,8 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
         blogStrategy: analysis.blogStrategy
       },
       intelligenceData,
-      ctaForNarrative
+      ctaForNarrative,
+      onNarrativeProgress
     );
 
     const insightCards = narrativeAnalysis?.cards || [];

@@ -265,7 +265,7 @@ export class OpenAIService {
    * Generate narrative analysis from website analysis data.
    * Returns a short opening statement (1-2 sentences, max 140 chars) plus 4-6 insight cards for the frontend.
    */
-  async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData) {
+  async generateWebsiteAnalysisNarrative(analysisData, intelligenceData, ctaData, onProgress = null) {
     console.log('📝 [NARRATIVE-GEN] Starting narrative generation (opening + insight cards)');
     console.log('📝 [NARRATIVE-GEN] Business:', analysisData.businessName);
     console.log('📝 [NARRATIVE-GEN] Type:', analysisData.businessType);
@@ -303,6 +303,7 @@ RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType} 
 
 Be factual and direct. This leads into showing them the audience segments next.`;
 
+    onProgress?.('Writing opening statement');
     let openingStatement = '';
     try {
       const openingCompletion = await openai.chat.completions.create({
@@ -408,18 +409,38 @@ Format as JSON:
       console.log('📝 [NARRATIVE-GEN] Response format: JSON');
       console.log('📝 [NARRATIVE-GEN] Calling OpenAI API...');
 
-      const completion = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [
-          {
-            role: 'system',
-            content: systemMessage
-          },
-          { role: 'user', content: prompt }
-        ],
-        response_format: { type: 'json_object' },
-        temperature: 0.6
-      });
+      // Rotate phase labels every 7s so the checklist sub-text updates during the ~25s wait
+      const insightPhases = [
+        'Analyzing business positioning',
+        'Identifying growth opportunities',
+        'Crafting insight cards',
+      ];
+      let insightPhaseIndex = 0;
+      onProgress?.(insightPhases[0]);
+      const phaseRotationInterval = onProgress
+        ? setInterval(() => {
+            insightPhaseIndex = (insightPhaseIndex + 1) % insightPhases.length;
+            onProgress(insightPhases[insightPhaseIndex]);
+          }, 7000)
+        : null;
+
+      let completion;
+      try {
+        completion = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [
+            {
+              role: 'system',
+              content: systemMessage
+            },
+            { role: 'user', content: prompt }
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.6
+        });
+      } finally {
+        if (phaseRotationInterval) clearInterval(phaseRotationInterval);
+      }
 
       console.log('📝 [NARRATIVE-GEN] OpenAI response received');
 
