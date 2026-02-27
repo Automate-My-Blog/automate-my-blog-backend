@@ -1031,9 +1031,30 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
     detail: scenarios.length ? `${scenarios.length} audiences` : null
   });
   if (await checkCancelled()) throw new Error('Cancelled');
-  scenarios = await openaiService.generateAudienceImages(scenarios, brandContext, typeof onPartialResult === 'function' ? {
-    onImageComplete: (scenario, index) => onPartialResult('scenario-image-complete', { index, scenario })
-  } : {});
+
+  // Rotate phase labels every 5s during image generation (~18s wait)
+  const imagePhases = [
+    'Designing audience profiles',
+    'Visualizing customer segments',
+    'Finalizing visuals',
+  ];
+  let imagePhaseIndex = 0;
+  const imagePhaseInterval = setInterval(() => {
+    imagePhaseIndex = (imagePhaseIndex + 1) % imagePhases.length;
+    void report(3, PROGRESS_STEPS[3], Math.min(20 + imagePhaseIndex * 20, 60), 10, {
+      phase: imagePhases[imagePhaseIndex],
+      detail: scenarios.length ? `${scenarios.length} audiences` : null
+    });
+  }, 5000);
+
+  try {
+    scenarios = await openaiService.generateAudienceImages(scenarios, brandContext, typeof onPartialResult === 'function' ? {
+      onImageComplete: (scenario, index) => onPartialResult('scenario-image-complete', { index, scenario })
+    } : {});
+  } finally {
+    clearInterval(imagePhaseInterval);
+  }
+
   await report(3, PROGRESS_STEPS[3], 70, 3, {
     phase: PROGRESS_PHASES[3][0],
     detail: scenarios.length ? `${scenarios.length} audiences` : null
