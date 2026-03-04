@@ -291,7 +291,7 @@ Analysis:
 - ${scenarioCount} customer scenarios identified
 - Key insights: ${keyInsightsSnippet}
 
-Write a direct opening statement (1-2 sentences, max 140 chars) that:
+Write a direct opening statement (2-3 sentences) that:
 - States what you LEARNED about THEIR BUSINESS (positioning, brand, focus areas)
 - NOT what customers want - focus on the business itself
 - Be specific about their business model, positioning, or value proposition
@@ -299,7 +299,7 @@ Write a direct opening statement (1-2 sentences, max 140 chars) that:
 - Use simple present tense: "I analyzed X and learned Y"
 
 WRONG: "I found that Safety Managers seek immediate solutions" (talks about customers)
-RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType} positioned as [specific positioning], focusing on [specific solutions]."
+RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType} positioned as [specific positioning], focusing on [specific solutions]. Your content strategy centers on [specific focus], which positions you well to [specific opportunity]."
 
 Be factual and direct. This leads into showing them the audience segments next.`;
 
@@ -309,7 +309,7 @@ Be factual and direct. This leads into showing them the audience segments next.`
       const openingCompletion = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: openingPrompt }],
-        max_tokens: 120,
+        max_tokens: 250,
         temperature: 0.7
       });
       openingStatement = (openingCompletion.choices[0]?.message?.content?.trim() || '').replace(/^["']|["']$/g, '');
