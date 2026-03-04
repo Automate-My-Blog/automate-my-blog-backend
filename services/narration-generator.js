@@ -50,7 +50,7 @@ Analysis:
 - ${scenarioCount} customer scenarios identified
 - Key insights: ${keyInsights ? JSON.stringify(keyInsights).substring(0, 100) : 'Multiple patterns'}
 
-Write a direct opening statement (1-2 sentences, max 140 chars) that:
+Write a direct opening statement (2-3 sentences) that:
 - States what you LEARNED about THEIR BUSINESS (positioning, brand, focus areas)
 - NOT what customers want - focus on the business itself
 - Be specific about their business model, positioning, or value proposition
@@ -58,7 +58,7 @@ Write a direct opening statement (1-2 sentences, max 140 chars) that:
 - Use simple present tense: "I analyzed X and learned Y"
 
 WRONG: "I found that Safety Managers seek immediate solutions" (talks about customers)
-RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType || 'business'} positioned as [specific positioning], focusing on [specific solutions]."
+RIGHT: "I analyzed ${businessName} and learned you're a premium ${businessType || 'business'} positioned as [specific positioning], focusing on [specific solutions]. Your content strategy centers on [specific focus], which positions you well to [specific opportunity]."
 
 Be factual and direct. This leads into showing them the audience segments next.`;
 
@@ -69,7 +69,7 @@ Be factual and direct. This leads into showing them the audience segments next.`
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 120,
+      max_tokens: 250,
       temperature: 0.7,
     });
 
@@ -131,7 +131,7 @@ Business: ${businessName} (${businessType || 'Not specified'})
 Audience Segments Found (${audiences?.length || 0}):
 ${audienceProblems.map((p, i) => `${i + 1}. ${p}`).join('\n')}
 
-Write the next statement (1-2 sentences, max 130 chars) that:
+Write the next statement (2-3 sentences) that:
 - Introduces the ${audiences?.length || 0} audience segments you discovered
 - Explains WHY they fit the target market (shared characteristics or behaviors)
 - Asks which one to focus on
@@ -139,7 +139,7 @@ Write the next statement (1-2 sentences, max 130 chars) that:
 - Keep the same consultant perspective as Part 1
 
 WRONG: "I found 5 audiences struggling with X, Y, Z" (just lists problems)
-RIGHT: "I found ${audiences?.length || 0} distinct audiences that fit your target market because they both [specific shared trait] and [specific behavior]. Which one should we focus on?"
+RIGHT: "I found ${audiences?.length || 0} distinct audiences that fit your target market because they both [specific shared trait] and [specific behavior]. Each has a distinct pain point your content can address directly. Which one should we focus on?"
 
 Direct and factual. This continues your presentation and leads to showing topics next.`;
 
@@ -150,7 +150,7 @@ Direct and factual. This continues your presentation and leads to showing topics
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
+      max_tokens: 200,
       temperature: 0.7,
     });
 
@@ -210,7 +210,7 @@ export async function generateTopicNarration(params) {
 They selected: ${audienceSegment}
 Their problem: ${problem}
 
-Write the final statement (1-2 sentences, max 120 chars) that:
+Write the final statement (2-3 sentences) that:
 - Acknowledges their audience choice briefly
 - Introduces topic recommendations with specific REASONS they'll drive results
 - NOT generic phrases like "content challenges" or "help with"
@@ -219,7 +219,7 @@ Write the final statement (1-2 sentences, max 120 chars) that:
 - Maintain same professional tone from Parts 1 & 2
 
 WRONG: "Here are topics to address content challenges" (generic, no reasoning)
-RIGHT: "For ${audienceSegment}, here are blog ideas that should drive results because they [specific reason like "target high-volume searches"] and [specific reason like "address their main pain point"]. Which one should we write?"
+RIGHT: "For ${audienceSegment}, here are blog ideas that should drive results because they target high-volume searches and address their main pain point around ${problem}. Each topic is designed to build trust and move them toward a decision. Which one should we write?"
 
 Direct and factual. This completes your 3-part presentation.`;
 
@@ -230,7 +230,7 @@ Direct and factual. This completes your 3-part presentation.`;
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 100,
+      max_tokens: 200,
       temperature: 0.7,
     });
 
