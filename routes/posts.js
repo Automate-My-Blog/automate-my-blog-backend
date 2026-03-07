@@ -75,6 +75,32 @@ const safeParse = (jsonString, fieldName, recordId) => {
   }
 };
 
+// Known platform keys for direct publishing (frontend sends these in publish modal)
+const KNOWN_PLATFORMS = new Set(['wordpress', 'medium']);
+
+// Format a raw post row for API response (includes publication metadata per handoff §6)
+const formatPostForResponse = (post) => {
+  if (!post) return null;
+  const topicData = safeParse(post.topic_data, 'topic_data', post.id);
+  const generationMetadata = safeParse(post.generation_metadata, 'generation_metadata', post.id);
+  let platformPublications = post.platform_publications;
+  if (platformPublications === null || platformPublications === undefined) {
+    platformPublications = [];
+  } else if (typeof platformPublications === 'string') {
+    platformPublications = safeParse(platformPublications, 'platform_publications', post.id) || [];
+  }
+  if (!Array.isArray(platformPublications)) {
+    platformPublications = [];
+  }
+  return {
+    ...post,
+    topic_data: topicData,
+    generation_metadata: generationMetadata,
+    publication_status: post.publication_status ?? 'draft',
+    platform_publications: platformPublications
+  };
+};
+
 // =============================================================================
 // CREATE POST - Supports both authenticated and session-based creation
 // =============================================================================
@@ -199,11 +225,7 @@ router.post('/', async (req, res) => {
 
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {
@@ -252,12 +274,7 @@ router.get('/', async (req, res) => {
     
     const result = await db.query(query, params);
     
-    // Parse JSON fields safely
-    const posts = result.rows.map(post => ({
-      ...post,
-      topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-      generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-    }));
+    const posts = result.rows.map(post => formatPostForResponse(post));
     
     console.log('✅ Posts retrieved successfully:', {
       count: posts.length,
@@ -381,11 +398,7 @@ router.post('/:postId/reanalyze-seo', async (req, res) => {
 
     res.json({
       success: true,
-      post: {
-        ...updatedPost,
-        topic_data: safeParse(updatedPost.topic_data, 'topic_data', updatedPost.id),
-        generation_metadata: safeParse(updatedPost.generation_metadata, 'generation_metadata', updatedPost.id)
-      },
+      post: formatPostForResponse(updatedPost),
       analysis: seoResult.analysis,
       message: `SEO analysis complete! Score: ${seoResult.analysis.overallScore}/100`
     });
@@ -395,6 +408,154 @@ router.post('/:postId/reanalyze-seo', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to re-analyze post',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
+// PUBLISH - Direct platform publishing (requires JWT)
+// =============================================================================
+router.post('/:id/publish', async (req, res) => {
+  try {
+    const context = extractUserContext(req);
+    if (!context.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        message: 'Direct publishing requires a logged-in user. Use Authorization: Bearer <token>.'
+      });
+    }
+
+    const { id } = req.params;
+    const { platforms } = req.body || {};
+
+    if (!Array.isArray(platforms) || platforms.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request',
+        message: 'Body must include "platforms" (non-empty array of platform keys, e.g. ["wordpress", "medium"])'
+      });
+    }
+
+    const invalid = platforms.filter((p) => typeof p !== 'string' || !KNOWN_PLATFORMS.has(p.toLowerCase()));
+    if (invalid.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid or disconnected platform',
+        message: `Unsupported or disconnected platform(s): ${invalid.join(', ')}. Supported: ${[...KNOWN_PLATFORMS].join(', ')}`
+      });
+    }
+
+    const normalizedPlatforms = platforms.map((p) => p.toLowerCase());
+
+    const selectResult = await db.query(
+      'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
+      [id, context.userId]
+    );
+    if (selectResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found or access denied'
+      });
+    }
+
+    const platformPublications = normalizedPlatforms.map((p) => ({
+      platform: p,
+      status: 'publishing'
+    }));
+
+    const updateResult = await db.query(
+      `UPDATE blog_posts
+       SET publication_status = $1, platform_publications = $2, updated_at = NOW()
+       WHERE id = $3 AND user_id = $4
+       RETURNING *`,
+      ['publishing', JSON.stringify(platformPublications), id, context.userId]
+    );
+    const updated = updateResult.rows[0];
+
+    res.json({
+      success: true,
+      post: formatPostForResponse(updated)
+    });
+  } catch (error) {
+    console.error('❌ Publish failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to publish post',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
+// UNPUBLISH - Remove post from one platform or all (requires JWT)
+// =============================================================================
+router.post('/:id/unpublish', async (req, res) => {
+  try {
+    const context = extractUserContext(req);
+    if (!context.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        message: 'Unpublishing requires a logged-in user. Use Authorization: Bearer <token>.'
+      });
+    }
+
+    const { id } = req.params;
+    const { platform } = req.body || {};
+
+    const selectResult = await db.query(
+      'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
+      [id, context.userId]
+    );
+    if (selectResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found or access denied'
+      });
+    }
+
+    const post = selectResult.rows[0];
+    let platformPublications = post.platform_publications;
+    if (platformPublications === null || platformPublications === undefined) {
+      platformPublications = [];
+    } else if (typeof platformPublications === 'string') {
+      platformPublications = safeParse(platformPublications, 'platform_publications', post.id) || [];
+    }
+    if (!Array.isArray(platformPublications)) {
+      platformPublications = [];
+    }
+
+    let nextPublications;
+    let nextStatus;
+    if (platform === undefined || platform === null || String(platform).trim() === '') {
+      nextPublications = [];
+      nextStatus = 'draft';
+    } else {
+      const key = String(platform).toLowerCase();
+      nextPublications = platformPublications.filter((item) => String(item.platform).toLowerCase() !== key);
+      nextStatus = nextPublications.length === 0 ? 'draft' : post.publication_status;
+    }
+
+    const updateResult = await db.query(
+      `UPDATE blog_posts
+       SET platform_publications = $1, publication_status = $2, updated_at = NOW()
+       WHERE id = $3 AND user_id = $4
+       RETURNING *`,
+      [JSON.stringify(nextPublications), nextStatus, id, context.userId]
+    );
+    const updated = updateResult.rows[0];
+
+    res.json({
+      success: true,
+      post: formatPostForResponse(updated)
+    });
+  } catch (error) {
+    console.error('❌ Unpublish failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unpublish post',
       details: error.message
     });
   }
@@ -519,11 +680,7 @@ router.get('/:id', async (req, res) => {
     
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {
@@ -623,11 +780,7 @@ router.put('/:id', async (req, res) => {
     
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {
