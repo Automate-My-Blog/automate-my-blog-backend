@@ -669,7 +669,7 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     let data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
 
-    // If empty, refresh once (using SEO keywords or fallback to target_segment/customer_problem) then re-query
+    // If empty, refresh once (keywords from strategies, or fallback, or generic) then re-query
     if (data.length === 0) {
       let strategyResult = await db.query(
         `SELECT DISTINCT a.id
@@ -688,10 +688,8 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
         );
         strategyIds = strategyResult.rows.map((r) => r.id);
       }
-      if (strategyIds.length > 0) {
-        await fetchTrendsForContentCalendar(userId, strategyIds);
-        data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
-      }
+      await fetchTrendsForContentCalendar(userId, strategyIds);
+      data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
     }
 
     res.json({ success: true, data });
@@ -743,16 +741,7 @@ router.post('/trends/refresh', authService.authMiddleware.bind(authService), asy
       strategyIds = strategyResult.rows.map((r) => r.id);
     }
 
-    if (strategyIds.length === 0) {
-      return res.status(200).json({
-        success: true,
-        fetched: 0,
-        keywordCount: 0,
-        errorCount: 0,
-        message: 'No strategies with keywords found. Add strategies (and keywords or audience focus) to refresh emerging topics.'
-      });
-    }
-
+    // When no strategies: service uses generic keywords so user still gets topics
     const result = await fetchTrendsForContentCalendar(userId, strategyIds);
 
     res.json({
