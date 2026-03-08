@@ -64,21 +64,35 @@ export async function fetchTrendsForContentCalendar(userId, strategyIds) {
            AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
         [strategyIds]
       );
-      const toText = (v) => {
-        if (v == null) return '';
-        if (typeof v === 'string') return v;
-        if (typeof v === 'object' && (v.name || v.title)) return v.name || v.title;
-        if (Array.isArray(v) && v[0]) return toText(v[0]);
-        return typeof v === 'object' ? JSON.stringify(v).slice(0, 100) : String(v);
+      /** Extract a clean search phrase: prefer customer_problem, then target_segment demographics/psychographics/searchBehavior. */
+      const toPhrases = (row) => {
+        const phrases = [];
+        if (row.customer_problem && typeof row.customer_problem === 'string') {
+          const first = row.customer_problem.replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
+          if (first && first.length > 2) phrases.push(first);
+        }
+        const ts = row.target_segment;
+        if (ts && typeof ts === 'object' && !Array.isArray(ts)) {
+          for (const key of ['demographics', 'psychographics', 'searchBehavior']) {
+            const v = ts[key];
+            if (typeof v === 'string' && v.trim().length > 2) phrases.push(v.trim());
+          }
+        }
+        if (ts && typeof ts === 'string') {
+          const first = ts.replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
+          if (first && first.length > 2) phrases.push(first);
+        }
+        return phrases;
       };
       for (const row of fallbackResult.rows || []) {
-        const text = [row.customer_problem, row.target_segment].map(toText).filter(Boolean).join(' ');
-        const phrase = (text || '').replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
-        if (phrase && phrase.length > 2 && !seen.has(phrase)) {
-          seen.add(phrase);
-          keywords.push(phrase);
-          if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
+        for (const phrase of toPhrases(row)) {
+          if (phrase.length > 2 && phrase.length < 80 && !seen.has(phrase)) {
+            seen.add(phrase);
+            keywords.push(phrase);
+            if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
+          }
         }
+        if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
       }
     }
     if (keywords.length === 0) {
