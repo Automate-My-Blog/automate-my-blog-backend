@@ -257,8 +257,8 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     res.json({
       success: true,
       connected: !!credentials,
-      expires_at: credentials?.expires_at,
-      scopes: credentials?.scopes
+      expires_at: credentials?.expires_at ?? null,
+      scopes: credentials?.scopes ?? []
     });
   } catch (error) {
     console.error('OAuth status check error:', error);
@@ -669,16 +669,25 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     let data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
 
-    // If empty and user has strategies with keywords, refresh once then re-query
+    // If empty, refresh once (using SEO keywords or fallback to target_segment/customer_problem) then re-query
     if (data.length === 0) {
-      const strategyResult = await db.query(
+      let strategyResult = await db.query(
         `SELECT DISTINCT a.id
          FROM audiences a
          WHERE a.user_id = $1
            AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
         [userId]
       );
-      const strategyIds = strategyResult.rows.map((r) => r.id);
+      let strategyIds = strategyResult.rows.map((r) => r.id);
+      if (strategyIds.length === 0) {
+        strategyResult = await db.query(
+          `SELECT id FROM audiences
+           WHERE user_id = $1
+             AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+          [userId]
+        );
+        strategyIds = strategyResult.rows.map((r) => r.id);
+      }
       if (strategyIds.length > 0) {
         await fetchTrendsForContentCalendar(userId, strategyIds);
         data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
@@ -714,14 +723,25 @@ router.post('/trends/refresh', authService.authMiddleware.bind(authService), asy
       });
     }
 
-    const strategyResult = await db.query(
+    let strategyResult = await db.query(
       `SELECT DISTINCT a.id
        FROM audiences a
        WHERE a.user_id = $1
          AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
       [userId]
     );
-    const strategyIds = strategyResult.rows.map((r) => r.id);
+    let strategyIds = strategyResult.rows.map((r) => r.id);
+
+    // If no strategies have SEO keywords, try audiences with target_segment/customer_problem (fallback for trends)
+    if (strategyIds.length === 0) {
+      strategyResult = await db.query(
+        `SELECT id FROM audiences
+         WHERE user_id = $1
+           AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+        [userId]
+      );
+      strategyIds = strategyResult.rows.map((r) => r.id);
+    }
 
     if (strategyIds.length === 0) {
       return res.status(200).json({
@@ -729,7 +749,7 @@ router.post('/trends/refresh', authService.authMiddleware.bind(authService), asy
         fetched: 0,
         keywordCount: 0,
         errorCount: 0,
-        message: 'No strategies with keywords found. Add keywords to your strategies to refresh emerging topics.'
+        message: 'No strategies with keywords found. Add strategies (and keywords or audience focus) to refresh emerging topics.'
       });
     }
 

@@ -50,10 +50,37 @@ export async function fetchTrendsForContentCalendar(userId, strategyIds) {
     );
 
     const seen = new Set();
-    const keywords = (keywordsResult.rows || [])
+    let keywords = (keywordsResult.rows || [])
       .map((r) => r.keyword?.trim())
       .filter((k) => k && !seen.has(k) && (seen.add(k), true))
       .slice(0, MAX_TRENDS_KEYWORDS);
+
+    // Fallback: no SEO keywords yet — derive from target_segment / customer_problem (same as trends preview)
+    if (keywords.length === 0) {
+      const fallbackResult = await db.query(
+        `SELECT id, customer_problem, target_segment
+         FROM audiences
+         WHERE id = ANY($1::uuid[])
+           AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+        [strategyIds]
+      );
+      const toText = (v) => {
+        if (v == null) return '';
+        if (typeof v === 'string') return v;
+        if (typeof v === 'object' && (v.name || v.title)) return v.name || v.title;
+        if (Array.isArray(v) && v[0]) return toText(v[0]);
+        return typeof v === 'object' ? JSON.stringify(v).slice(0, 100) : String(v);
+      };
+      for (const row of fallbackResult.rows || []) {
+        const text = [row.customer_problem, row.target_segment].map(toText).filter(Boolean).join(' ');
+        const phrase = (text || '').replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
+        if (phrase && phrase.length > 2 && !seen.has(phrase)) {
+          seen.add(phrase);
+          keywords.push(phrase);
+          if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
+        }
+      }
+    }
     if (keywords.length === 0) {
       return { fetched: 0, keywordCount: 0, errorCount: 0 };
     }
