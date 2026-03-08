@@ -241,11 +241,13 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     const { service } = req.params;
     const userId = req.user.userId;
 
-    // Google Trends: no OAuth; dashboard home tile uses { connected: true/false }
+    // Google Trends: no OAuth; match response shape of other services (expires_at, scopes) for frontend
     if (service === 'trends') {
       return res.json({
         success: true,
         connected: true,
+        expires_at: null,
+        scopes: [],
         message: 'Google Trends uses public API - no authentication required'
       });
     }
@@ -649,8 +651,9 @@ REQUIREMENTS:
 /**
  * GET /api/v1/google/trends/topics
  * Return cached emerging/trending topics for the current user (from google_trends_cache).
- * Use this to display "Find Emerging Topics" in the UI. Data is populated by POST /trends/refresh or the daily cron.
- * Requires JWT.
+ * Use this to display "Find Emerging Topics" in the UI.
+ * If cache is empty and the user has strategies with SEO keywords, triggers a one-time
+ * refresh so the response includes data (first load may take a few seconds).
  * Query: limit (optional, default 20).
  */
 router.get('/trends/topics', authService.authMiddleware.bind(authService), async (req, res) => {
@@ -664,7 +667,24 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
       });
     }
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
-    const data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+    let data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+
+    // If empty and user has strategies with keywords, refresh once then re-query
+    if (data.length === 0) {
+      const strategyResult = await db.query(
+        `SELECT DISTINCT a.id
+         FROM audiences a
+         WHERE a.user_id = $1
+           AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
+        [userId]
+      );
+      const strategyIds = strategyResult.rows.map((r) => r.id);
+      if (strategyIds.length > 0) {
+        await fetchTrendsForContentCalendar(userId, strategyIds);
+        data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+      }
+    }
+
     res.json({ success: true, data });
   } catch (error) {
     console.error('Google Trends topics error:', error);
