@@ -690,6 +690,12 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
       }
       await fetchTrendsForContentCalendar(userId, strategyIds);
       data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+
+      // Second chance: if still empty (e.g. audience keywords were long phrases, API returned nothing, or cache had stale empty rows), force fetch with default keywords only
+      if (data.length === 0) {
+        await fetchTrendsForContentCalendar(userId, []);
+        data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+      }
     }
 
     res.json({ success: true, data });
