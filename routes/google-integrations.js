@@ -257,8 +257,8 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     res.json({
       success: true,
       connected: !!credentials,
-      expires_at: credentials?.expires_at,
-      scopes: credentials?.scopes
+      expires_at: credentials?.expires_at ?? null,
+      scopes: credentials?.scopes ?? []
     });
   } catch (error) {
     console.error('OAuth status check error:', error);
