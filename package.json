@@ -16,7 +16,7 @@
     "setup-test-db": "bash scripts/setup-test-db.sh",
     "verify-db": "node verify-connection.js",
     "setup-db": "node setup-database.js",
-    "worker": "node jobs/job-worker.js"
+    "worker": "node -r dotenv/config jobs/job-worker.js"
   },
   "keywords": [
     "autoblog",
