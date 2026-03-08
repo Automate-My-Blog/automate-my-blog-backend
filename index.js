@@ -22,6 +22,7 @@ import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import postsRoutes from './routes/posts.js';
+import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
@@ -229,6 +230,9 @@ app.use('/api/v1/audiences', optionalAuth, audienceRoutes);
 app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
 app.use('/api/v1/users', optionalAuth, userRoutes);
 app.use('/api/v1/posts', optionalAuth, postsRoutes);
+// Medium OAuth callback (no JWT; user is redirected from Medium)
+app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
+app.use('/api/v1/publishing-platforms', requireAuth, publishingPlatformsRoutes);
 app.use('/api/v1/analysis', optionalAuth, analysisRoutes);
 app.use('/api/v1/jobs', optionalAuth, jobsRoutes);
 app.use('/api/v1/voice-samples', requireAuth, voiceSamplesRoutes);

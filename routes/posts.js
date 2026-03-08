@@ -1,6 +1,9 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
+import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
+import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToWordPress } from '../services/wordpress-publish.js';
 
 const router = express.Router();
 
@@ -54,9 +57,6 @@ const safeParse = (jsonString, fieldName, recordId) => {
     return null;
   }
 };
-
-// Known platform keys for direct publishing (frontend sends these in publish modal)
-const KNOWN_PLATFORMS = new Set(['wordpress', 'medium']);
 
 // Format a raw post row for API response (includes publication metadata per handoff §6)
 const formatPostForResponse = (post) => {
@@ -418,16 +418,36 @@ router.post('/:id/publish', async (req, res) => {
       });
     }
 
-    const invalid = platforms.filter((p) => typeof p !== 'string' || !KNOWN_PLATFORMS.has(p.toLowerCase()));
-    if (invalid.length > 0) {
+    const normalizedPlatforms = platforms
+      .filter((p) => typeof p === 'string' && p.trim())
+      .map((p) => normalizePlatformKey(p))
+      .filter(Boolean);
+    if (normalizedPlatforms.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or disconnected platform',
-        message: `Unsupported or disconnected platform(s): ${invalid.join(', ')}. Supported: ${[...KNOWN_PLATFORMS].join(', ')}`
+        error: 'Invalid request',
+        message: 'Body must include "platforms" (non-empty array of platform keys: wordpress, medium, substack, ghost)'
       });
     }
 
-    const normalizedPlatforms = platforms.map((p) => p.toLowerCase());
+    const unknown = platforms.filter((p) => normalizePlatformKey(p) === null);
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid platform',
+        message: `Unsupported platform(s): ${unknown.join(', ')}. Supported: ${[...PLATFORM_KEYS].join(', ')}`
+      });
+    }
+
+    const connected = await getConnectedPlatforms(context.userId);
+    const notConnected = normalizedPlatforms.filter((p) => !connected.has(p));
+    if (notConnected.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Platform not connected',
+        message: `The following platform(s) are not connected for your account. Connect them in Settings first: ${notConnected.join(', ')}`
+      });
+    }
 
     const selectResult = await db.query(
       'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
@@ -440,17 +460,50 @@ router.post('/:id/publish', async (req, res) => {
       });
     }
 
-    const platformPublications = normalizedPlatforms.map((p) => ({
-      platform: p,
-      status: 'publishing'
-    }));
+    const post = selectResult.rows[0];
+    const platformPublications = [];
+
+    for (const platformKey of normalizedPlatforms) {
+      if (platformKey === 'wordpress') {
+        const creds = await getConnectionCredentials(context.userId, 'wordpress');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'WordPress connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToWordPress(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url
+          });
+        } catch (err) {
+          console.error('WordPress publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else {
+        // Medium, Substack, Ghost: not yet implemented; leave as publishing
+        platformPublications.push({ platform: platformKey, status: 'publishing' });
+      }
+    }
+
+    const anyPublished = platformPublications.some((p) => p.status === 'published');
+    const anyFailed = platformPublications.some((p) => p.status === 'failed');
+    const publicationStatus = anyFailed && !anyPublished ? 'failed' : anyPublished ? 'published' : 'publishing';
 
     const updateResult = await db.query(
       `UPDATE blog_posts
        SET publication_status = $1, platform_publications = $2, updated_at = NOW()
        WHERE id = $3 AND user_id = $4
        RETURNING *`,
-      ['publishing', JSON.stringify(platformPublications), id, context.userId]
+      [publicationStatus, JSON.stringify(platformPublications), id, context.userId]
     );
     const updated = updateResult.rows[0];
 
