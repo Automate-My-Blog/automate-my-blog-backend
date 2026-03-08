@@ -1,6 +1,7 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
+import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 
 const router = express.Router();
 
@@ -54,9 +55,6 @@ const safeParse = (jsonString, fieldName, recordId) => {
     return null;
   }
 };
-
-// Known platform keys for direct publishing (frontend sends these in publish modal)
-const KNOWN_PLATFORMS = new Set(['wordpress', 'medium']);
 
 // Format a raw post row for API response (includes publication metadata per handoff §6)
 const formatPostForResponse = (post) => {
@@ -418,16 +416,36 @@ router.post('/:id/publish', async (req, res) => {
       });
     }
 
-    const invalid = platforms.filter((p) => typeof p !== 'string' || !KNOWN_PLATFORMS.has(p.toLowerCase()));
-    if (invalid.length > 0) {
+    const normalizedPlatforms = platforms
+      .filter((p) => typeof p === 'string' && p.trim())
+      .map((p) => normalizePlatformKey(p))
+      .filter(Boolean);
+    if (normalizedPlatforms.length === 0) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid or disconnected platform',
-        message: `Unsupported or disconnected platform(s): ${invalid.join(', ')}. Supported: ${[...KNOWN_PLATFORMS].join(', ')}`
+        error: 'Invalid request',
+        message: 'Body must include "platforms" (non-empty array of platform keys: wordpress, medium, substack, ghost)'
       });
     }
 
-    const normalizedPlatforms = platforms.map((p) => p.toLowerCase());
+    const unknown = platforms.filter((p) => normalizePlatformKey(p) === null);
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid platform',
+        message: `Unsupported platform(s): ${unknown.join(', ')}. Supported: ${[...PLATFORM_KEYS].join(', ')}`
+      });
+    }
+
+    const connected = await getConnectedPlatforms(context.userId);
+    const notConnected = normalizedPlatforms.filter((p) => !connected.has(p));
+    if (notConnected.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Platform not connected',
+        message: `The following platform(s) are not connected for your account. Connect them in Settings first: ${notConnected.join(', ')}`
+      });
+    }
 
     const selectResult = await db.query(
       'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
