@@ -669,7 +669,11 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
     let data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
 
-    // If empty, refresh once (keywords from strategies, or fallback, or generic) then re-query
+    // If empty, refresh: try default keywords first (fast, ~5s), then strategy-based if still empty
+    if (data.length === 0) {
+      await fetchTrendsForContentCalendar(userId, []);
+      data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+    }
     if (data.length === 0) {
       let strategyResult = await db.query(
         `SELECT DISTINCT a.id

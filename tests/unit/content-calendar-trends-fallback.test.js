@@ -161,7 +161,7 @@ describe('fetchTrendsForContentCalendar fallback', () => {
     expect(result.fetched).toBe(2);
   });
 
-  it('adds default keywords when fallback yields only long phrases (Trends API returns empty for long queries)', async () => {
+  it('uses only default keywords when fallback yields only long phrases (avoids timeout, Trends API returns empty for long queries)', async () => {
     const longPhrase = 'Finding reliable solutions and expert guidance in their field of interest';
     mockQuery
       .mockResolvedValueOnce({ rows: [] })
@@ -178,13 +178,12 @@ describe('fetchTrendsForContentCalendar fallback', () => {
 
     const { fetchTrendsForContentCalendar } = await import('../../services/content-calendar-service.js');
     const resultP = fetchTrendsForContentCalendar(userId, strategyIds);
-    await vi.advanceTimersByTimeAsync(10000);
+    await vi.advanceTimersByTimeAsync(5000);
     const result = await resultP;
 
+    expect(mockGetRisingQueries).toHaveBeenCalledTimes(2);
     expect(mockGetRisingQueries).toHaveBeenNthCalledWith(1, 'content marketing', 'US', '7d', userId);
     expect(mockGetRisingQueries).toHaveBeenNthCalledWith(2, 'digital marketing', 'US', '7d', userId);
-    expect(mockGetRisingQueries).toHaveBeenCalledWith(longPhrase, 'US', '7d', userId);
-    expect(result.keywordCount).toBeLessThanOrEqual(10);
-    expect(result.keywordCount).toBeGreaterThanOrEqual(3);
+    expect(result.keywordCount).toBe(2);
   });
 });
