@@ -1,14 +1,27 @@
 /**
  * Third-party publishing platform connections (WordPress, Medium, Substack, Ghost).
- * List, connect, disconnect. All endpoints require JWT.
+ * List, connect, disconnect. All endpoints require JWT except Medium OAuth callback.
  * @see docs: Third-Party Publishing Services — Backend Handoff
  */
 import express from 'express';
+import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import db from '../services/database.js';
 import oauthManager from '../services/oauth-manager.js';
 import { PLATFORM_KEYS, PLATFORM_LABELS, normalizePlatformKey } from '../lib/publishing-platforms.js';
 
 const router = express.Router();
+
+const MEDIUM_AUTH_URL = 'https://medium.com/m/oauth/authorize';
+const MEDIUM_TOKEN_URL = 'https://api.medium.com/v1/tokens';
+const MEDIUM_SCOPES = 'basicProfile,publishPost';
+
+function getMediumRedirectUri() {
+  const uri = (process.env.MEDIUM_REDIRECT_URI || '').trim();
+  if (uri) return uri.replace(/\?.*$/, '');
+  const base = (process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`) || process.env.BACKEND_URL || process.env.API_URL;
+  return base ? `${base.replace(/\/+$/, '')}/api/v1/publishing-platforms/medium/callback` : '';
+}
 
 function requireAuth(req, res, next) {
   if (!req.user?.userId) {
@@ -71,17 +84,22 @@ router.post('/connect', requireAuth, async (req, res) => {
     }
 
     if (platform === 'wordpress') {
-      const { site_url, application_password } = rest;
+      const { site_url, username, application_password } = rest;
       if (!site_url || typeof application_password !== 'string' || !application_password.trim()) {
         return res.status(400).json({
           success: false,
           error: 'Invalid request',
-          message: 'WordPress connection requires site_url and application_password'
+          message: 'WordPress connection requires site_url and application_password. Include username for publishing.'
         });
       }
+      const wpUsername = typeof username === 'string' && username.trim() ? username.trim() : null;
       const url = String(site_url).trim().replace(/\/+$/, '');
       const credentialsEncrypted = oauthManager.encryptToken(
-        JSON.stringify({ site_url: url, application_password: application_password.trim() })
+        JSON.stringify({
+          site_url: url,
+          username: wpUsername,
+          application_password: application_password.trim()
+        })
       );
       await db.query(
         `INSERT INTO publishing_platform_connections
@@ -126,12 +144,69 @@ router.post('/connect', requireAuth, async (req, res) => {
       return res.json({ success: true, platform });
     }
 
-    if (platform === 'medium' || platform === 'substack') {
-      return res.status(501).json({
-        success: false,
-        error: 'Not implemented',
-        message: `${PLATFORM_LABELS[platform]} OAuth flow is not yet implemented. Connect WordPress or Ghost in the meantime.`
+    if (platform === 'medium') {
+      const clientId = process.env.MEDIUM_CLIENT_ID;
+      const clientSecret = process.env.MEDIUM_CLIENT_SECRET;
+      const redirectUri = getMediumRedirectUri();
+      if (!clientId || !clientSecret) {
+        return res.status(503).json({
+          success: false,
+          error: 'Service unavailable',
+          message: 'Medium OAuth is not configured (MEDIUM_CLIENT_ID, MEDIUM_CLIENT_SECRET).'
+        });
+      }
+      if (!redirectUri) {
+        return res.status(503).json({
+          success: false,
+          error: 'Service unavailable',
+          message: 'Medium redirect URI not set. Set MEDIUM_REDIRECT_URI or BACKEND_URL.'
+        });
+      }
+      const state = jwt.sign(
+        { userId, platform: 'medium', nonce: crypto.randomUUID() },
+        process.env.JWT_SECRET || 'fallback-secret-for-development',
+        { expiresIn: '600s' }
+      );
+      const authUrl = new URL(MEDIUM_AUTH_URL);
+      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('scope', MEDIUM_SCOPES);
+      authUrl.searchParams.set('state', state);
+      authUrl.searchParams.set('response_type', 'code');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      return res.json({
+        success: true,
+        authorization_url: authUrl.toString(),
+        state
       });
+    }
+
+    if (platform === 'substack') {
+      const { api_key, publication_url } = rest;
+      if (!api_key || typeof api_key !== 'string' || !api_key.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid request',
+          message: 'Substack connection requires api_key (from https://auth.substackapi.dev/)'
+        });
+      }
+      const pubUrl = publication_url && String(publication_url).trim();
+      const credentialsEncrypted = oauthManager.encryptToken(
+        JSON.stringify({ api_key: api_key.trim(), publication_url: pubUrl || null })
+      );
+      await db.query(
+        `INSERT INTO publishing_platform_connections
+         (user_id, platform, credentials_encrypted, site_url, account, connected, updated_at)
+         VALUES ($1, $2, $3, $4, $5, true, NOW())
+         ON CONFLICT (user_id, platform)
+         DO UPDATE SET
+           credentials_encrypted = EXCLUDED.credentials_encrypted,
+           site_url = EXCLUDED.site_url,
+           account = EXCLUDED.account,
+           connected = true,
+           updated_at = NOW()`,
+        [userId, platform, credentialsEncrypted, pubUrl || null, pubUrl || 'Substack']
+      );
+      return res.json({ success: true, platform });
     }
 
     return res.status(400).json({
@@ -193,5 +268,108 @@ router.delete('/:platform/disconnect', requireAuth, async (req, res) => {
     });
   }
 });
+
+/**
+ * Medium OAuth callback (no JWT). Register in index.js without requireAuth.
+ * GET /api/v1/publishing-platforms/medium/callback?code=...&state=...
+ */
+export async function mediumOAuthCallback(req, res) {
+  const frontendBase = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+  const successRedirect = `${frontendBase}/settings?publishing=connected&platform=medium`;
+  const errorRedirect = (message) => `${frontendBase}/settings?publishing=error&message=${encodeURIComponent(message)}`;
+
+  try {
+    const { code, state, error: oauthError } = req.query;
+    if (oauthError) {
+      const msg = oauthError === 'access_denied' ? 'Medium access was denied' : String(oauthError);
+      return res.redirect(errorRedirect(msg));
+    }
+    if (!code || !state) {
+      return res.redirect(errorRedirect('Missing code or state from Medium'));
+    }
+
+    const secret = process.env.JWT_SECRET || 'fallback-secret-for-development';
+    let payload;
+    try {
+      payload = jwt.verify(state, secret);
+    } catch {
+      return res.redirect(errorRedirect('Invalid or expired state. Please try connecting again.'));
+    }
+    if (payload.platform !== 'medium' || !payload.userId) {
+      return res.redirect(errorRedirect('Invalid state'));
+    }
+    const userId = payload.userId;
+
+    const clientId = process.env.MEDIUM_CLIENT_ID;
+    const clientSecret = process.env.MEDIUM_CLIENT_SECRET;
+    const redirectUri = getMediumRedirectUri();
+    if (!clientId || !clientSecret || !redirectUri) {
+      return res.redirect(errorRedirect('Medium OAuth not configured'));
+    }
+
+    const tokenRes = await fetch(MEDIUM_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri
+      })
+    });
+
+    if (!tokenRes.ok) {
+      const errText = await tokenRes.text();
+      console.error('Medium token exchange failed:', tokenRes.status, errText);
+      return res.redirect(errorRedirect('Could not complete Medium connection'));
+    }
+
+    const tokenData = await tokenRes.json();
+    const { access_token: accessToken, refresh_token: refreshToken, expires_at: expiresAt } = tokenData;
+    if (!accessToken) {
+      return res.redirect(errorRedirect('Invalid response from Medium'));
+    }
+
+    let account = 'Medium';
+    try {
+      const meRes = await fetch('https://api.medium.com/v1/me', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      if (meRes.ok) {
+        const me = await meRes.json();
+        account = me?.data?.username || me?.data?.name || account;
+      }
+    } catch (e) {
+      console.warn('Medium /me failed, using default account label:', e.message);
+    }
+
+    const credentialsEncrypted = oauthManager.encryptToken(
+      JSON.stringify({
+        access_token: accessToken,
+        refresh_token: refreshToken || null,
+        expires_at: expiresAt || null
+      })
+    );
+
+    await db.query(
+      `INSERT INTO publishing_platform_connections
+       (user_id, platform, credentials_encrypted, account, connected, updated_at)
+       VALUES ($1, 'medium', $2, $3, true, NOW())
+       ON CONFLICT (user_id, platform)
+       DO UPDATE SET
+         credentials_encrypted = EXCLUDED.credentials_encrypted,
+         account = EXCLUDED.account,
+         connected = true,
+         updated_at = NOW()`,
+      [userId, credentialsEncrypted, account]
+    );
+
+    res.redirect(successRedirect);
+  } catch (err) {
+    console.error('Medium OAuth callback error:', err);
+    res.redirect(errorRedirect(err.message || 'Connection failed'));
+  }
+}
 
 export default router;

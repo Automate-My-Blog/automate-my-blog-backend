@@ -91,6 +91,59 @@ describe.skipIf(!hasDb)('publishing-platforms routes', () => {
     expect(res.body?.message).toMatch(/site_url|application_password/i);
   });
 
+  it('POST /publishing-platforms/connect Medium returns authorization_url or 503', async () => {
+    const res = await request(app)
+      .post('/api/v1/publishing-platforms/connect')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Content-Type', 'application/json')
+      .send({ platform: 'medium' });
+    if (res.status === 200) {
+      expect(res.body?.success).toBe(true);
+      expect(res.body?.authorization_url).toBeDefined();
+      expect(res.body.authorization_url).toMatch(/medium\.com\/m\/oauth\/authorize/);
+    } else {
+      expect(res.status).toBe(503);
+      expect(res.body?.message).toMatch(/not configured|redirect/i);
+    }
+  });
+
+  it('POST /publishing-platforms/connect Substack without api_key returns 400', async () => {
+    const res = await request(app)
+      .post('/api/v1/publishing-platforms/connect')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Content-Type', 'application/json')
+      .send({ platform: 'substack' });
+    expect(res.status).toBe(400);
+    expect(res.body?.message).toMatch(/api_key/i);
+  });
+
+  it('POST /publishing-platforms/connect Substack with api_key returns 200 or 503', async () => {
+    const res = await request(app)
+      .post('/api/v1/publishing-platforms/connect')
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Content-Type', 'application/json')
+      .send({
+        platform: 'substack',
+        api_key: 'sk_test_fake_key_for_test',
+        publication_url: 'https://example.substack.com'
+      });
+    if (res.status === 200) {
+      expect(res.body?.success).toBe(true);
+      expect(res.body?.platform).toBe('substack');
+    } else {
+      expect(res.status).toBe(503);
+      expect(res.body?.message).toMatch(/Encryption|OAUTH_ENCRYPTION_KEY/i);
+    }
+  });
+
+  it('GET /publishing-platforms/medium/callback without code redirects to frontend with error', async () => {
+    const res = await request(app)
+      .get('/api/v1/publishing-platforms/medium/callback')
+      .query({ state: 'invalid' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toMatch(/publishing=error|message=/);
+  });
+
   it('POST /posts/:id/publish with unconnected platform returns 400', async () => {
     const createRes = await request(app)
       .post('/api/v1/posts')

@@ -2,6 +2,8 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
+import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToWordPress } from '../services/wordpress-publish.js';
 
 const router = express.Router();
 
@@ -458,17 +460,50 @@ router.post('/:id/publish', async (req, res) => {
       });
     }
 
-    const platformPublications = normalizedPlatforms.map((p) => ({
-      platform: p,
-      status: 'publishing'
-    }));
+    const post = selectResult.rows[0];
+    const platformPublications = [];
+
+    for (const platformKey of normalizedPlatforms) {
+      if (platformKey === 'wordpress') {
+        const creds = await getConnectionCredentials(context.userId, 'wordpress');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'WordPress connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToWordPress(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url
+          });
+        } catch (err) {
+          console.error('WordPress publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else {
+        // Medium, Substack, Ghost: not yet implemented; leave as publishing
+        platformPublications.push({ platform: platformKey, status: 'publishing' });
+      }
+    }
+
+    const anyPublished = platformPublications.some((p) => p.status === 'published');
+    const anyFailed = platformPublications.some((p) => p.status === 'failed');
+    const publicationStatus = anyFailed && !anyPublished ? 'failed' : anyPublished ? 'published' : 'publishing';
 
     const updateResult = await db.query(
       `UPDATE blog_posts
        SET publication_status = $1, platform_publications = $2, updated_at = NOW()
        WHERE id = $3 AND user_id = $4
        RETURNING *`,
-      ['publishing', JSON.stringify(platformPublications), id, context.userId]
+      [publicationStatus, JSON.stringify(platformPublications), id, context.userId]
     );
     const updated = updateResult.rows[0];
 
