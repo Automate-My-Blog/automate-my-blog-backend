@@ -27,7 +27,26 @@ Quick audit of Google integration routes and services (Trends, Search Console, A
 | GET /trends/rising-queries, related-topics, interest-over-time | Optional | Public-style; no user cache. |
 
 - **Cache:** `google-trends.js` getRisingQueries: cache hit only when rising_queries is non-empty; empty cache triggers refetch.
-- **Content calendar:** `content-calendar-service.js` adds default short keywords when fallback yields only long phrases (> 40 chars).
+- **Content calendar:** When fallback yields only long phrases (> 40 chars), we use **only** default keywords (2), not long phrases, so the fetch finishes in ~5s and avoids serverless timeout.
+- **GET /trends/topics when empty:** Tries default-keywords fetch first, then strategy-based fetch if still empty. Ensures a fast path that usually returns data.
+
+---
+
+## 2b. How to verify Trends after deploy
+
+1. **Call the API** (use a valid staging JWT):
+   ```bash
+   curl -s -H "Authorization: Bearer YOUR_JWT" "https://<staging-api>/api/v1/google/trends/topics" | jq '.data | length'
+   ```
+   Expect: a number **> 0** (first call may take ~5–10s while default keywords are fetched).
+
+2. **Optional – run against staging DB locally:**
+   ```bash
+   STAGING_DATABASE_URL="postgresql://..." node scripts/test-trends-against-staging.js <userId>
+   ```
+   Expect: `OK: Topics returned. Flow works against staging.`
+
+3. **If still empty:** Check Vercel function logs for errors from the Trends API or DB; confirm the deployment includes the default-first and default-only-long-phrases changes.
 
 ---
 

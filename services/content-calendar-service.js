@@ -111,12 +111,11 @@ export async function fetchTrendsForContentCalendar(userId, strategyIds) {
       console.log(`📈 Using default trends keywords for user ${userId}: ${keywords.join(', ')}`);
     } else {
       // Fallback often yields long phrases; Google Trends rarely returns rising data for those.
-      // Ensure we always include short default keywords so at least some topics are returned.
+      // Use ONLY default keywords (no long phrases) so we finish in ~5s and avoid serverless timeout.
       const hasShortKeyword = keywords.some((k) => k.length <= MAX_KEYWORD_LENGTH_FOR_TRENDS);
       if (!hasShortKeyword) {
-        const extra = DEFAULT_TRENDS_KEYWORDS.filter((d) => !keywords.includes(d));
-        keywords = [...extra, ...keywords].slice(0, MAX_TRENDS_KEYWORDS);
-        console.log(`📈 Added default trends keywords (audience phrases too long for Trends): ${DEFAULT_TRENDS_KEYWORDS.join(', ')}`);
+        keywords = DEFAULT_TRENDS_KEYWORDS.slice(0, 2);
+        console.log(`📈 Using default trends keywords only (audience phrases too long for Trends): ${keywords.join(', ')}`);
       }
     }
 
