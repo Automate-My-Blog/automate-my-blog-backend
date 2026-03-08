@@ -22,6 +22,7 @@ import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import postsRoutes from './routes/posts.js';
+import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
@@ -66,6 +67,9 @@ if (!process.env.REDIS_URL) {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const optionalAuth = authService.optionalAuthMiddleware.bind(authService);
+const requireAuth = authService.authMiddleware.bind(authService);
+const requireFlexibleAuth = authService.authMiddlewareFlexible.bind(authService);
 
 // Configure Express to trust Vercel proxy for accurate IP detection
 app.set('trust proxy', 1);
@@ -222,26 +226,29 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // API Routes
 app.use('/api/v1/session', sessionRoutes);
-app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
-app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
-app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
-app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
-app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
-app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
-app.use('/api/v1/voice-samples', authService.authMiddleware.bind(authService), voiceSamplesRoutes);
+app.use('/api/v1/audiences', optionalAuth, audienceRoutes);
+app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
+app.use('/api/v1/users', optionalAuth, userRoutes);
+app.use('/api/v1/posts', optionalAuth, postsRoutes);
+// Medium OAuth callback (no JWT; user is redirected from Medium)
+app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
+app.use('/api/v1/publishing-platforms', requireAuth, publishingPlatformsRoutes);
+app.use('/api/v1/analysis', optionalAuth, analysisRoutes);
+app.use('/api/v1/jobs', optionalAuth, jobsRoutes);
+app.use('/api/v1/voice-samples', requireAuth, voiceSamplesRoutes);
 app.use('/api/v1/stream', registerStreamRoute(authService));
-app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
-app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
-app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
-app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
-app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
-app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes);
-app.use('/api/v1/topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
-app.use('/api/v1/tweets', authService.optionalAuthMiddleware.bind(authService), tweetRoutes);
-app.use('/api/v1/youtube-videos', authService.optionalAuthMiddleware.bind(authService), youtubeVideosRoutes);
-app.use('/api/v1/news-articles', authService.optionalAuthMiddleware.bind(authService), newsArticlesRoutes);
-app.use('/api/v1/trending-topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
-app.use('/api/v1/organizations', authService.optionalAuthMiddleware.bind(authService), organizationRoutes);
+app.use('/api/v1/seo-analysis', requireAuth, seoAnalysisRoutes);
+app.use('/api/v1/content-upload', requireAuth, contentUploadRoutes);
+app.use('/api/v1/manual-inputs', requireAuth, manualInputRoutes);
+app.use('/api/v1/visual-content', requireAuth, visualContentRoutes);
+app.use('/api/v1/enhanced-blog-generation', requireAuth, enhancedBlogGenerationRoutes);
+app.use('/api/v1/blog', requireAuth, blogRoutes);
+app.use('/api/v1/topics', optionalAuth, topicRoutes);
+app.use('/api/v1/tweets', optionalAuth, tweetRoutes);
+app.use('/api/v1/youtube-videos', optionalAuth, youtubeVideosRoutes);
+app.use('/api/v1/news-articles', optionalAuth, newsArticlesRoutes);
+app.use('/api/v1/trending-topics', optionalAuth, topicRoutes);
+app.use('/api/v1/organizations', optionalAuth, organizationRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
 // Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
@@ -251,26 +258,26 @@ app.use('/api/v1/stripe', (req, res, next) => {
     return next();
   }
   // All other Stripe endpoints require authentication
-  authService.authMiddleware.bind(authService)(req, res, next);
+  requireAuth(req, res, next);
 }, stripeRoutes);
 
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
-app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
+app.use('/api/v1/strategies/bundle', requireAuth, bundleSubscriptionRoutes);
 // Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
-app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
+app.use('/api/v1/strategies', requireFlexibleAuth, strategyRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
 
 // Google API Integrations (Trends, Search Console, Analytics)
-app.use('/api/v1/google', authService.optionalAuthMiddleware.bind(authService), googleIntegrationsRoutes);
+app.use('/api/v1/google', optionalAuth, googleIntegrationsRoutes);
 
 // Email test routes (optional auth for testing)
-app.use('/api/v1/email/test', authService.optionalAuthMiddleware.bind(authService), emailTestRoutes);
+app.use('/api/v1/email/test', optionalAuth, emailTestRoutes);
 
 // Scheduler routes (optional auth for testing/admin)
-app.use('/api/v1/scheduler', authService.optionalAuthMiddleware.bind(authService), schedulerRoutes);
+app.use('/api/v1/scheduler', optionalAuth, schedulerRoutes);
 
 // Email preferences and unsubscribe routes (no auth required for unsubscribe token)
 app.use('/api/v1/email-preferences', emailPreferencesRoutes);
@@ -279,7 +286,7 @@ app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 app.use(founderEmailRoutes);
 
 // Admin panel: stats and cache management (super_admin JWT or ADMIN_API_KEY)
-app.use('/api/v1/admin-panel', authService.optionalAuthMiddleware.bind(authService), requireAdmin, adminPanelRouter);
+app.use('/api/v1/admin-panel', optionalAuth, requireAdmin, adminPanelRouter);
 // Admin login page (public): same shell as /admin so login + redirect works
 app.get('/admin/login', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -365,7 +372,6 @@ if (isDev) {
         connectionTest: dbTestResult,
         healthStats: dbHealthStats,
         hasUrl: !!process.env.DATABASE_URL,
-        urlStart: process.env.DATABASE_URL?.substring(0, 20) || 'Not set',
         urlLength: process.env.DATABASE_URL?.length || 0,
         urlProtocol: process.env.DATABASE_URL?.split('://')[0] || 'none'
       },

@@ -73,6 +73,8 @@ Copy `.env.example` to `.env` and fill in values. Key variables:
 | `STRIPE_SECRET_KEY` | For billing | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | For webhooks | Stripe webhook signing secret |
 
+For **Google OAuth** (Search Console, Analytics), credentials are stored in the **encrypted store** (no Vercel env vars required): super_admin calls POST `/api/v1/google/oauth/credentials` with `platform: true` once, or users store their own via the same endpoint. Backend needs `GOOGLE_REDIRECT_URI` and `OAUTH_ENCRYPTION_KEY`. See [docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md).
+
 See `.env.example` for the full list.
 
 ## Installation
@@ -84,7 +86,17 @@ npm install
 ## Development
 
 ```bash
+# API server
 npm run dev
+
+# Job worker (required for async /api/v1/jobs endpoints)
+npm run worker
+```
+
+The job queue also requires Redis:
+
+```bash
+REDIS_URL=redis://localhost:6379
 ```
 
 ## Testing
@@ -105,6 +117,17 @@ npm run test:coverage
 - Migrations live in `database/` and `database/migrations/`
 - Run migrations via `scripts/run_migrations.sh` or your deployment pipeline
 - Setup from scratch: `npm run setup-db`
+
+## Repository Layout
+
+- `index.js` - application entrypoint (Express app wiring and shared middleware)
+- `routes/` - request handlers by domain (`analysis`, `jobs`, `blog`, `stripe`, etc.)
+- `services/` - business logic + external integrations (OpenAI, DB, billing, scraping)
+- `jobs/` - schedulers and BullMQ worker processors
+- `lib/` - shared validation and domain-error helpers
+- `utils/` - low-level helpers (streaming, parsing, normalization)
+- `database/` + `migrations/` - SQL schema changes and migration history
+- `tests/` - unit + integration coverage
 
 ## Deployment
 

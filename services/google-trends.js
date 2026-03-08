@@ -12,7 +12,28 @@ export class GoogleTrendsService {
   }
 
   /**
-   * Get rising search queries for a keyword (with caching)
+   * Resolve timeframe string to start/end dates for the API.
+   * @param {string} timeframe - e.g. '7d', '30d', 'today 1-m'
+   * @returns {{ startTime: Date, endTime: Date }}
+   */
+  _timeframeToDates(timeframe) {
+    const endTime = new Date();
+    const startTime = new Date(endTime);
+    if (timeframe === '7d' || timeframe === '7') {
+      startTime.setDate(startTime.getDate() - 7);
+    } else if (timeframe === '30d' || timeframe === '30' || (typeof timeframe === 'string' && timeframe.includes('1-m'))) {
+      startTime.setDate(startTime.getDate() - 30);
+    } else {
+      startTime.setDate(startTime.getDate() - 7); // default 7 days
+    }
+    return { startTime, endTime };
+  }
+
+  /**
+   * Get rising search queries for a keyword (with caching).
+   * API returns rankedList[0]=Top (relative interest), rankedList[1]=Rising (growth/Breakout).
+   * We prefer Rising when present so the UI shows actual trending growth, and fall back to Top.
+   *
    * @param {string} keyword - The keyword to search for
    * @param {string} geo - Geographic region (default: 'US')
    * @param {string} timeframe - Time range (default: '7d' for last 7 days)
@@ -20,36 +41,41 @@ export class GoogleTrendsService {
    * @returns {Promise<Array>} Rising queries data
    */
   async getRisingQueries(keyword, geo = 'US', timeframe = '7d', userId = null) {
-    // Check cache first (expires after 6 hours)
+    // Check cache first (expires after 6 hours). Treat empty rising_queries as miss so we refetch.
     const cached = await this.getCachedData(keyword, geo, timeframe, userId);
-    if (cached && cached.rising_queries) {
+    if (cached && cached.rising_queries && Array.isArray(cached.rising_queries) && cached.rising_queries.length > 0) {
       console.log(`📦 Cache hit for trending queries: "${keyword}"`);
       return cached.rising_queries;
     }
 
     try {
+      const { startTime, endTime } = this._timeframeToDates(timeframe);
       console.log(`📈 Fetching Google Trends for keyword: "${keyword}", geo: ${geo}, timeframe: ${timeframe}`);
 
-      // Fetch from Google Trends API
+      // Fetch from Google Trends API (date range improves relevance of "Rising" results)
       const result = await googleTrends.relatedQueries({
         keyword,
         geo,
         category: 0,
-        hl: 'en-US'
+        hl: 'en-US',
+        startTime,
+        endTime
       });
 
       const data = JSON.parse(result);
 
-      // Extract rising queries (if available)
+      // API returns rankedList[0] = Top (relative interest 0-100), rankedList[1] = Rising (growth %, Breakout)
+      // Prefer Rising so we show actual trending growth; fall back to Top if Rising is empty
       let risingQueries = [];
       if (data.default?.rankedList) {
-        const risingList = data.default.rankedList.find(list => list.rankedKeyword?.length > 0);
+        const lists = data.default.rankedList.filter(list => list.rankedKeyword?.length > 0);
+        const risingList = lists.length > 1 ? lists[1] : lists[0]; // Prefer second list (Rising)
         if (risingList) {
           risingQueries = risingList.rankedKeyword
-            .filter(item => item.query && item.value)
+            .filter(item => item.query && (item.value != null || item.formattedValue))
             .map(item => ({
               query: item.query,
-              value: item.value,
+              value: typeof item.value === 'number' ? item.value : parseInt(String(item.value), 10) || 0,
               formattedValue: item.formattedValue || `${item.value}%`,
               hasData: item.hasData !== false
             }));
