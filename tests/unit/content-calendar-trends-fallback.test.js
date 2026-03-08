@@ -124,7 +124,7 @@ describe('fetchTrendsForContentCalendar fallback', () => {
     expect(result.keywordCount).toBe(2);
   });
 
-  it('returns zero when no audiences have keywords or fallback text', async () => {
+  it('uses default keywords when audiences have no extractable fallback text', async () => {
     mockQuery
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({
@@ -138,19 +138,26 @@ describe('fetchTrendsForContentCalendar fallback', () => {
       });
 
     const { fetchTrendsForContentCalendar } = await import('../../services/content-calendar-service.js');
-    const result = await fetchTrendsForContentCalendar(userId, strategyIds);
+    const resultP = fetchTrendsForContentCalendar(userId, strategyIds);
+    await vi.advanceTimersByTimeAsync(10000);
+    const result = await resultP;
 
-    expect(mockGetRisingQueries).not.toHaveBeenCalled();
-    expect(result.keywordCount).toBe(0);
-    expect(result.fetched).toBe(0);
+    expect(mockGetRisingQueries).toHaveBeenCalledWith('content marketing', 'US', '7d', userId);
+    expect(mockGetRisingQueries).toHaveBeenCalledWith('digital marketing', 'US', '7d', userId);
+    expect(result.keywordCount).toBe(2);
+    expect(result.fetched).toBe(2);
   });
 
-  it('returns zero when strategyIds empty', async () => {
+  it('uses default keywords when strategyIds empty so user still gets topics', async () => {
     const { fetchTrendsForContentCalendar } = await import('../../services/content-calendar-service.js');
-    const result = await fetchTrendsForContentCalendar(userId, []);
+    const resultP = fetchTrendsForContentCalendar(userId, []);
+    await vi.advanceTimersByTimeAsync(10000);
+    const result = await resultP;
 
     expect(mockQuery).not.toHaveBeenCalled();
-    expect(mockGetRisingQueries).not.toHaveBeenCalled();
-    expect(result).toEqual({ fetched: 0, keywordCount: 0, errorCount: 0 });
+    expect(mockGetRisingQueries).toHaveBeenCalledWith('content marketing', 'US', '7d', userId);
+    expect(mockGetRisingQueries).toHaveBeenCalledWith('digital marketing', 'US', '7d', userId);
+    expect(result.keywordCount).toBe(2);
+    expect(result.fetched).toBe(2);
   });
 });
