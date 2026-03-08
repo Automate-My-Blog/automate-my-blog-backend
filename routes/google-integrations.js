@@ -958,7 +958,7 @@ router.get('/funnel', authService.authMiddleware.bind(authService), async (req, 
  *
  * NOTE: Requires user authentication and OAuth tokens
  */
-router.get('/search-console/top-queries', async (req, res) => {
+router.get('/search-console/top-queries', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { siteUrl, startDate, endDate, limit = 100 } = req.query;
 
@@ -1015,7 +1015,7 @@ router.get('/search-console/top-queries', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/search-console/page-performance', async (req, res) => {
+router.get('/search-console/page-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { siteUrl, pageUrl, startDate, endDate } = req.query;
 
@@ -1072,7 +1072,7 @@ router.get('/search-console/page-performance', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/analytics/page-performance', async (req, res) => {
+router.get('/analytics/page-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, pageUrl, startDate, endDate } = req.query;
 
@@ -1128,7 +1128,7 @@ router.get('/analytics/page-performance', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/analytics/traffic-sources', async (req, res) => {
+router.get('/analytics/traffic-sources', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, startDate, endDate } = req.query;
 
@@ -1185,7 +1185,7 @@ router.get('/analytics/traffic-sources', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.post('/analytics/compare-trend-performance', async (req, res) => {
+router.post('/analytics/compare-trend-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, trendInformedUrls, standardUrls, startDate, endDate } = req.body;
 
