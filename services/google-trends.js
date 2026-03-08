@@ -41,9 +41,9 @@ export class GoogleTrendsService {
    * @returns {Promise<Array>} Rising queries data
    */
   async getRisingQueries(keyword, geo = 'US', timeframe = '7d', userId = null) {
-    // Check cache first (expires after 6 hours)
+    // Check cache first (expires after 6 hours). Treat empty rising_queries as miss so we refetch.
     const cached = await this.getCachedData(keyword, geo, timeframe, userId);
-    if (cached && cached.rising_queries) {
+    if (cached && cached.rising_queries && Array.isArray(cached.rising_queries) && cached.rising_queries.length > 0) {
       console.log(`📦 Cache hit for trending queries: "${keyword}"`);
       return cached.rising_queries;
     }

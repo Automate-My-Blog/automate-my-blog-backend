@@ -160,4 +160,31 @@ describe('fetchTrendsForContentCalendar fallback', () => {
     expect(result.keywordCount).toBe(2);
     expect(result.fetched).toBe(2);
   });
+
+  it('adds default keywords when fallback yields only long phrases (Trends API returns empty for long queries)', async () => {
+    const longPhrase = 'Finding reliable solutions and expert guidance in their field of interest';
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            id: 'audience-id-1',
+            customer_problem: null,
+            target_segment: { demographics: longPhrase, psychographics: '', searchBehavior: '' }
+          }
+        ]
+      })
+      .mockResolvedValue({ rows: [] });
+
+    const { fetchTrendsForContentCalendar } = await import('../../services/content-calendar-service.js');
+    const resultP = fetchTrendsForContentCalendar(userId, strategyIds);
+    await vi.advanceTimersByTimeAsync(10000);
+    const result = await resultP;
+
+    expect(mockGetRisingQueries).toHaveBeenNthCalledWith(1, 'content marketing', 'US', '7d', userId);
+    expect(mockGetRisingQueries).toHaveBeenNthCalledWith(2, 'digital marketing', 'US', '7d', userId);
+    expect(mockGetRisingQueries).toHaveBeenCalledWith(longPhrase, 'US', '7d', userId);
+    expect(result.keywordCount).toBeLessThanOrEqual(10);
+    expect(result.keywordCount).toBeGreaterThanOrEqual(3);
+  });
 });
