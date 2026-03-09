@@ -4,8 +4,12 @@ import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 import { getConnectionCredentials } from '../services/publishing-connections.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
+import postsAutomationRoutes from './posts-automation.js';
 
 const router = express.Router();
+
+// Mount automation routes before /:id so /automation is not captured as id
+router.use('/automation', postsAutomationRoutes);
 
 const extractUserContext = (req) => {
   const sessionId = req.headers['x-session-id'] || req.body?.session_id;
