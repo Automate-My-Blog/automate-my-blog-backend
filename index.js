@@ -51,7 +51,8 @@ import googleIntegrationsRoutes from './routes/google-integrations.js';
 import adminPanelRouter, { requireAdmin, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse, ValidationError } from './lib/errors.js';
-import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
+import { validateRegistrationInput, validateLoginInput } from './lib/auth-validation.js';
+import { COOKIE_NAMES, getAuthCookieOptions, getAuthCookieClearOptions, parseCookieHeader } from './lib/auth-cookies.js';
 import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
 import { saveAnalysisResult } from './services/website-analysis-persistence.js';
 
@@ -223,6 +224,26 @@ app.use((req, res, next) => {
 });
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Parse Cookie header so auth and SSE can read httpOnly cookie names (we set them; browser sends them)
+app.use((req, res, next) => {
+  req.cookies = parseCookieHeader(req.headers.cookie);
+  next();
+});
+
+/** Set httpOnly auth cookies on response (login/register/refresh). */
+function setAuthCookies(res, accessToken, refreshToken) {
+  const opts = getAuthCookieOptions();
+  res.cookie(COOKIE_NAMES.access, accessToken, opts.access);
+  res.cookie(COOKIE_NAMES.refresh, refreshToken, opts.refresh);
+}
+
+/** Clear auth cookies (logout). */
+function clearAuthCookies(res) {
+  const opts = getAuthCookieClearOptions();
+  res.clearCookie(COOKIE_NAMES.access, opts);
+  res.clearCookie(COOKIE_NAMES.refresh, opts);
+}
 
 // API Routes
 app.use('/api/v1/session', sessionRoutes);
@@ -540,6 +561,7 @@ app.post('/api/v1/auth/register', async (req, res, next) => {
     emailService.sendNewUserSignupAlert(result.user.id)
       .catch(err => console.error('Failed to send admin signup alert:', err));
 
+    setAuthCookies(res, result.accessToken, result.refreshToken);
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
@@ -561,6 +583,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
 
     const result = await authService.login(email, password);
 
+    setAuthCookies(res, result.accessToken, result.refreshToken);
     res.json({
       success: true,
       message: 'Login successful',
@@ -599,13 +622,20 @@ app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (
   }
 });
 
-// Refresh token endpoint
+// Refresh token endpoint — prefers httpOnly cookie; accepts body for backward compatibility
 app.post('/api/v1/auth/refresh', async (req, res, next) => {
   try {
-    const { refreshToken } = validateRefreshInput(req.body);
+    const refreshToken = authService.getRefreshTokenFromRequest(req, req.body);
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'Missing refresh token',
+        message: 'Refresh token is required (send via cookie or body refreshToken)'
+      });
+    }
 
     const tokens = await authService.refreshTokens(refreshToken);
 
+    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
     res.json({
       success: true,
       message: 'Tokens refreshed successfully',
@@ -617,10 +647,9 @@ app.post('/api/v1/auth/refresh', async (req, res, next) => {
   }
 });
 
-// Logout endpoint
+// Logout endpoint — clear httpOnly auth cookies so session ends
 app.post('/api/v1/auth/logout', (req, res) => {
-  // For JWT-based auth, logout is typically handled client-side
-  // by removing the tokens from storage
+  clearAuthCookies(res);
   res.json({
     success: true,
     message: 'Logout successful'

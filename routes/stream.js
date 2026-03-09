@@ -1,12 +1,13 @@
 /**
  * SSE stream routes. Phase 1: infrastructure.
- * Auth via query: ?token=JWT (logged-in) or ?sessionId= (anonymous/session). EventSource cannot send headers.
+ * Auth via httpOnly cookie (logged-in) or ?token=JWT (legacy) or ?sessionId= (anonymous). EventSource sends cookies with credentials.
  * GET /api/v1/stream — open SSE connection; client receives connectionId and keepalive.
  */
 
 import express from 'express';
 import streamManager from '../services/stream-manager.js';
 import { writeSSE } from '../utils/streaming-helpers.js';
+import { COOKIE_NAMES } from '../lib/auth-cookies.js';
 
 const router = express.Router();
 
@@ -14,13 +15,16 @@ const router = express.Router();
 const MIN_SESSION_ID_LENGTH = 10;
 
 /**
- * Resolve stream auth from query: JWT (token) or session ID. One must be valid.
+ * Resolve stream auth from cookie, query token, or session ID. One must be valid.
  * @param {object} authService - auth service with verifyToken(token)
- * @param {{ token?: string, sessionId?: string }} query - req.query
+ * @param {import('express').Request} req - request (cookies, query)
  * @returns {{ userId?: string, sessionId?: string } | null}
  */
-function validateStreamAuth(authService, query) {
-  const token = query?.token;
+function validateStreamAuth(authService, req) {
+  let token = req.cookies?.[COOKIE_NAMES.access];
+  if (!token && req.query?.token && typeof req.query.token === 'string') {
+    token = req.query.token.trim();
+  }
   if (token && typeof token === 'string') {
     const t = token.trim();
     if (t) {
@@ -32,7 +36,7 @@ function validateStreamAuth(authService, query) {
       }
     }
   }
-  const sessionId = query?.sessionId;
+  const sessionId = req.query?.sessionId;
   if (sessionId && typeof sessionId === 'string') {
     const s = sessionId.trim();
     if (s.length >= MIN_SESSION_ID_LENGTH) return { sessionId: s };
@@ -48,7 +52,7 @@ function validateStreamAuth(authService, query) {
  */
 function handleStreamByConnectionId(authService, req, res) {
   const connectionId = req.params.connectionId;
-  const context = validateStreamAuth(authService, req.query);
+  const context = validateStreamAuth(authService, req);
   if (!context) {
     res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
     return;
@@ -79,7 +83,7 @@ function handleStreamByConnectionId(authService, req, res) {
 export function registerStreamRoute(authService) {
   // Root first so /stream matches (/:connectionId would match / with connectionId='')
   router.get('/', (req, res) => {
-    const context = validateStreamAuth(authService, req.query);
+    const context = validateStreamAuth(authService, req);
     if (!context) {
       res.status(401).set('Content-Type', 'text/plain').end('Unauthorized');
       return;

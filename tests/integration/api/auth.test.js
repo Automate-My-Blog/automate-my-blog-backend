@@ -91,6 +91,35 @@ describe.skipIf(!hasDb)('integration api auth', () => {
       .expect(200);
   });
 
+  it('protected route with auth cookie (no Authorization header) returns 200', async () => {
+    const e = email();
+    await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        email: e,
+        password: 'password123',
+        firstName: 'Test',
+        lastName: 'User',
+        organizationName: 'Test Org',
+      })
+      .expect(201);
+
+    const loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: e, password: 'password123' })
+      .expect(200);
+
+    const setCookie = loginRes.headers['set-cookie'];
+    expect(setCookie).toBeDefined();
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.map(h => h.split(';')[0].trim()).join('; ') : String(setCookie || '').split(';')[0].trim();
+
+    const meRes = await request(app)
+      .get('/api/v1/auth/me')
+      .set('Cookie', cookieHeader)
+      .expect(200);
+    expect(meRes.body.user?.email).toBe(e);
+  });
+
   it('users can only access own data (GET /me returns own user)', async () => {
     const e = email();
     const reg = await request(app)
@@ -158,6 +187,70 @@ describe.skipIf(!hasDb)('integration api auth', () => {
       .expect(401);
 
     expect(res.body.error).toBeDefined();
+  });
+
+  it('refresh with cookie only (no body) returns new tokens', async () => {
+    const e = email();
+    await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        email: e,
+        password: 'password123',
+        firstName: 'Test',
+        lastName: 'User',
+        organizationName: 'Test Org',
+      })
+      .expect(201);
+
+    const loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: e, password: 'password123' })
+      .expect(200);
+
+    const setCookie = loginRes.headers['set-cookie'];
+    expect(setCookie).toBeDefined();
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.map(h => h.split(';')[0].trim()).join('; ') : String(setCookie || '').split(';')[0].trim();
+
+    const refreshRes = await request(app)
+      .post('/api/v1/auth/refresh')
+      .set('Cookie', cookieHeader)
+      .send({})
+      .expect(200);
+
+    expect(refreshRes.body.success).toBe(true);
+    expect(refreshRes.body.accessToken).toBeDefined();
+    expect(refreshRes.body.refreshToken).toBeDefined();
+  });
+
+  it('logout clears session (subsequent /me without cookie returns 401)', async () => {
+    const e = email();
+    await request(app)
+      .post('/api/v1/auth/register')
+      .send({
+        email: e,
+        password: 'password123',
+        firstName: 'Test',
+        lastName: 'User',
+        organizationName: 'Test Org',
+      })
+      .expect(201);
+
+    const loginRes = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: e, password: 'password123' })
+      .expect(200);
+
+    const setCookie = loginRes.headers['set-cookie'];
+    const cookieHeader = Array.isArray(setCookie) ? setCookie.map(h => h.split(';')[0].trim()).join('; ') : String(setCookie || '').split(';')[0].trim();
+
+    await request(app)
+      .get('/api/v1/auth/me')
+      .set('Cookie', cookieHeader)
+      .expect(200);
+
+    await request(app).post('/api/v1/auth/logout').set('Cookie', cookieHeader).expect(200);
+
+    await request(app).get('/api/v1/auth/me').expect(401);
   });
 
   it('logout returns 200 and success message', async () => {
