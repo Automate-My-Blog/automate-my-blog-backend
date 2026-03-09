@@ -20,6 +20,11 @@ const JOB_STREAM_MAX_AGE_MS = 250 * 1000;
 /** Retry getJobStatus when null (avoids 404 on create→stream race / read-after-write). */
 const JOB_STATUS_RETRIES = 4;
 const JOB_STATUS_RETRY_DELAY_MS = 80;
+const JOB_NOT_FOUND_RESPONSE = Object.freeze({
+  success: false,
+  error: 'Not found',
+  message: 'Job not found or access denied'
+});
 
 async function getJobStatusWithRetry(jobId, ctx) {
   for (let attempt = 0; attempt < JOB_STATUS_RETRIES; attempt++) {
@@ -114,6 +119,23 @@ function requireUserOrSession(req, res, next) {
     });
   }
   next();
+}
+
+function sendJobNotFound(res) {
+  return res.status(404).json(JOB_NOT_FOUND_RESPONSE);
+}
+
+function configureSSE(res) {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  if (!res.writableEnded) {
+    res.write(': ok\n\n');
+    if (typeof res.flush === 'function') res.flush();
+  }
+  if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
 }
 
 /**
@@ -261,11 +283,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
     const ctx = getJobContext(req);
     const status = await jobQueue.getJobStatus(jobId, ctx);
     if (!status) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not found',
-        message: 'Job not found or access denied'
-      });
+      return sendJobNotFound(res);
     }
 
     const row = await jobQueue.getJobRow(jobId);
@@ -285,14 +303,7 @@ router.get('/:jobId/narrative-stream', requireUserOrSession, async (req, res) =>
       });
     }
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-    res.write(': ok\n\n');
-    if (typeof res.flush === 'function') res.flush();
-    if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
+    configureSSE(res);
 
     writeSSE(res, 'connected', { jobId });
 
@@ -343,23 +354,10 @@ async function handleJobStream(req, res) {
     const ctx = getJobContext(req);
     const status = await getJobStatusWithRetry(jobId, ctx);
     if (!status) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not found',
-        message: 'Job not found or access denied'
-      });
+      return sendJobNotFound(res);
     }
 
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-    if (!res.writableEnded) {
-      res.write(': ok\n\n');
-      if (typeof res.flush === 'function') res.flush();
-    }
-    if (res.socket && typeof res.socket.setNoDelay === 'function') res.socket.setNoDelay(true);
+    configureSSE(res);
 
     const connectionId = streamManager.createConnection(res, {
       userId: ctx.userId ?? undefined,
@@ -434,11 +432,7 @@ router.get('/:jobId/status', requireUserOrSession, async (req, res) => {
     const ctx = getJobContext(req);
     const status = await jobQueue.getJobStatus(jobId, ctx);
     if (!status) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not found',
-        message: 'Job not found or access denied'
-      });
+      return sendJobNotFound(res);
     }
     return res.json(status);
   } catch (e) {
@@ -456,11 +450,7 @@ router.post('/:jobId/retry', requireUserOrSession, async (req, res) => {
     const ctx = getJobContext(req);
     const out = await jobQueue.retryJob(jobId, ctx);
     if (!out) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not found',
-        message: 'Job not found or access denied'
-      });
+      return sendJobNotFound(res);
     }
     return res.json(out);
   } catch (e) {
@@ -478,11 +468,7 @@ router.post('/:jobId/cancel', requireUserOrSession, async (req, res) => {
     const ctx = getJobContext(req);
     const out = await jobQueue.cancelJob(jobId, ctx);
     if (!out) {
-      return res.status(404).json({
-        success: false,
-        error: 'Not found',
-        message: 'Job not found or access denied'
-      });
+      return sendJobNotFound(res);
     }
     return res.json(out);
   } catch (e) {

@@ -102,6 +102,10 @@ REDIS_URL=redis://localhost:6379
 ## Testing
 
 ```bash
+# Some test files import the OpenAI client during module load.
+# Set a dummy key for local runs when you don't need live OpenAI calls.
+export OPENAI_API_KEY=test-key
+
 # Unit and integration tests
 npm test
 
