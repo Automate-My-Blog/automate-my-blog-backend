@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import { v4 as uuidv4 } from 'uuid';
 import db from './database.js';
 import { UnauthorizedError, ConflictError } from '../lib/errors.js';
+import { COOKIE_NAMES } from '../lib/auth-cookies.js';
 
 // JWT configuration
 // NOTE: In production, JWT_SECRET must be set. The fallback is for local dev only.
@@ -842,20 +843,45 @@ class DatabaseAuthService {
   }
 
   /**
-   * Middleware to protect routes
+   * Get access token from request: httpOnly cookie (preferred) or Authorization Bearer header.
+   * @param {import('express').Request} req
+   * @returns {string | null}
+   */
+  getAccessTokenFromRequest(req) {
+    const fromCookie = req.cookies?.[COOKIE_NAMES.access];
+    if (fromCookie && typeof fromCookie === 'string' && fromCookie.trim()) return fromCookie.trim();
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) return authHeader.substring(7).trim();
+    return null;
+  }
+
+  /**
+   * Get refresh token from request: httpOnly cookie (preferred) or body (backward compat).
+   * @param {import('express').Request} req
+   * @param {{ refreshToken?: string }} [body]
+   * @returns {string | null}
+   */
+  getRefreshTokenFromRequest(req, body) {
+    const fromCookie = req.cookies?.[COOKIE_NAMES.refresh];
+    if (fromCookie && typeof fromCookie === 'string' && fromCookie.trim()) return fromCookie.trim();
+    const fromBody = body?.refreshToken;
+    if (fromBody && typeof fromBody === 'string' && fromBody.trim()) return fromBody.trim();
+    return null;
+  }
+
+  /**
+   * Middleware to protect routes. Accepts token from cookie or Authorization Bearer header.
    */
   authMiddleware(req, res, next) {
-    const authHeader = req.headers.authorization;
+    const token = this.getAccessTokenFromRequest(req);
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    if (!token) {
       return res.status(401).json({
         error: 'Access denied',
         message: 'No token provided'
       });
     }
 
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-
     try {
       const decoded = this.verifyToken(token);
       req.user = decoded;
@@ -869,22 +895,19 @@ class DatabaseAuthService {
   }
 
   /**
-   * Flexible auth middleware: accepts Bearer header OR ?token= query param.
-   * Use for strategy routes where pitch uses EventSource (?token=) and others use Bearer.
-   * Eliminates route-order dependence for auth.
+   * Flexible auth middleware: accepts cookie, Bearer header, or ?token= query param.
+   * Use for strategy routes and SSE where client may send cookie or query token.
    */
   authMiddlewareFlexible(req, res, next) {
-    let token = null;
-    if (req.headers.authorization?.startsWith('Bearer ')) {
-      token = req.headers.authorization.substring(7);
-    } else if (req.query?.token && typeof req.query.token === 'string') {
+    let token = this.getAccessTokenFromRequest(req);
+    if (!token && req.query?.token && typeof req.query.token === 'string') {
       token = req.query.token.trim();
     }
 
     if (!token) {
       return res.status(401).json({
         error: 'Access denied',
-        message: 'No token provided (use Authorization: Bearer <token> or ?token=<token>)'
+        message: 'No token provided (cookie, Authorization: Bearer <token>, or ?token=<token>)'
       });
     }
 
@@ -901,14 +924,13 @@ class DatabaseAuthService {
   }
 
   /**
-   * Optional auth middleware
+   * Optional auth middleware. Accepts token from cookie or Authorization Bearer header.
    */
   optionalAuthMiddleware(req, res, next) {
-    const authHeader = req.headers.authorization;
+    const token = this.getAccessTokenFromRequest(req);
     const isDev = process.env.NODE_ENV !== 'production';
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
+    if (token) {
       try {
         const decoded = this.verifyToken(token);
         req.user = decoded;
