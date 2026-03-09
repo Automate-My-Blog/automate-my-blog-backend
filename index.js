@@ -36,6 +36,7 @@ import tweetRoutes from './routes/tweets.js';
 import youtubeVideosRoutes from './routes/youtube-videos.js';
 import newsArticlesRoutes from './routes/news-articles.js';
 import organizationRoutes from './routes/organizations.js';
+import projectsRoutes from './routes/projects.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
 import leadsRoutes from './routes/leads.js';
@@ -251,6 +252,7 @@ app.use('/api/v1/youtube-videos', optionalAuth, youtubeVideosRoutes);
 app.use('/api/v1/news-articles', optionalAuth, newsArticlesRoutes);
 app.use('/api/v1/trending-topics', optionalAuth, topicRoutes);
 app.use('/api/v1/organizations', optionalAuth, organizationRoutes);
+app.use('/api/v1/projects', requireAuth, projectsRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
 // Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
@@ -499,6 +501,8 @@ app.get('/api', (req, res) => {
       'POST /api/v1/referrals/invite': 'Send referral invitation for customer acquisition (requires auth)',
       'GET /api/v1/referrals/stats': 'Get referral statistics and earnings (requires auth)',
       'POST /api/v1/referrals/process-signup': 'Process referral signup and grant rewards (requires auth)',
+      'GET /api/v1/projects/:id/settings': 'Get project strategy settings (requires auth)',
+      'PUT /api/v1/projects/:id/settings': 'Save project strategy settings (requires auth)',
       'PUT /api/v1/organization/profile': 'Update organization name and website (requires auth)',
       'POST /api/v1/organization/invite': 'Send organization team member invitation (requires auth)',
       'GET /api/v1/organization/members': 'Get organization members list (requires auth)',
