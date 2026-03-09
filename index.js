@@ -21,6 +21,7 @@ import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
+import recommendationsRoutes from './routes/recommendations.js';
 import postsRoutes from './routes/posts.js';
 import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
@@ -229,6 +230,7 @@ app.use('/api/v1/session', sessionRoutes);
 app.use('/api/v1/audiences', optionalAuth, audienceRoutes);
 app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
 app.use('/api/v1/users', optionalAuth, userRoutes);
+app.use('/api/v1/recommendations', requireAuth, recommendationsRoutes);
 app.use('/api/v1/posts', optionalAuth, postsRoutes);
 // Medium OAuth callback (no JWT; user is redirected from Medium)
 app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
