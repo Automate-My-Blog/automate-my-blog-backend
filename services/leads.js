@@ -30,6 +30,29 @@ class LeadService {
   }
 
   /**
+   * Enrich conversion step data with canonical camelCase score fields for frontend (Issue #164).
+   * Ensures leadScore, dynamicLeadScore, initialLeadScore, scoreUpdatedAt, isDynamicScore are present when step has score info.
+   */
+  _enrichConversionStepData(stepData, conversionStep) {
+    if (!stepData || typeof stepData !== 'object') return stepData || {};
+    const score = stepData.lead_score ?? stepData.leadScore;
+    if (score == null && stepData.dynamic_lead_score == null && stepData.dynamicLeadScore == null) {
+      return { ...stepData };
+    }
+    const enriched = { ...stepData };
+    if (score != null) enriched.leadScore = typeof score === 'number' ? score : parseInt(score, 10);
+    const dynamic = stepData.dynamic_lead_score ?? stepData.dynamicLeadScore;
+    if (dynamic != null) enriched.dynamicLeadScore = typeof dynamic === 'number' ? dynamic : parseInt(dynamic, 10);
+    const initial = stepData.initial_score ?? stepData.initialLeadScore;
+    if (initial != null) enriched.initialLeadScore = typeof initial === 'number' ? initial : parseInt(initial, 10);
+    const updatedAt = stepData.score_updated_at ?? stepData.scoreUpdatedAt;
+    if (updatedAt != null) enriched.scoreUpdatedAt = updatedAt;
+    const isDynamic = stepData.is_dynamic_score ?? stepData.isDynamicScore;
+    if (typeof isDynamic === 'boolean') enriched.isDynamicScore = isDynamic;
+    return enriched;
+  }
+
+  /**
    * Capture a new lead from website analysis - Organization-Centric Approach
    */
   async captureLead(websiteUrl, analysisData, sessionInfo = {}) {
@@ -248,7 +271,10 @@ class LeadService {
           website_url: websiteUrl,
           analysis_data: analysisData,
           session_info: sessionInfo,
-          lead_score: leadScore
+          lead_score: leadScore,
+          leadScore,
+          is_dynamic_score: false,
+          isDynamicScore: false
         }),
         sessionInfo.sessionId || null
       ]);
@@ -389,6 +415,8 @@ class LeadService {
           o.brand_voice as org_brand_voice,
           -- Lead scoring data
           ls.overall_score as lead_score,
+          ls.initial_score,
+          ls.score_updated_at,
           ls.business_size_score,
           ls.industry_fit_score,
           ls.engagement_score,
@@ -414,8 +442,8 @@ class LeadService {
         LEFT JOIN conversion_tracking ct ON wl.id = ct.website_lead_id
         ${whereClause}
         GROUP BY wl.id, o.id, o.name, o.business_model, o.company_size, o.target_audience, o.brand_voice,
-                 ls.overall_score, ls.business_size_score, ls.industry_fit_score, 
-                 ls.engagement_score, ls.content_quality_score, ls.scoring_factors, 
+                 ls.overall_score, ls.initial_score, ls.score_updated_at, ls.business_size_score, ls.industry_fit_score,
+                 ls.engagement_score, ls.content_quality_score, ls.scoring_factors,
                  oi.customer_scenarios, oi.business_value_assessment, oi.analysis_confidence_score,
                  u.email
         ORDER BY ${safeSortBy} ${safeSortOrder}
@@ -443,6 +471,12 @@ class LeadService {
           estimatedCompanySize: lead.estimated_company_size,
           leadSource: lead.lead_source,
           leadScore: parseInt(lead.lead_score || 0),
+          ...(lead.score_updated_at != null && {
+            dynamicLeadScore: parseInt(lead.lead_score || 0),
+            initialLeadScore: lead.initial_score != null ? parseInt(lead.initial_score) : undefined,
+            scoreUpdatedAt: lead.score_updated_at,
+            isDynamicScore: true
+          }),
           status: lead.status,
           isConverted: lead.is_converted,
           convertedAt: lead.converted_at,
@@ -620,6 +654,8 @@ class LeadService {
           o.website_goals as org_website_goals,
           -- Lead scoring data
           ls.overall_score as lead_score,
+          ls.initial_score,
+          ls.score_updated_at,
           ls.business_size_score,
           ls.industry_fit_score,
           ls.engagement_score,
@@ -676,6 +712,12 @@ class LeadService {
         leadSource: lead.lead_source,
         leadSourceDisplay: this.leadSources[lead.lead_source] || lead.lead_source,
         leadScore: parseInt(lead.lead_score || 0),
+        ...(lead.score_updated_at != null && {
+          dynamicLeadScore: parseInt(lead.lead_score || 0),
+          initialLeadScore: lead.initial_score != null ? parseInt(lead.initial_score) : undefined,
+          scoreUpdatedAt: lead.score_updated_at,
+          isDynamicScore: true
+        }),
         status: lead.status,
         statusDisplay: this.leadStatuses[lead.status] || lead.status,
         isConverted: !!lead.converted_to_user_id,
@@ -739,7 +781,7 @@ class LeadService {
         conversionSteps: stepsResult.rows.map(step => ({
           step: step.conversion_step,
           completedAt: step.step_completed_at,
-          data: step.step_data,
+          data: this._enrichConversionStepData(step.step_data, step.conversion_step),
           timeToComplete: step.total_time_to_conversion
         }))
       };
