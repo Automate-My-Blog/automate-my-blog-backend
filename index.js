@@ -2386,7 +2386,9 @@ app.get('/api/v1/admin/organizations/:id', authService.authMiddleware.bind(authS
         wl.lead_source,
         wl.status,
         wl.created_at,
-        ls.overall_score as lead_score
+        ls.overall_score as lead_score,
+        ls.initial_score,
+        ls.score_updated_at
       FROM website_leads wl
       LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
       WHERE wl.organization_id = $1
@@ -2405,6 +2407,12 @@ app.get('/api/v1/admin/organizations/:id', authService.authMiddleware.bind(authS
           leadSource: lead.lead_source,
           status: lead.status,
           leadScore: parseInt(lead.lead_score || 0),
+          ...(lead.score_updated_at != null && {
+            dynamicLeadScore: parseInt(lead.lead_score || 0),
+            initialLeadScore: lead.initial_score != null ? parseInt(lead.initial_score) : undefined,
+            scoreUpdatedAt: lead.score_updated_at,
+            isDynamicScore: true
+          }),
           createdAt: lead.created_at
         }))
       }
