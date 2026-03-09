@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
-import { waitUntil } from '@vercel/functions';
 import openaiService from './services/openai.js';
 import webScraperService from './services/webscraper.js';
 import DatabaseAuthService from './services/auth-database.js';
@@ -16,7 +15,6 @@ import organizationService from './services/organizations.js';
 import projectsService from './services/projects.js';
 import db from './services/database.js';
 import enhancedBlogGenerationService from './services/enhanced-blog-generation.js';
-import { expireOldCredits } from './jobs/expireCredits.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
@@ -48,7 +46,7 @@ import jobsRoutes from './routes/jobs.js';
 import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
 import googleIntegrationsRoutes from './routes/google-integrations.js';
-import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
+import adminPanelRouter, { requireAdmin, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse, ValidationError } from './lib/errors.js';
 import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
@@ -792,8 +790,7 @@ app.post('/api/analyze-website', async (req, res, next) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (token) {
       try {
-        const jwt = await import('jsonwebtoken');
-        const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+        const payload = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
         userId = payload.userId;
       } catch (jwtError) {
         console.warn('Failed to extract user from JWT:', jwtError.message);
@@ -3010,11 +3007,9 @@ if (process.env.NODE_ENV !== 'test') {
 function handleOptions(req, res) {
   const origin = (req.headers && (req.headers.origin || req.headers.Origin)) || '';
   const fallback = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || process.env.CORS_ORIGINS || '').split(',')[0].trim() || 'https://staging.automatemyblog.com';
-  const allowed =
-    /^https:\/\/(staging\.|www\.)?automatemyblog\.com$/i.test(origin) ||
-    /^https?:\/\/[^/]+\.vercel\.app$/i.test(origin) ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-  const allowOrigin = (origin && allowed) ? origin : fallback;
+  const allowOrigin = (origin && isOriginAllowed(origin))
+    ? origin
+    : (isOriginAllowed(fallback) ? fallback : 'https://staging.automatemyblog.com');
   res.setHeader('Access-Control-Allow-Origin', allowOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');

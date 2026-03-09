@@ -6,6 +6,7 @@ import { writeSSE } from '../utils/streaming-helpers.js';
 import openaiService from '../services/openai.js';
 
 const router = express.Router();
+const tokenAuthService = new DatabaseAuthService();
 
 // Safe JSON parsing to handle corrupted database records
 const safeParse = (jsonString, fieldName, recordId) => {
@@ -49,6 +50,25 @@ const validateUserContext = (context) => {
   }
   return null;
 };
+
+function applyTokenQueryAuth(req, userContext, options = {}) {
+  const { successMessage = null, failurePrefix = 'Token validation failed:' } = options;
+  if (!req.query.token || userContext.isAuthenticated) return false;
+
+  try {
+    const token = String(req.query.token).trim();
+    const decoded = tokenAuthService.verifyToken(token);
+    if (!decoded?.userId) return false;
+
+    userContext.userId = decoded.userId;
+    userContext.isAuthenticated = true;
+    if (successMessage) console.log(successMessage);
+    return true;
+  } catch (err) {
+    console.warn(failurePrefix, err.message);
+    return false;
+  }
+}
 
 /**
  * POST /api/v1/analysis/adopt-session
@@ -1524,21 +1544,10 @@ router.get('/narration/analysis', async (req, res) => {
       hasSessionId: !!userContext.sessionId
     });
 
-    // Support token-based auth for EventSource
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-          console.log('✅ [ENDPOINT] Token auth successful');
-        }
-      } catch (err) {
-        console.warn('⚠️ [ENDPOINT] Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext, {
+      successMessage: '✅ [ENDPOINT] Token auth successful',
+      failurePrefix: '⚠️ [ENDPOINT] Token validation failed:'
+    });
 
     // Verify access to organization
     const orgQuery = userContext.isAuthenticated
@@ -1736,20 +1745,7 @@ router.get('/narration/audience', async (req, res) => {
     // Get user context for auth
     const userContext = extractUserContext(req);
 
-    // Support token-based auth for EventSource
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-        }
-      } catch (err) {
-        console.warn('Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext);
 
     // Resolve organization (same as narration/content: context first, then fallback by id for narration)
     let orgRow = await getOrganizationForContext(organizationId, userContext);
@@ -1915,19 +1911,7 @@ router.get('/narration/topic', async (req, res) => {
     // Get user context for auth (same pattern as audience)
     const userContext = extractUserContext(req);
 
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-        }
-      } catch (err) {
-        console.warn('Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext);
 
     // Resolve organization (same as narration/content and audience: context first, then fallback by id)
     let orgRow = await getOrganizationForContext(organizationId, userContext);
