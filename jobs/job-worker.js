@@ -422,6 +422,12 @@ async function processContentCalendarPost(jobId, input, context) {
       console.warn('Credit deduct failed:', e.message);
     }
     await setContentCalendarPostBlogId(audienceId, dayNumber, savedPost.id);
+    const { createNotification } = await import('../services/post-automation.js');
+    try {
+      await createNotification(userId, { type: 'post_generated', postId: savedPost.id });
+    } catch (notifErr) {
+      console.warn('Post automation notification create failed:', notifErr.message);
+    }
   } catch (e) {
     console.warn('Save or calendar update failed:', e.message);
     throw e;

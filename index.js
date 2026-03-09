@@ -19,6 +19,7 @@ import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
+import recommendationsRoutes from './routes/recommendations.js';
 import postsRoutes from './routes/posts.js';
 import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
@@ -227,6 +228,7 @@ app.use('/api/v1/session', sessionRoutes);
 app.use('/api/v1/audiences', optionalAuth, audienceRoutes);
 app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
 app.use('/api/v1/users', optionalAuth, userRoutes);
+app.use('/api/v1/recommendations', requireAuth, recommendationsRoutes);
 app.use('/api/v1/posts', optionalAuth, postsRoutes);
 // Medium OAuth callback (no JWT; user is redirected from Medium)
 app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
@@ -481,6 +483,9 @@ app.get('/api', (req, res) => {
       'PUT /api/v1/blog-posts/:id': 'Update blog post (requires auth)',
       'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)',
       'PUT /api/v1/user/profile': 'Update user profile (requires auth)',
+      'GET /api/v1/user/email-preferences': 'Get email preferences (requires auth)',
+      'PUT /api/v1/user/email-preferences': 'Update email preferences (requires auth)',
+      'POST /api/v1/user/unsubscribe': 'Unsubscribe from non-essential emails (requires auth)',
       'POST /api/v1/user/change-password': 'Change user password (requires auth)',
       'GET /api/v1/user/credits': 'Get user credits and billing info (requires auth)',
       'POST /api/v1/user/apply-rewards': 'Apply pending referral rewards (requires auth)', 
@@ -2452,6 +2457,140 @@ app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), as
     console.error('Update profile error:', error);
     res.status(500).json({
       error: 'Failed to update profile',
+      message: error.message
+    });
+  }
+});
+
+// Email preferences (issue #7) - GET/PUT /api/v1/user/email-preferences, POST /api/v1/user/unsubscribe
+const EMAIL_PREFERENCE_KEYS = ['draft_ready', 'recommendations', 'weekly_summary', 'product_updates'];
+const EMAIL_FREQUENCIES = ['daily', 'weekly', 'important', 'never'];
+
+function defaultEmailPreferences() {
+  return {
+    frequency: 'weekly',
+    notificationTypes: ['draft_ready', 'recommendations', 'weekly_summary'],
+    notifications: {
+      draft_ready: true,
+      recommendations: true,
+      weekly_summary: true,
+      product_updates: false
+    }
+  };
+}
+
+app.get('/api/v1/user/email-preferences', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const row = await db.query(
+      'SELECT email_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    const stored = row.rows[0].email_preferences || {};
+    const prefs = {
+      ...defaultEmailPreferences(),
+      ...(stored.frequency && { frequency: stored.frequency }),
+      ...(Array.isArray(stored.notificationTypes) && { notificationTypes: stored.notificationTypes }),
+      ...(typeof stored.notifications === 'object' && stored.notifications !== null && { notifications: { ...defaultEmailPreferences().notifications, ...stored.notifications } })
+    };
+    res.json({
+      ...prefs,
+      data: prefs
+    });
+  } catch (error) {
+    console.error('Get email preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get email preferences',
+      message: error.message
+    });
+  }
+});
+
+app.put('/api/v1/user/email-preferences', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { frequency, notificationTypes, notifications } = req.body || {};
+    const row = await db.query(
+      'SELECT email_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    const current = row.rows[0].email_preferences || {};
+    const updates = { ...current };
+    if (frequency && EMAIL_FREQUENCIES.includes(frequency)) {
+      updates.frequency = frequency;
+    }
+    if (Array.isArray(notificationTypes)) {
+      updates.notificationTypes = notificationTypes.filter(t => EMAIL_PREFERENCE_KEYS.includes(t));
+    }
+    if (notifications && typeof notifications === 'object') {
+      updates.notifications = { ...(current.notifications || defaultEmailPreferences().notifications) };
+      for (const key of EMAIL_PREFERENCE_KEYS) {
+        if (typeof notifications[key] === 'boolean') {
+          updates.notifications[key] = notifications[key];
+        }
+      }
+    }
+    await db.query(
+      'UPDATE users SET email_preferences = $1, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(updates), userId]
+    );
+    const prefs = {
+      ...defaultEmailPreferences(),
+      ...(updates.frequency && { frequency: updates.frequency }),
+      ...(Array.isArray(updates.notificationTypes) && { notificationTypes: updates.notificationTypes }),
+      ...(updates.notifications && { notifications: updates.notifications })
+    };
+    res.json({
+      ...prefs,
+      data: prefs,
+      success: true
+    });
+  } catch (error) {
+    console.error('Update email preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update email preferences',
+      message: error.message
+    });
+  }
+});
+
+app.post('/api/v1/user/unsubscribe', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const unsubscribedAll = {
+      frequency: 'never',
+      notificationTypes: [],
+      notifications: {
+        draft_ready: false,
+        recommendations: false,
+        weekly_summary: false,
+        product_updates: false
+      }
+    };
+    const legacyCategories = ['engagement', 'reengagement', 'referral'];
+    await db.query(
+      `UPDATE users SET email_preferences = $1, unsubscribed_from = $2, updated_at = NOW() WHERE id = $3`,
+      [JSON.stringify(unsubscribedAll), JSON.stringify(legacyCategories), userId]
+    );
+    res.json({
+      success: true,
+      message: 'Unsubscribed from non-essential emails',
+      ...unsubscribedAll,
+      data: unsubscribedAll
+    });
+  } catch (error) {
+    console.error('Unsubscribe all error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unsubscribe',
       message: error.message
     });
   }
