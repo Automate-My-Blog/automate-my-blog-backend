@@ -41,7 +41,13 @@ All protected REST routes and SSE stream routes accept auth from **cookie first*
 
 ## 4. Staging / cross-origin (frontend and API on different domains)
 
-When the frontend is on a different domain than the API (e.g. `staging.automatemyblog.com` → `automate-my-blog-backend-*.vercel.app`), the backend **defaults in production to `SameSite=None` and `Secure`**, so the browser will send cookies on those cross-origin requests. No backend env var is required for staging. If you still see 401 "No token provided" after login, confirm the backend is running with `NODE_ENV=production` (Vercel sets this for all deployments).
+When the frontend is on a different domain than the API (e.g. `staging.automatemyblog.com` → `automate-my-blog-backend-*.vercel.app`), the backend sets auth cookies with **`SameSite=None`** and **`Secure`** so the browser sends them on cross-origin requests. This is done when:
+
+- `NODE_ENV=production`, or
+- `VERCEL=1` (set by Vercel for all deployments), or
+- **`COOKIE_CROSS_ORIGIN=true`** (set this on staging if 401s persist; it forces cross-origin cookie attributes).
+
+On login/register the backend sends **explicit `Set-Cookie`** headers with `SameSite=None; Secure; Path=/; HttpOnly; Max-Age=...` so the exact format is guaranteed. If you still see 401 after login, add **`COOKIE_CROSS_ORIGIN=true`** to the backend (staging) environment and redeploy.
 
 ---
 
@@ -93,7 +99,8 @@ If the frontend and API are on different domains and cookies are not sent, the b
 
 | Env variable           | Purpose |
 |------------------------|--------|
-| `COOKIE_SAME_SITE`     | `lax` (default), `strict`, or `none`. Use `none` only for cross-site frontend + API (requires HTTPS). |
+| **`COOKIE_CROSS_ORIGIN`** | Set to `true` or `1` to **force** `SameSite=None` and `Secure` for auth cookies (use if 401s persist on staging; overrides NODE_ENV/VERCEL). |
+| `COOKIE_SAME_SITE`     | `lax`, `strict`, or `none`. Override when needed. |
 | `COOKIE_DOMAIN`        | Optional domain for the cookie (e.g. shared subdomain). |
 | `COOKIE_SECURE`        | Set to `true` to force `Secure` in non-production. |
 
