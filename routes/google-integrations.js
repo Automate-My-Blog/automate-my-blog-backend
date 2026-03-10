@@ -413,29 +413,11 @@ router.get('/integration-pitch/stream', authService.authMiddleware.bind(authServ
  * Fetch actual trending topics for the user and stream LLM summary
  * Shows immediate value when connecting Google Trends
  * SSE endpoint. Events: chunk, complete, error.
+ * Auth: cookie (preferred for EventSource withCredentials) or ?token= for legacy.
  * SECURITY: Do not log or expose the token query parameter.
  */
-router.get('/trends/preview', async (req, res) => {
-  // Token from query only (EventSource cannot send headers). Never log req.query or token.
-  const token = req.query.token;
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'Access denied',
-      message: 'No token provided'
-    });
-  }
-
-  let userId;
-  try {
-    const decoded = authService.verifyToken(token);
-    userId = decoded.userId;
-  } catch (error) {
-    return res.status(401).json({
-      error: 'Access denied',
-      message: 'Invalid token'
-    });
-  }
+router.get('/trends/preview', authService.authMiddlewareFlexible.bind(authService), async (req, res) => {
+  const userId = req.user.userId;
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
