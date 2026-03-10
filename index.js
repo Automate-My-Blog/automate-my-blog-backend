@@ -52,7 +52,7 @@ import adminPanelRouter, { requireAdmin, adminLoginHtml, adminShellHtml } from '
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse, ValidationError } from './lib/errors.js';
 import { validateRegistrationInput, validateLoginInput } from './lib/auth-validation.js';
-import { COOKIE_NAMES, getAuthCookieOptions, getAuthCookieClearOptions, parseCookieHeader } from './lib/auth-cookies.js';
+import { COOKIE_NAMES, getAuthCookieOptions, getAuthCookieClearOptions, parseCookieHeader, useCrossOriginCookies, buildAuthSetCookieHeaders, buildAuthClearCookieHeaders } from './lib/auth-cookies.js';
 import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
 import { saveAnalysisResult } from './services/website-analysis-persistence.js';
 
@@ -231,18 +231,26 @@ app.use((req, res, next) => {
   next();
 });
 
-/** Set httpOnly auth cookies on response (login/register/refresh). */
+/** Set httpOnly auth cookies on response (login/register/refresh). Uses explicit Set-Cookie for cross-origin to guarantee SameSite=None; Secure. */
 function setAuthCookies(res, accessToken, refreshToken) {
-  const opts = getAuthCookieOptions();
-  res.cookie(COOKIE_NAMES.access, accessToken, opts.access);
-  res.cookie(COOKIE_NAMES.refresh, refreshToken, opts.refresh);
+  if (useCrossOriginCookies) {
+    res.setHeader('Set-Cookie', buildAuthSetCookieHeaders(accessToken, refreshToken));
+  } else {
+    const opts = getAuthCookieOptions();
+    res.cookie(COOKIE_NAMES.access, accessToken, opts.access);
+    res.cookie(COOKIE_NAMES.refresh, refreshToken, opts.refresh);
+  }
 }
 
-/** Clear auth cookies (logout). */
+/** Clear auth cookies (logout). Uses explicit Set-Cookie when cross-origin so browser clears the right cookies. */
 function clearAuthCookies(res) {
-  const opts = getAuthCookieClearOptions();
-  res.clearCookie(COOKIE_NAMES.access, opts);
-  res.clearCookie(COOKIE_NAMES.refresh, opts);
+  if (useCrossOriginCookies) {
+    res.setHeader('Set-Cookie', buildAuthClearCookieHeaders());
+  } else {
+    const opts = getAuthCookieClearOptions();
+    res.clearCookie(COOKIE_NAMES.access, opts);
+    res.clearCookie(COOKIE_NAMES.refresh, opts);
+  }
 }
 
 // API Routes
