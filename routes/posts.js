@@ -430,7 +430,7 @@ router.post('/:id/publish', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Invalid request',
-        message: 'Body must include "platforms" (non-empty array of platform keys: wordpress, medium, substack, ghost)'
+        message: `Body must include "platforms" (non-empty array of platform keys). Supported: ${[...PLATFORM_KEYS].sort().join(', ')}`
       });
     }
 
@@ -541,6 +541,17 @@ router.post('/:id/unpublish', async (req, res) => {
 
     const { id } = req.params;
     const { platform } = req.body || {};
+
+    if (platform !== undefined && platform !== null && String(platform).trim() !== '') {
+      const key = normalizePlatformKey(String(platform).trim());
+      if (!key) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid platform',
+          message: `Unsupported platform. Supported: ${[...PLATFORM_KEYS].sort().join(', ')}`
+        });
+      }
+    }
 
     const selectResult = await db.query(
       'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
