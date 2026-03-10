@@ -106,7 +106,21 @@ If the frontend and API are on different domains and cookies are not sent, the b
 
 ---
 
-## 9. Validation Checklist (Frontend)
+## 9. Troubleshooting: 401 after login on staging
+
+If login returns 200 but the next API call returns **401 "No token provided"**, the browser is not sending the auth cookie. Check the following:
+
+1. **Login response:** In DevTools → Network → select the `login` (or `register`) request → **Response Headers**. You should see two **`Set-Cookie`** headers with `access_token` and `refresh_token`, each including **`SameSite=None`** and **`Secure`**. If they are missing or use `SameSite=Lax`, the backend is not sending cross-origin cookies (redeploy with latest backend; the backend now uses HTTPS detection to set these when the request is HTTPS).
+
+2. **Staging env:** In the **staging** backend (Vercel → your project → Environment Variables for Preview/staging), add **`COOKIE_CROSS_ORIGIN=true`** and redeploy. This forces cross-origin cookie attributes even if `VERCEL`/`NODE_ENV` are not set as expected.
+
+3. **Cookies in DevTools:** After login, open DevTools → Application (Chrome) or Storage (Firefox) → **Cookies** → select the API origin (e.g. `automate-my-blog-backend-env-staging-...vercel.app`). You should see `access_token` and `refresh_token` with **SameSite=None**, **Secure** checked. If the cookies are not there, the browser rejected them (fix the Set-Cookie format on the backend).
+
+4. **Subsequent request:** In Network, select a request that returned 401 (e.g. `GET /api/v1/user/recent-analysis`) → **Request Headers**. Check whether **`Cookie`** is present and includes `access_token=...`. If Cookie is missing, the browser did not send it (same-origin/cross-origin or SameSite/Secure mismatch).
+
+---
+
+## 10. Validation Checklist (Frontend)
 
 - [ ] Login succeeds and the browser receives `Set-Cookie` for `access_token` and `refresh_token`.
 - [ ] After reload, calling `GET /api/v1/auth/me` with credentials returns 200 and the current user (session restored via cookie).
@@ -117,7 +131,7 @@ If the frontend and API are on different domains and cookies are not sent, the b
 
 ---
 
-## 10. Local Development
+## 11. Local Development
 
 - Point the frontend at the local backend (e.g. `http://localhost:3001`). Use **credentials included** on all API and SSE requests.
 - The backend allows localhost origins and sets cookies with `Secure` off in development, so cookies work over `http://localhost`.

@@ -231,10 +231,12 @@ app.use((req, res, next) => {
   next();
 });
 
-/** Set httpOnly auth cookies on response (login/register/refresh). Uses explicit Set-Cookie for cross-origin to guarantee SameSite=None; Secure. */
-function setAuthCookies(res, accessToken, refreshToken) {
-  if (useCrossOriginCookies) {
-    res.setHeader('Set-Cookie', buildAuthSetCookieHeaders(accessToken, refreshToken));
+/** Set httpOnly auth cookies on response (login/register/refresh). Uses explicit Set-Cookie when HTTPS so cross-origin (SameSite=None; Secure) is guaranteed. */
+function setAuthCookies(req, res, accessToken, refreshToken) {
+  const isHttps = req.secure || (req.get && req.get('x-forwarded-proto') === 'https');
+  if (isHttps || useCrossOriginCookies) {
+    const [accessCookie, refreshCookie] = buildAuthSetCookieHeaders(accessToken, refreshToken);
+    res.setHeader('Set-Cookie', [accessCookie, refreshCookie]);
   } else {
     const opts = getAuthCookieOptions();
     res.cookie(COOKIE_NAMES.access, accessToken, opts.access);
@@ -569,7 +571,7 @@ app.post('/api/v1/auth/register', async (req, res, next) => {
     emailService.sendNewUserSignupAlert(result.user.id)
       .catch(err => console.error('Failed to send admin signup alert:', err));
 
-    setAuthCookies(res, result.accessToken, result.refreshToken);
+    setAuthCookies(req, res, result.accessToken, result.refreshToken);
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
@@ -591,7 +593,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
 
     const result = await authService.login(email, password);
 
-    setAuthCookies(res, result.accessToken, result.refreshToken);
+    setAuthCookies(req, res, result.accessToken, result.refreshToken);
     res.json({
       success: true,
       message: 'Login successful',
@@ -643,7 +645,7 @@ app.post('/api/v1/auth/refresh', async (req, res, next) => {
 
     const tokens = await authService.refreshTokens(refreshToken);
 
-    setAuthCookies(res, tokens.accessToken, tokens.refreshToken);
+    setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
     res.json({
       success: true,
       message: 'Tokens refreshed successfully',
