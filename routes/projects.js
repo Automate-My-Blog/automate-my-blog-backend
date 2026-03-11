@@ -12,6 +12,13 @@ const router = express.Router();
 /** Project ID param name */
 const PROJECT_ID_PARAM = 'id';
 
+/** UUID v4 regex (RFC 4122) */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidProjectId(id) {
+  return typeof id === 'string' && UUID_REGEX.test(id);
+}
+
 /**
  * Load project and enforce access (owner or org member).
  * Returns { project } with settings and updated_at, or sends 403/404 and returns null.
@@ -41,6 +48,12 @@ router.get(`/:${PROJECT_ID_PARAM}/settings`, async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     const projectId = req.params[PROJECT_ID_PARAM];
+    if (!isValidProjectId(projectId)) {
+      return res.status(400).json({
+        error: 'Invalid project ID',
+        message: 'Project ID must be a valid UUID. Use the project id from your project list, not a placeholder like "default".'
+      });
+    }
     const project = await getProjectForUser(projectId, userId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
@@ -65,6 +78,12 @@ router.put(`/:${PROJECT_ID_PARAM}/settings`, async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     const projectId = req.params[PROJECT_ID_PARAM];
+    if (!isValidProjectId(projectId)) {
+      return res.status(400).json({
+        error: 'Invalid project ID',
+        message: 'Project ID must be a valid UUID. Use the project id from your project list, not a placeholder like "default".'
+      });
+    }
     const project = await getProjectForUser(projectId, userId);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
