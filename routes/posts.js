@@ -274,10 +274,18 @@ router.get('/', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Posts retrieval failed:', error);
+    const msg = error?.message ?? '';
+    if (msg.includes('authentication') && msg.includes('session ID')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication or session required',
+        message: 'Either authentication or session ID is required'
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve posts',
-      details: error.message
+      details: msg
     });
   }
 });

@@ -681,10 +681,11 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
     res.json({ success: true, data });
   } catch (error) {
     console.error('Google Trends topics error:', error);
+    const message = error?.message ?? 'Failed to get trending topics';
     res.status(500).json({
       success: false,
       error: 'Failed to get trending topics',
-      message: error.message
+      message
     });
   }
 });
