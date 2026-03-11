@@ -17,6 +17,9 @@ function mockAuth(req, _res, next) {
   next();
 }
 
+/** Valid UUID v4 for route param (projects table uses UUID). */
+const VALID_PROJECT_ID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
 describe('projects api', () => {
   let app;
 
@@ -34,15 +37,24 @@ describe('projects api', () => {
   });
 
   describe('GET /api/v1/projects/:id/settings', () => {
+    it('returns 400 for invalid project ID (non-UUID)', async () => {
+      const res = await request(app)
+        .get('/api/v1/projects/default/settings')
+        .set('x-test-user-id', 'u1')
+        .expect(400);
+      expect(res.body.error).toBe('Invalid project ID');
+      expect(mockGetProjectSettingsForUser).not.toHaveBeenCalled();
+    });
+
     it('returns 401 for unauthorized errors', async () => {
       mockGetProjectSettingsForUser.mockRejectedValue(new UnauthorizedError('Authentication required'));
-      await request(app).get('/api/v1/projects/p1/settings').expect(401);
+      await request(app).get(`/api/v1/projects/${VALID_PROJECT_ID}/settings`).expect(401);
     });
 
     it('returns 404 when service reports not found', async () => {
       mockGetProjectSettingsForUser.mockRejectedValue(new NotFoundError('Project not found', 'project'));
       await request(app)
-        .get('/api/v1/projects/p1/settings')
+        .get(`/api/v1/projects/${VALID_PROJECT_ID}/settings`)
         .set('x-test-user-id', 'u1')
         .expect(404);
     });
@@ -53,11 +65,11 @@ describe('projects api', () => {
         savedAt: '2026-02-01T10:00:00.000Z'
       });
       const res = await request(app)
-        .get('/api/v1/projects/p1/settings')
+        .get(`/api/v1/projects/${VALID_PROJECT_ID}/settings`)
         .set('x-test-user-id', 'u1')
         .expect(200);
 
-      expect(mockGetProjectSettingsForUser).toHaveBeenCalledWith({ projectId: 'p1', userId: 'u1' });
+      expect(mockGetProjectSettingsForUser).toHaveBeenCalledWith({ projectId: VALID_PROJECT_ID, userId: 'u1' });
       expect(res.body).toEqual({
         settings: { audienceSegment: 'enterprise' },
         savedAt: '2026-02-01T10:00:00.000Z'
@@ -66,10 +78,20 @@ describe('projects api', () => {
   });
 
   describe('PUT /api/v1/projects/:id/settings', () => {
+    it('returns 400 for invalid project ID (non-UUID)', async () => {
+      const res = await request(app)
+        .put('/api/v1/projects/default/settings')
+        .set('x-test-user-id', 'u1')
+        .send({ settings: { contentTone: 'friendly' } })
+        .expect(400);
+      expect(res.body.error).toBe('Invalid project ID');
+      expect(mockSaveProjectSettingsForUser).not.toHaveBeenCalled();
+    });
+
     it('returns 404 when service reports not found', async () => {
       mockSaveProjectSettingsForUser.mockRejectedValue(new NotFoundError('Project not found', 'project'));
       await request(app)
-        .put('/api/v1/projects/p1/settings')
+        .put(`/api/v1/projects/${VALID_PROJECT_ID}/settings`)
         .set('x-test-user-id', 'u1')
         .send({ settings: { contentTone: 'friendly' } })
         .expect(404);
@@ -81,13 +103,13 @@ describe('projects api', () => {
         savedAt: '2026-02-01T11:00:00.000Z'
       });
       const res = await request(app)
-        .put('/api/v1/projects/p1/settings')
+        .put(`/api/v1/projects/${VALID_PROJECT_ID}/settings`)
         .set('x-test-user-id', 'u1')
         .send({ settings: { contentTone: 'friendly' } })
         .expect(200);
 
       expect(mockSaveProjectSettingsForUser).toHaveBeenCalledWith({
-        projectId: 'p1',
+        projectId: VALID_PROJECT_ID,
         userId: 'u1',
         incomingSettings: { contentTone: 'friendly' }
       });
