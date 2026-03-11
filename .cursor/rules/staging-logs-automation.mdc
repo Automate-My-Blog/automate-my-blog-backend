@@ -1,0 +1,34 @@
+---
+description: Run Vercel staging logs and create GitHub issues for problems (automation)
+alwaysApply: false
+---
+
+# Staging logs → GitHub issues automation
+
+When the user asks to **run the staging logs workflow**, **analyze staging logs and create issues**, **run the read-logs script and create GitHub issues**, or similar:
+
+1. **Run the automation script** from the repo root:
+   ```bash
+   npm run logs:staging:create-issues
+   ```
+   Or with options:
+   ```bash
+   node scripts/analyze-staging-logs-create-issues.js --since 24h
+   node scripts/analyze-staging-logs-create-issues.js --dry-run   # no issue creation, just report
+   ```
+
+2. **What it does**
+   - Runs `scripts/vercel-staging-logs.js` with `--level error` to fetch staging logs from Vercel.
+   - Parses logs, groups problems by path + status + method.
+   - For each problem type, creates a GitHub issue with label `staging-logs` **unless** an open issue already exists for that path+status (avoids duplicates).
+
+3. **Prerequisites**
+   - Vercel CLI linked and logged in (or `VERCEL_TOKEN`).
+   - GitHub CLI installed and authenticated (`gh auth login`).
+   - Optional: ensure label `staging-logs` exists in the repo (first run may create it via `gh issue create --label staging-logs`).
+
+4. **If the user wants to only fetch logs without creating issues**, use:
+   ```bash
+   npm run logs:staging
+   ```
+   or `node scripts/vercel-staging-logs.js --since 24h --level error` (no issue creation).
