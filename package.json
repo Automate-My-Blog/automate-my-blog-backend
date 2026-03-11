@@ -16,7 +16,9 @@
     "setup-test-db": "bash scripts/setup-test-db.sh",
     "verify-db": "node verify-connection.js",
     "setup-db": "node setup-database.js",
-    "worker": "node jobs/job-worker.js"
+    "worker": "node -r dotenv/config jobs/job-worker.js",
+    "logs:staging": "node scripts/vercel-staging-logs.js",
+    "logs:staging:create-issues": "node scripts/analyze-staging-logs-create-issues.js"
   },
   "keywords": [
     "autoblog",

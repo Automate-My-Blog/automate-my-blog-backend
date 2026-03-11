@@ -1,25 +1,19 @@
 import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
+import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
+import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToWordPress } from '../services/wordpress-publish.js';
+import postsAutomationRoutes from './posts-automation.js';
 
 const router = express.Router();
 
-// Enhanced user context extraction with comprehensive debugging
+// Mount automation routes before /:id so /automation is not captured as id
+router.use('/automation', postsAutomationRoutes);
+
 const extractUserContext = (req) => {
   const sessionId = req.headers['x-session-id'] || req.body?.session_id;
-  
-  // Enhanced debugging for authentication issues
-  console.log('🔍 Posts extractUserContext debug:', {
-    hasAuthHeader: !!req.headers.authorization,
-    authHeaderStart: req.headers.authorization?.substring(0, 20),
-    hasReqUser: !!req.user,
-    reqUserKeys: req.user ? Object.keys(req.user) : [],
-    reqUserId: req.user?.userId,
-    sessionId: sessionId,
-    endpoint: req.path,
-    method: req.method
-  });
-  
+
   // Check for mock user ID (for testing)
   const mockUserId = req.headers['x-mock-user-id'];
   if (mockUserId && process.env.NODE_ENV !== 'production') {
@@ -31,15 +25,13 @@ const extractUserContext = (req) => {
   }
   
   if (req.user?.userId) {
-    console.log('✅ Posts extractUserContext: Authenticated user found:', req.user.userId);
     return {
       isAuthenticated: true,
       userId: req.user.userId,
       sessionId: sessionId || null
     };
   }
-  
-  console.log('❌ Posts extractUserContext: No authenticated user, falling back to session');
+
   return {
     isAuthenticated: false,
     userId: null,
@@ -51,11 +43,6 @@ const validateUserContext = (context) => {
   if (!context.isAuthenticated && !context.sessionId) {
     throw new Error('Either authentication or session ID is required');
   }
-  console.log('✅ Posts validateUserContext passed:', {
-    isAuthenticated: context.isAuthenticated,
-    hasSessionId: !!context.sessionId,
-    userId: context.userId
-  });
 };
 
 // Safe JSON parsing for corrupted data
@@ -73,6 +60,29 @@ const safeParse = (jsonString, fieldName, recordId) => {
     });
     return null;
   }
+};
+
+// Format a raw post row for API response (includes publication metadata per handoff §6)
+const formatPostForResponse = (post) => {
+  if (!post) return null;
+  const topicData = safeParse(post.topic_data, 'topic_data', post.id);
+  const generationMetadata = safeParse(post.generation_metadata, 'generation_metadata', post.id);
+  let platformPublications = post.platform_publications;
+  if (platformPublications === null || platformPublications === undefined) {
+    platformPublications = [];
+  } else if (typeof platformPublications === 'string') {
+    platformPublications = safeParse(platformPublications, 'platform_publications', post.id) || [];
+  }
+  if (!Array.isArray(platformPublications)) {
+    platformPublications = [];
+  }
+  return {
+    ...post,
+    topic_data: topicData,
+    generation_metadata: generationMetadata,
+    publication_status: post.publication_status ?? 'draft',
+    platform_publications: platformPublications
+  };
 };
 
 // =============================================================================
@@ -199,11 +209,7 @@ router.post('/', async (req, res) => {
 
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {
@@ -252,12 +258,7 @@ router.get('/', async (req, res) => {
     
     const result = await db.query(query, params);
     
-    // Parse JSON fields safely
-    const posts = result.rows.map(post => ({
-      ...post,
-      topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-      generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-    }));
+    const posts = result.rows.map(post => formatPostForResponse(post));
     
     console.log('✅ Posts retrieved successfully:', {
       count: posts.length,
@@ -273,10 +274,18 @@ router.get('/', async (req, res) => {
     
   } catch (error) {
     console.error('❌ Posts retrieval failed:', error);
+    const msg = error?.message ?? '';
+    if (msg.includes('authentication') && msg.includes('session ID')) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication or session required',
+        message: 'Either authentication or session ID is required'
+      });
+    }
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve posts',
-      details: error.message
+      details: msg
     });
   }
 });
@@ -381,11 +390,7 @@ router.post('/:postId/reanalyze-seo', async (req, res) => {
 
     res.json({
       success: true,
-      post: {
-        ...updatedPost,
-        topic_data: safeParse(updatedPost.topic_data, 'topic_data', updatedPost.id),
-        generation_metadata: safeParse(updatedPost.generation_metadata, 'generation_metadata', updatedPost.id)
-      },
+      post: formatPostForResponse(updatedPost),
       analysis: seoResult.analysis,
       message: `SEO analysis complete! Score: ${seoResult.analysis.overallScore}/100`
     });
@@ -395,6 +400,218 @@ router.post('/:postId/reanalyze-seo', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to re-analyze post',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
+// PUBLISH - Direct platform publishing (requires JWT)
+// =============================================================================
+router.post('/:id/publish', async (req, res) => {
+  try {
+    const context = extractUserContext(req);
+    if (!context.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        message: 'Direct publishing requires a logged-in user. Use Authorization: Bearer <token>.'
+      });
+    }
+
+    const { id } = req.params;
+    const { platforms } = req.body || {};
+
+    if (!Array.isArray(platforms) || platforms.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request',
+        message: 'Body must include "platforms" (non-empty array of platform keys, e.g. ["wordpress", "medium"])'
+      });
+    }
+
+    const normalizedPlatforms = platforms
+      .filter((p) => typeof p === 'string' && p.trim())
+      .map((p) => normalizePlatformKey(p))
+      .filter(Boolean);
+    if (normalizedPlatforms.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid request',
+        message: `Body must include "platforms" (non-empty array of platform keys). Supported: ${[...PLATFORM_KEYS].sort().join(', ')}`
+      });
+    }
+
+    const unknown = platforms.filter((p) => normalizePlatformKey(p) === null);
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid platform',
+        message: `Unsupported platform(s): ${unknown.join(', ')}. Supported: ${[...PLATFORM_KEYS].join(', ')}`
+      });
+    }
+
+    const connected = await getConnectedPlatforms(context.userId);
+    const notConnected = normalizedPlatforms.filter((p) => !connected.has(p));
+    if (notConnected.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Platform not connected',
+        message: `The following platform(s) are not connected for your account. Connect them in Settings first: ${notConnected.join(', ')}`
+      });
+    }
+
+    const selectResult = await db.query(
+      'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
+      [id, context.userId]
+    );
+    if (selectResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found or access denied'
+      });
+    }
+
+    const post = selectResult.rows[0];
+    const platformPublications = [];
+
+    for (const platformKey of normalizedPlatforms) {
+      if (platformKey === 'wordpress') {
+        const creds = await getConnectionCredentials(context.userId, 'wordpress');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'WordPress connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToWordPress(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url
+          });
+        } catch (err) {
+          console.error('WordPress publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else {
+        // Medium, Substack, Ghost: not yet implemented; leave as publishing
+        platformPublications.push({ platform: platformKey, status: 'publishing' });
+      }
+    }
+
+    const anyPublished = platformPublications.some((p) => p.status === 'published');
+    const anyFailed = platformPublications.some((p) => p.status === 'failed');
+    const publicationStatus = anyFailed && !anyPublished ? 'failed' : anyPublished ? 'published' : 'publishing';
+
+    const updateResult = await db.query(
+      `UPDATE blog_posts
+       SET publication_status = $1, platform_publications = $2, updated_at = NOW()
+       WHERE id = $3 AND user_id = $4
+       RETURNING *`,
+      [publicationStatus, JSON.stringify(platformPublications), id, context.userId]
+    );
+    const updated = updateResult.rows[0];
+
+    res.json({
+      success: true,
+      post: formatPostForResponse(updated)
+    });
+  } catch (error) {
+    console.error('❌ Publish failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to publish post',
+      details: error.message
+    });
+  }
+});
+
+// =============================================================================
+// UNPUBLISH - Remove post from one platform or all (requires JWT)
+// =============================================================================
+router.post('/:id/unpublish', async (req, res) => {
+  try {
+    const context = extractUserContext(req);
+    if (!context.isAuthenticated) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required',
+        message: 'Unpublishing requires a logged-in user. Use Authorization: Bearer <token>.'
+      });
+    }
+
+    const { id } = req.params;
+    const { platform } = req.body || {};
+
+    if (platform !== undefined && platform !== null && String(platform).trim() !== '') {
+      const key = normalizePlatformKey(String(platform).trim());
+      if (!key) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid platform',
+          message: `Unsupported platform. Supported: ${[...PLATFORM_KEYS].sort().join(', ')}`
+        });
+      }
+    }
+
+    const selectResult = await db.query(
+      'SELECT * FROM blog_posts WHERE id = $1 AND user_id = $2',
+      [id, context.userId]
+    );
+    if (selectResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Post not found or access denied'
+      });
+    }
+
+    const post = selectResult.rows[0];
+    let platformPublications = post.platform_publications;
+    if (platformPublications === null || platformPublications === undefined) {
+      platformPublications = [];
+    } else if (typeof platformPublications === 'string') {
+      platformPublications = safeParse(platformPublications, 'platform_publications', post.id) || [];
+    }
+    if (!Array.isArray(platformPublications)) {
+      platformPublications = [];
+    }
+
+    let nextPublications;
+    let nextStatus;
+    if (platform === undefined || platform === null || String(platform).trim() === '') {
+      nextPublications = [];
+      nextStatus = 'draft';
+    } else {
+      const key = String(platform).toLowerCase();
+      nextPublications = platformPublications.filter((item) => String(item.platform).toLowerCase() !== key);
+      nextStatus = nextPublications.length === 0 ? 'draft' : post.publication_status;
+    }
+
+    const updateResult = await db.query(
+      `UPDATE blog_posts
+       SET platform_publications = $1, publication_status = $2, updated_at = NOW()
+       WHERE id = $3 AND user_id = $4
+       RETURNING *`,
+      [JSON.stringify(nextPublications), nextStatus, id, context.userId]
+    );
+    const updated = updateResult.rows[0];
+
+    res.json({
+      success: true,
+      post: formatPostForResponse(updated)
+    });
+  } catch (error) {
+    console.error('❌ Unpublish failed:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unpublish post',
       details: error.message
     });
   }
@@ -519,11 +736,7 @@ router.get('/:id', async (req, res) => {
     
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {
@@ -623,11 +836,7 @@ router.put('/:id', async (req, res) => {
     
     res.json({
       success: true,
-      post: {
-        ...post,
-        topic_data: safeParse(post.topic_data, 'topic_data', post.id),
-        generation_metadata: safeParse(post.generation_metadata, 'generation_metadata', post.id)
-      }
+      post: formatPostForResponse(post)
     });
     
   } catch (error) {

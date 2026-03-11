@@ -6,6 +6,7 @@ import { writeSSE } from '../utils/streaming-helpers.js';
 import openaiService from '../services/openai.js';
 
 const router = express.Router();
+const tokenAuthService = new DatabaseAuthService();
 
 // Safe JSON parsing to handle corrupted database records
 const safeParse = (jsonString, fieldName, recordId) => {
@@ -23,27 +24,15 @@ const safeParse = (jsonString, fieldName, recordId) => {
 const extractUserContext = (req) => {
   // Session: header (POST/any), body (POST), or query (GET — e.g. EventSource can't send headers)
   const sessionId = req.headers['x-session-id'] || req.body?.session_id || req.query?.sessionId || null;
-  
-  // Enhanced debugging for authentication issues
-  console.log('🔍 extractUserContext debug (analysis):', {
-    hasAuthHeader: !!req.headers.authorization,
-    authHeaderStart: req.headers.authorization?.substring(0, 20),
-    hasReqUser: !!req.user,
-    reqUserId: req.user?.userId,
-    sessionId: sessionId,
-    endpoint: req.path
-  });
-  
+
   if (req.user?.userId) {
-    console.log('✅ extractUserContext: Authenticated user found:', req.user.userId);
     return {
       isAuthenticated: true,
       userId: req.user.userId,
       sessionId: sessionId || null
     };
   }
-  
-  console.log('❌ extractUserContext: No authenticated user, falling back to session');
+
   return {
     isAuthenticated: false,
     userId: null,
@@ -61,6 +50,25 @@ const validateUserContext = (context) => {
   }
   return null;
 };
+
+function applyTokenQueryAuth(req, userContext, options = {}) {
+  const { successMessage = null, failurePrefix = 'Token validation failed:' } = options;
+  if (!req.query.token || userContext.isAuthenticated) return false;
+
+  try {
+    const token = String(req.query.token).trim();
+    const decoded = tokenAuthService.verifyToken(token);
+    if (!decoded?.userId) return false;
+
+    userContext.userId = decoded.userId;
+    userContext.isAuthenticated = true;
+    if (successMessage) console.log(successMessage);
+    return true;
+  } catch (err) {
+    console.warn(failurePrefix, err.message);
+    return false;
+  }
+}
 
 /**
  * POST /api/v1/analysis/adopt-session
@@ -1536,21 +1544,10 @@ router.get('/narration/analysis', async (req, res) => {
       hasSessionId: !!userContext.sessionId
     });
 
-    // Support token-based auth for EventSource
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-          console.log('✅ [ENDPOINT] Token auth successful');
-        }
-      } catch (err) {
-        console.warn('⚠️ [ENDPOINT] Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext, {
+      successMessage: '✅ [ENDPOINT] Token auth successful',
+      failurePrefix: '⚠️ [ENDPOINT] Token validation failed:'
+    });
 
     // Verify access to organization
     const orgQuery = userContext.isAuthenticated
@@ -1748,20 +1745,7 @@ router.get('/narration/audience', async (req, res) => {
     // Get user context for auth
     const userContext = extractUserContext(req);
 
-    // Support token-based auth for EventSource
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-        }
-      } catch (err) {
-        console.warn('Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext);
 
     // Resolve organization (same as narration/content: context first, then fallback by id for narration)
     let orgRow = await getOrganizationForContext(organizationId, userContext);
@@ -1927,19 +1911,7 @@ router.get('/narration/topic', async (req, res) => {
     // Get user context for auth (same pattern as audience)
     const userContext = extractUserContext(req);
 
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-        }
-      } catch (err) {
-        console.warn('Token validation failed:', err.message);
-      }
-    }
+    applyTokenQueryAuth(req, userContext);
 
     // Resolve organization (same as narration/content and audience: context first, then fallback by id)
     let orgRow = await getOrganizationForContext(organizationId, userContext);
@@ -2074,98 +2046,6 @@ router.get('/narration/topic', async (req, res) => {
       res.status(500).json({
         success: false,
         error: 'Failed to stream topic narration',
-        message: error.message
-      });
-    }
-  }
-});
-
-/**
- * GET /api/v1/analysis/narration/content?organizationId=xxx&selectedTopic=yyy
- * SSE stream for content narration (Issue #303) - Future use
- */
-router.get('/narration/content', async (req, res) => {
-  try {
-    const { organizationId, selectedTopic } = req.query;
-
-    if (!organizationId) {
-      return res.status(400).json({
-        success: false,
-        error: 'organizationId is required'
-      });
-    }
-
-    // Get user context (same auth pattern)
-    const userContext = extractUserContext(req);
-
-    if (req.query.token && !userContext.isAuthenticated) {
-      try {
-        const token = String(req.query.token).trim();
-        const authService = new DatabaseAuthService();
-        const decoded = authService.verifyToken(token);
-        if (decoded?.userId) {
-          userContext.userId = decoded.userId;
-          userContext.isAuthenticated = true;
-        }
-      } catch (err) {
-        console.warn('Token validation failed:', err.message);
-      }
-    }
-
-    // Verify access
-    const orgQuery = userContext.isAuthenticated
-      ? 'SELECT * FROM organizations WHERE id = $1 AND owner_user_id = $2'
-      : 'SELECT * FROM organizations WHERE id = $1 AND session_id = $2';
-
-    const orgResult = await db.query(orgQuery, [
-      organizationId,
-      userContext.isAuthenticated ? userContext.userId : userContext.sessionId
-    ]);
-
-    if (orgResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Organization not found or access denied'
-      });
-    }
-
-    // Set up SSE
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders?.();
-    if (res.socket?.setNoDelay) res.socket.setNoDelay(true);
-
-    writeSSE(res, 'connected', { organizationId });
-
-    // Generate and stream narration
-    const { generateContentNarration, streamTextAsChunks } =
-      await import('../services/narration-generator.js');
-
-    const narrationText = await generateContentNarration({
-      selectedTopic: selectedTopic ? { title: selectedTopic } : null
-    });
-
-    // Stream text word by word
-    await streamTextAsChunks(narrationText, async (chunk) => {
-      if (!res.writableEnded) {
-        writeSSE(res, 'content-chunk', { text: chunk });
-      }
-    }, 50);
-
-    // Send complete event
-    if (!res.writableEnded) {
-      writeSSE(res, 'content-complete', { text: '' });
-      res.end();
-    }
-
-  } catch (error) {
-    console.error('Content narration stream error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to stream content narration',
         message: error.message
       });
     }

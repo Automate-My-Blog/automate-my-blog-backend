@@ -3,6 +3,7 @@
  * Require DATABASE_URL (app loads DB). Skip when not set.
  *
  * @see docs/testing-strategy.md — Should Have
+ * @see docs/API_RESPONSE_CONTRACTS.md — Response shape consistency and cache-backed endpoints
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
@@ -63,5 +64,46 @@ describe.skipIf(!hasDb)('integration api contract', () => {
       .expect(200);
     expect(res.body).toHaveProperty('success', true);
     expect(res.body).toHaveProperty('message');
+  });
+
+  /**
+   * Google OAuth status: all services must return the same response shape so the frontend
+   * can handle them uniformly (success, connected, expires_at, scopes).
+   */
+  describe('GET /api/v1/google/oauth/status/:service response shape', () => {
+    const requiredKeys = ['success', 'connected', 'expires_at', 'scopes'];
+    let accessToken;
+
+    beforeAll(async () => {
+      const email = `contract-${Date.now()}@example.com`;
+      const reg = await request(app)
+        .post('/api/v1/auth/register')
+        .send({
+          email,
+          password: 'password123',
+          firstName: 'Contract',
+          lastName: 'Test',
+          organizationName: 'Contract Test Org',
+        })
+        .expect(201);
+      accessToken = reg.body.accessToken;
+    });
+
+    it.each(['trends', 'search_console', 'analytics'])(
+      '%s returns 200 with consistent shape (success, connected, expires_at, scopes)',
+      async (service) => {
+        const res = await request(app)
+          .get(`/api/v1/google/oauth/status/${service}`)
+          .set('Authorization', `Bearer ${accessToken}`)
+          .expect(200);
+        for (const key of requiredKeys) {
+          expect(res.body, `missing key "${key}" for service ${service}`).toHaveProperty(key);
+        }
+        expect(typeof res.body.success).toBe('boolean');
+        expect(typeof res.body.connected).toBe('boolean');
+        expect(res.body.expires_at === null || typeof res.body.expires_at === 'string').toBe(true);
+        expect(Array.isArray(res.body.scopes)).toBe(true);
+      }
+    );
   });
 });

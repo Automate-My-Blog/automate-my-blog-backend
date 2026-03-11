@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
-import { waitUntil } from '@vercel/functions';
 import openaiService from './services/openai.js';
 import webScraperService from './services/webscraper.js';
 import DatabaseAuthService from './services/auth-database.js';
@@ -16,12 +15,13 @@ import organizationService from './services/organizations.js';
 import projectsService from './services/projects.js';
 import db from './services/database.js';
 import enhancedBlogGenerationService from './services/enhanced-blog-generation.js';
-import { expireOldCredits } from './jobs/expireCredits.js';
 import sessionRoutes from './routes/session.js';
 import audienceRoutes from './routes/audiences.js';
 import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
+import recommendationsRoutes from './routes/recommendations.js';
 import postsRoutes from './routes/posts.js';
+import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
@@ -34,6 +34,7 @@ import tweetRoutes from './routes/tweets.js';
 import youtubeVideosRoutes from './routes/youtube-videos.js';
 import newsArticlesRoutes from './routes/news-articles.js';
 import organizationRoutes from './routes/organizations.js';
+import projectsRoutes from './routes/projects.js';
 import stripeRoutes from './routes/stripe.js';
 import analyticsRoutes from './routes/analytics.js';
 import leadsRoutes from './routes/leads.js';
@@ -47,10 +48,11 @@ import jobsRoutes from './routes/jobs.js';
 import voiceSamplesRoutes from './routes/voice-samples.js';
 import { registerStreamRoute } from './routes/stream.js';
 import googleIntegrationsRoutes from './routes/google-integrations.js';
-import adminPanelRouter, { requireAdmin, adminPanelHtml, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
+import adminPanelRouter, { requireAdmin, adminLoginHtml, adminShellHtml } from './routes/admin-panel.js';
 import { startEmailScheduler } from './jobs/scheduler.js';
 import { toHttpResponse, ValidationError } from './lib/errors.js';
-import { validateRegistrationInput, validateLoginInput, validateRefreshInput } from './lib/auth-validation.js';
+import { validateRegistrationInput, validateLoginInput } from './lib/auth-validation.js';
+import { COOKIE_NAMES, getAuthCookieOptions, getAuthCookieClearOptions, parseCookieHeader, useCrossOriginCookies, buildAuthSetCookieHeaders, buildAuthClearCookieHeaders } from './lib/auth-cookies.js';
 import { validateCreateBlogPostBody, validateUpdateBlogPostBody } from './lib/blog-post-validation.js';
 import { saveAnalysisResult } from './services/website-analysis-persistence.js';
 
@@ -66,6 +68,9 @@ if (!process.env.REDIS_URL) {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const optionalAuth = authService.optionalAuthMiddleware.bind(authService);
+const requireAuth = authService.authMiddleware.bind(authService);
+const requireFlexibleAuth = authService.authMiddlewareFlexible.bind(authService);
 
 // Configure Express to trust Vercel proxy for accurate IP detection
 app.set('trust proxy', 1);
@@ -220,28 +225,63 @@ app.use((req, res, next) => {
 
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Parse Cookie header so auth and SSE can read httpOnly cookie names (we set them; browser sends them)
+app.use((req, res, next) => {
+  req.cookies = parseCookieHeader(req.headers.cookie);
+  next();
+});
+
+/** Set httpOnly auth cookies on response (login/register/refresh). Uses explicit Set-Cookie when HTTPS so cross-origin (SameSite=None; Secure) is guaranteed. */
+function setAuthCookies(req, res, accessToken, refreshToken) {
+  const isHttps = req.secure || (req.get && req.get('x-forwarded-proto') === 'https');
+  if (isHttps || useCrossOriginCookies) {
+    const [accessCookie, refreshCookie] = buildAuthSetCookieHeaders(accessToken, refreshToken);
+    res.setHeader('Set-Cookie', [accessCookie, refreshCookie]);
+  } else {
+    const opts = getAuthCookieOptions();
+    res.cookie(COOKIE_NAMES.access, accessToken, opts.access);
+    res.cookie(COOKIE_NAMES.refresh, refreshToken, opts.refresh);
+  }
+}
+
+/** Clear auth cookies (logout). Uses explicit Set-Cookie when cross-origin so browser clears the right cookies. */
+function clearAuthCookies(res) {
+  if (useCrossOriginCookies) {
+    res.setHeader('Set-Cookie', buildAuthClearCookieHeaders());
+  } else {
+    const opts = getAuthCookieClearOptions();
+    res.clearCookie(COOKIE_NAMES.access, opts);
+    res.clearCookie(COOKIE_NAMES.refresh, opts);
+  }
+}
+
 // API Routes
 app.use('/api/v1/session', sessionRoutes);
-app.use('/api/v1/audiences', authService.optionalAuthMiddleware.bind(authService), audienceRoutes);
-app.use('/api/v1/keywords', authService.optionalAuthMiddleware.bind(authService), keywordRoutes);
-app.use('/api/v1/users', authService.optionalAuthMiddleware.bind(authService), userRoutes);
-app.use('/api/v1/posts', authService.optionalAuthMiddleware.bind(authService), postsRoutes);
-app.use('/api/v1/analysis', authService.optionalAuthMiddleware.bind(authService), analysisRoutes);
-app.use('/api/v1/jobs', authService.optionalAuthMiddleware.bind(authService), jobsRoutes);
-app.use('/api/v1/voice-samples', authService.authMiddleware.bind(authService), voiceSamplesRoutes);
+app.use('/api/v1/audiences', optionalAuth, audienceRoutes);
+app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
+app.use('/api/v1/users', optionalAuth, userRoutes);
+app.use('/api/v1/recommendations', requireAuth, recommendationsRoutes);
+app.use('/api/v1/posts', optionalAuth, postsRoutes);
+// Medium OAuth callback (no JWT; user is redirected from Medium)
+app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
+app.use('/api/v1/publishing-platforms', requireAuth, publishingPlatformsRoutes);
+app.use('/api/v1/analysis', optionalAuth, analysisRoutes);
+app.use('/api/v1/jobs', optionalAuth, jobsRoutes);
+app.use('/api/v1/voice-samples', requireAuth, voiceSamplesRoutes);
 app.use('/api/v1/stream', registerStreamRoute(authService));
-app.use('/api/v1/seo-analysis', authService.authMiddleware.bind(authService), seoAnalysisRoutes);
-app.use('/api/v1/content-upload', authService.authMiddleware.bind(authService), contentUploadRoutes);
-app.use('/api/v1/manual-inputs', authService.authMiddleware.bind(authService), manualInputRoutes);
-app.use('/api/v1/visual-content', authService.authMiddleware.bind(authService), visualContentRoutes);
-app.use('/api/v1/enhanced-blog-generation', authService.authMiddleware.bind(authService), enhancedBlogGenerationRoutes);
-app.use('/api/v1/blog', authService.authMiddleware.bind(authService), blogRoutes);
-app.use('/api/v1/topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
-app.use('/api/v1/tweets', authService.optionalAuthMiddleware.bind(authService), tweetRoutes);
-app.use('/api/v1/youtube-videos', authService.optionalAuthMiddleware.bind(authService), youtubeVideosRoutes);
-app.use('/api/v1/news-articles', authService.optionalAuthMiddleware.bind(authService), newsArticlesRoutes);
-app.use('/api/v1/trending-topics', authService.optionalAuthMiddleware.bind(authService), topicRoutes);
-app.use('/api/v1/organizations', authService.optionalAuthMiddleware.bind(authService), organizationRoutes);
+app.use('/api/v1/seo-analysis', requireAuth, seoAnalysisRoutes);
+app.use('/api/v1/content-upload', requireAuth, contentUploadRoutes);
+app.use('/api/v1/manual-inputs', requireAuth, manualInputRoutes);
+app.use('/api/v1/visual-content', requireAuth, visualContentRoutes);
+app.use('/api/v1/enhanced-blog-generation', requireAuth, enhancedBlogGenerationRoutes);
+app.use('/api/v1/blog', requireAuth, blogRoutes);
+app.use('/api/v1/topics', optionalAuth, topicRoutes);
+app.use('/api/v1/tweets', optionalAuth, tweetRoutes);
+app.use('/api/v1/youtube-videos', optionalAuth, youtubeVideosRoutes);
+app.use('/api/v1/news-articles', optionalAuth, newsArticlesRoutes);
+app.use('/api/v1/trending-topics', optionalAuth, topicRoutes);
+app.use('/api/v1/organizations', optionalAuth, organizationRoutes);
+app.use('/api/v1/projects', requireAuth, projectsRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
 // Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
@@ -251,26 +291,26 @@ app.use('/api/v1/stripe', (req, res, next) => {
     return next();
   }
   // All other Stripe endpoints require authentication
-  authService.authMiddleware.bind(authService)(req, res, next);
+  requireAuth(req, res, next);
 }, stripeRoutes);
 
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
-app.use('/api/v1/strategies/bundle', authService.authMiddleware.bind(authService), bundleSubscriptionRoutes);
+app.use('/api/v1/strategies/bundle', requireAuth, bundleSubscriptionRoutes);
 // Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
-app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes);
+app.use('/api/v1/strategies', requireFlexibleAuth, strategyRoutes);
 
 // Analytics routes - all require authentication
 app.use('/api/v1/analytics', analyticsRoutes);
 
 // Google API Integrations (Trends, Search Console, Analytics)
-app.use('/api/v1/google', authService.optionalAuthMiddleware.bind(authService), googleIntegrationsRoutes);
+app.use('/api/v1/google', optionalAuth, googleIntegrationsRoutes);
 
 // Email test routes (optional auth for testing)
-app.use('/api/v1/email/test', authService.optionalAuthMiddleware.bind(authService), emailTestRoutes);
+app.use('/api/v1/email/test', optionalAuth, emailTestRoutes);
 
 // Scheduler routes (optional auth for testing/admin)
-app.use('/api/v1/scheduler', authService.optionalAuthMiddleware.bind(authService), schedulerRoutes);
+app.use('/api/v1/scheduler', optionalAuth, schedulerRoutes);
 
 // Email preferences and unsubscribe routes (no auth required for unsubscribe token)
 app.use('/api/v1/email-preferences', emailPreferencesRoutes);
@@ -279,7 +319,7 @@ app.use('/api/v1/email-preferences', emailPreferencesRoutes);
 app.use(founderEmailRoutes);
 
 // Admin panel: stats and cache management (super_admin JWT or ADMIN_API_KEY)
-app.use('/api/v1/admin-panel', authService.optionalAuthMiddleware.bind(authService), requireAdmin, adminPanelRouter);
+app.use('/api/v1/admin-panel', optionalAuth, requireAdmin, adminPanelRouter);
 // Admin login page (public): same shell as /admin so login + redirect works
 app.get('/admin/login', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -365,7 +405,6 @@ if (isDev) {
         connectionTest: dbTestResult,
         healthStats: dbHealthStats,
         hasUrl: !!process.env.DATABASE_URL,
-        urlStart: process.env.DATABASE_URL?.substring(0, 20) || 'Not set',
         urlLength: process.env.DATABASE_URL?.length || 0,
         urlProtocol: process.env.DATABASE_URL?.split('://')[0] || 'none'
       },
@@ -477,6 +516,9 @@ app.get('/api', (req, res) => {
       'PUT /api/v1/blog-posts/:id': 'Update blog post (requires auth)',
       'DELETE /api/v1/blog-posts/:id': 'Delete blog post (requires auth)',
       'PUT /api/v1/user/profile': 'Update user profile (requires auth)',
+      'GET /api/v1/user/email-preferences': 'Get email preferences (requires auth)',
+      'PUT /api/v1/user/email-preferences': 'Update email preferences (requires auth)',
+      'POST /api/v1/user/unsubscribe': 'Unsubscribe from non-essential emails (requires auth)',
       'POST /api/v1/user/change-password': 'Change user password (requires auth)',
       'GET /api/v1/user/credits': 'Get user credits and billing info (requires auth)',
       'POST /api/v1/user/apply-rewards': 'Apply pending referral rewards (requires auth)', 
@@ -488,6 +530,8 @@ app.get('/api', (req, res) => {
       'POST /api/v1/referrals/invite': 'Send referral invitation for customer acquisition (requires auth)',
       'GET /api/v1/referrals/stats': 'Get referral statistics and earnings (requires auth)',
       'POST /api/v1/referrals/process-signup': 'Process referral signup and grant rewards (requires auth)',
+      'GET /api/v1/projects/:id/settings': 'Get project strategy settings (requires auth)',
+      'PUT /api/v1/projects/:id/settings': 'Save project strategy settings (requires auth)',
       'PUT /api/v1/organization/profile': 'Update organization name and website (requires auth)',
       'POST /api/v1/organization/invite': 'Send organization team member invitation (requires auth)',
       'GET /api/v1/organization/members': 'Get organization members list (requires auth)',
@@ -527,6 +571,7 @@ app.post('/api/v1/auth/register', async (req, res, next) => {
     emailService.sendNewUserSignupAlert(result.user.id)
       .catch(err => console.error('Failed to send admin signup alert:', err));
 
+    setAuthCookies(req, res, result.accessToken, result.refreshToken);
     res.status(201).json({
       success: true,
       message: 'User registered successfully',
@@ -548,6 +593,7 @@ app.post('/api/v1/auth/login', async (req, res, next) => {
 
     const result = await authService.login(email, password);
 
+    setAuthCookies(req, res, result.accessToken, result.refreshToken);
     res.json({
       success: true,
       message: 'Login successful',
@@ -586,13 +632,20 @@ app.get('/api/v1/auth/me', authService.authMiddleware.bind(authService), async (
   }
 });
 
-// Refresh token endpoint
+// Refresh token endpoint — prefers httpOnly cookie; accepts body for backward compatibility
 app.post('/api/v1/auth/refresh', async (req, res, next) => {
   try {
-    const { refreshToken } = validateRefreshInput(req.body);
+    const refreshToken = authService.getRefreshTokenFromRequest(req, req.body);
+    if (!refreshToken) {
+      return res.status(400).json({
+        error: 'Missing refresh token',
+        message: 'Refresh token is required (send via cookie or body refreshToken)'
+      });
+    }
 
     const tokens = await authService.refreshTokens(refreshToken);
 
+    setAuthCookies(req, res, tokens.accessToken, tokens.refreshToken);
     res.json({
       success: true,
       message: 'Tokens refreshed successfully',
@@ -604,10 +657,9 @@ app.post('/api/v1/auth/refresh', async (req, res, next) => {
   }
 });
 
-// Logout endpoint
+// Logout endpoint — clear httpOnly auth cookies so session ends
 app.post('/api/v1/auth/logout', (req, res) => {
-  // For JWT-based auth, logout is typically handled client-side
-  // by removing the tokens from storage
+  clearAuthCookies(res);
   res.json({
     success: true,
     message: 'Logout successful'
@@ -786,8 +838,7 @@ app.post('/api/analyze-website', async (req, res, next) => {
     const token = req.headers.authorization?.replace('Bearer ', '');
     if (token) {
       try {
-        const jwt = await import('jsonwebtoken');
-        const payload = jwt.default.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
+        const payload = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret-for-development');
         userId = payload.userId;
       } catch (jwtError) {
         console.warn('Failed to extract user from JWT:', jwtError.message);
@@ -2371,7 +2422,9 @@ app.get('/api/v1/admin/organizations/:id', authService.authMiddleware.bind(authS
         wl.lead_source,
         wl.status,
         wl.created_at,
-        ls.overall_score as lead_score
+        ls.overall_score as lead_score,
+        ls.initial_score,
+        ls.score_updated_at
       FROM website_leads wl
       LEFT JOIN lead_scoring ls ON wl.id = ls.website_lead_id
       WHERE wl.organization_id = $1
@@ -2390,6 +2443,12 @@ app.get('/api/v1/admin/organizations/:id', authService.authMiddleware.bind(authS
           leadSource: lead.lead_source,
           status: lead.status,
           leadScore: parseInt(lead.lead_score || 0),
+          ...(lead.score_updated_at != null && {
+            dynamicLeadScore: parseInt(lead.lead_score || 0),
+            initialLeadScore: lead.initial_score != null ? parseInt(lead.initial_score) : undefined,
+            scoreUpdatedAt: lead.score_updated_at,
+            isDynamicScore: true
+          }),
           createdAt: lead.created_at
         }))
       }
@@ -2449,6 +2508,140 @@ app.put('/api/v1/user/profile', authService.authMiddleware.bind(authService), as
     console.error('Update profile error:', error);
     res.status(500).json({
       error: 'Failed to update profile',
+      message: error.message
+    });
+  }
+});
+
+// Email preferences (issue #7) - GET/PUT /api/v1/user/email-preferences, POST /api/v1/user/unsubscribe
+const EMAIL_PREFERENCE_KEYS = ['draft_ready', 'recommendations', 'weekly_summary', 'product_updates'];
+const EMAIL_FREQUENCIES = ['daily', 'weekly', 'important', 'never'];
+
+function defaultEmailPreferences() {
+  return {
+    frequency: 'weekly',
+    notificationTypes: ['draft_ready', 'recommendations', 'weekly_summary'],
+    notifications: {
+      draft_ready: true,
+      recommendations: true,
+      weekly_summary: true,
+      product_updates: false
+    }
+  };
+}
+
+app.get('/api/v1/user/email-preferences', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const row = await db.query(
+      'SELECT email_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    const stored = row.rows[0].email_preferences || {};
+    const prefs = {
+      ...defaultEmailPreferences(),
+      ...(stored.frequency && { frequency: stored.frequency }),
+      ...(Array.isArray(stored.notificationTypes) && { notificationTypes: stored.notificationTypes }),
+      ...(typeof stored.notifications === 'object' && stored.notifications !== null && { notifications: { ...defaultEmailPreferences().notifications, ...stored.notifications } })
+    };
+    res.json({
+      ...prefs,
+      data: prefs
+    });
+  } catch (error) {
+    console.error('Get email preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get email preferences',
+      message: error.message
+    });
+  }
+});
+
+app.put('/api/v1/user/email-preferences', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { frequency, notificationTypes, notifications } = req.body || {};
+    const row = await db.query(
+      'SELECT email_preferences FROM users WHERE id = $1',
+      [userId]
+    );
+    if (row.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    const current = row.rows[0].email_preferences || {};
+    const updates = { ...current };
+    if (frequency && EMAIL_FREQUENCIES.includes(frequency)) {
+      updates.frequency = frequency;
+    }
+    if (Array.isArray(notificationTypes)) {
+      updates.notificationTypes = notificationTypes.filter(t => EMAIL_PREFERENCE_KEYS.includes(t));
+    }
+    if (notifications && typeof notifications === 'object') {
+      updates.notifications = { ...(current.notifications || defaultEmailPreferences().notifications) };
+      for (const key of EMAIL_PREFERENCE_KEYS) {
+        if (typeof notifications[key] === 'boolean') {
+          updates.notifications[key] = notifications[key];
+        }
+      }
+    }
+    await db.query(
+      'UPDATE users SET email_preferences = $1, updated_at = NOW() WHERE id = $2',
+      [JSON.stringify(updates), userId]
+    );
+    const prefs = {
+      ...defaultEmailPreferences(),
+      ...(updates.frequency && { frequency: updates.frequency }),
+      ...(Array.isArray(updates.notificationTypes) && { notificationTypes: updates.notificationTypes }),
+      ...(updates.notifications && { notifications: updates.notifications })
+    };
+    res.json({
+      ...prefs,
+      data: prefs,
+      success: true
+    });
+  } catch (error) {
+    console.error('Update email preferences error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to update email preferences',
+      message: error.message
+    });
+  }
+});
+
+app.post('/api/v1/user/unsubscribe', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const unsubscribedAll = {
+      frequency: 'never',
+      notificationTypes: [],
+      notifications: {
+        draft_ready: false,
+        recommendations: false,
+        weekly_summary: false,
+        product_updates: false
+      }
+    };
+    const legacyCategories = ['engagement', 'reengagement', 'referral'];
+    await db.query(
+      `UPDATE users SET email_preferences = $1, unsubscribed_from = $2, updated_at = NOW() WHERE id = $3`,
+      [JSON.stringify(unsubscribedAll), JSON.stringify(legacyCategories), userId]
+    );
+    res.json({
+      success: true,
+      message: 'Unsubscribed from non-essential emails',
+      ...unsubscribedAll,
+      data: unsubscribedAll
+    });
+  } catch (error) {
+    console.error('Unsubscribe all error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to unsubscribe',
       message: error.message
     });
   }
@@ -3004,11 +3197,9 @@ if (process.env.NODE_ENV !== 'test') {
 function handleOptions(req, res) {
   const origin = (req.headers && (req.headers.origin || req.headers.Origin)) || '';
   const fallback = (process.env.CORS_OPTIONS_FALLBACK_ORIGIN || process.env.CORS_ORIGINS || '').split(',')[0].trim() || 'https://staging.automatemyblog.com';
-  const allowed =
-    /^https:\/\/(staging\.|www\.)?automatemyblog\.com$/i.test(origin) ||
-    /^https?:\/\/[^/]+\.vercel\.app$/i.test(origin) ||
-    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
-  const allowOrigin = (origin && allowed) ? origin : fallback;
+  const allowOrigin = (origin && isOriginAllowed(origin))
+    ? origin
+    : (isOriginAllowed(fallback) ? fallback : 'https://staging.automatemyblog.com');
   res.setHeader('Access-Control-Allow-Origin', allowOrigin);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-session-id');

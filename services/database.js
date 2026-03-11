@@ -13,7 +13,6 @@ const getDatabaseConfig = () => {
     nodeEnv: process.env.NODE_ENV,
     hasRawDatabaseUrl: !!process.env.DATABASE_URL,
     databaseUrlLength: process.env.DATABASE_URL?.length || 0,
-    databaseUrlStart: process.env.DATABASE_URL?.substring(0, 20) || 'Not set',
     hasDbUser: !!process.env.DB_USER,
     hasDbHost: !!process.env.DB_HOST,
     hasDbName: !!process.env.DB_NAME,

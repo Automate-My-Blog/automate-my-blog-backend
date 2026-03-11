@@ -10,16 +10,20 @@ High-level map of request flows, where business rules live, core domain, and com
 | **Website analysis (sync)** | `POST /api/analyze-website` | Optional (JWT/session) | `index.js` (~600 lines inline) | Scrape → OpenAI → lead capture → org/intelligence/CTA save. Org resolution (user vs anonymous, adoption) and DB writes are in this single block. |
 | **Jobs (async analysis/content)** | `POST /api/v1/jobs/website-analysis`, `POST /api/v1/jobs/content-generation`, `GET /api/v1/jobs/:id/status`, retry, cancel | Optional auth or session | `routes/jobs.js` + `services/job-queue.js` | Handlers thin; job-queue has createJob, getJobStatus, retryJob, cancelJob. Ownership: user_id XOR session_id. |
 | **Blog posts CRUD** | `GET/POST/PUT/DELETE /api/v1/blog-posts`, `GET/POST /api/v1/blog-posts/:id` | Required | `index.js` (handlers) + `services/content.js` | Handlers parse input and call contentService; 404 inferred from `error.message === 'Blog post not found'`. |
-| **User profile / credits / referrals** | `PUT /api/v1/user/profile`, `GET /api/v1/user/credits`, `POST /api/v1/user/apply-rewards`, referrals | Required | `index.js` (handlers) + `services/billing.js`, `services/referrals.js`, etc. | Handlers call services; some validation in handlers. |
+| **Project settings** | `GET/PUT /api/v1/projects/:id/settings` | Required | `routes/projects.js` + `services/project-settings.js` + `services/project-settings-repository.js` | Route is thin; service enforces auth/not-found semantics and setting normalization; repository encapsulates SQL and access check. |
 
 ## 2. Where Business Rules Live Today
 
 - **Controllers / Routes**
   - **index.js**: Auth body validation (required fields, email regex, password length); blog-posts required fields and 404 handling; analyze-website URL check and **all** org/intelligence/CTA persistence logic.
-  - **routes/jobs.js**: Input validation (url, topic/businessInfo/organizationId); job context (user/session); error mapping (UserNotFoundError, 23503, REDIS_URL) repeated in each handler.
+  - **routes/jobs.js**: Input validation (url, topic/businessInfo/organizationId); job context (user/session); centralized `sendJobError(...)` mapping for job-route semantics.
+  - **routes/projects.js**: Thin HTTP layer for project settings; delegates business rules to `services/project-settings.js`.
 - **Services**
   - **auth-database.js**: register/login/refresh, user lookup, JWT creation; “user already exists” and DB fallback to memory.
   - **job-queue.js**: createJob (user existence check, Redis required), getJobForAccess (ownership), retryJob (only if status === 'failed'), cancelJob (only if queued/running); job state transitions.
+  - **project-settings.js**: get/save project settings, auth + access errors (UnauthorizedError/NotFoundError), normalization of allowed settings keys.
+- **Data Access Layer**
+  - **project-settings-repository.js**: owns project settings queries (access check + settings update merge).
   - **content.js**: getUserBlogPosts, getBlogPost, updateBlogPost, deleteBlogPost; ownership by userId; throws `Error('Blog post not found')` for missing/forbidden.
   - **organizations.js**: createOrUpdateOrganization (URL/domain lookup, update or create); **not** used by the main analyze-website flow, which has its own priority-based org logic in index.js.
 - **Models / Data**
@@ -44,10 +48,10 @@ High-level map of request flows, where business rules live, core domain, and com
    - Validation (required fields, email format, password length) in handlers; could be named rules in a small domain layer for reuse and tests.
 3. **Blog-posts error handling (index.js)**
    - Repeated `if (error.message === 'Blog post not found') res.status(404)...` in get/update/delete; fragile (string match). Prefer typed errors (e.g. NotFoundError).
-4. **Job routes (routes/jobs.js)**
-   - Same catch blocks for UserNotFoundError, 23503, REDIS_URL, and generic 500 repeated in multiple endpoints; should be a single “job error → HTTP” mapper.
-5. **Job state transitions**
-   - Allowed transitions live in job-queue.js (retry: failed → queued; cancel: queued|running → cancelled_at set). No single “allowed transitions” constant or table; worker and API share implicit contract.
+4. **Organizations route (routes/organizations.js)**
+   - Combines request parsing, permission checks, validation, and SQL updates in one module; repeated context/access checks and long handler bodies.
+5. **Job state transitions (residual risk)**
+   - Transition rules are centralized in job-queue (`JOB_STATE_TRANSITIONS` + predicates), but worker behavior still depends on the same status contract; any future status additions must update both API and worker expectations.
 
 ## 5. Error Handling Today
 
@@ -68,7 +72,8 @@ High-level map of request flows, where business rules live, core domain, and com
 - **Auth**: `lib/auth-validation.js` — validateRegistrationInput, validateLoginInput, validateRefreshInput (throw ValidationError); handlers are thin.
 - **Blog posts**: content service throws NotFoundError; handlers call next(error); global handler maps to 404. Blog post create/update validation extracted to `lib/blog-post-validation.js`.
 - **Jobs**: `routes/jobs.js` — single `sendJobError(res, e)` maps UserNotFoundError → 401, REDIS_URL → 503, statusCode 400 → 400, InvariantViolation/ServiceUnavailableError → same semantics; job-queue throws InvariantViolation for retry/cancel rules, ServiceUnavailableError for missing Redis.
-- **Job state transitions**: job-queue.js exports JOB_STATUSES, RETRIABLE_STATUS, CANCELLABLE_STATUSES; retry only when status === 'failed'; cancel only when status in ('queued', 'running').
+- **Job state transitions**: `job-queue.js` exports `RETRIABLE_STATUS`, `CANCELLABLE_STATUSES`, `JOB_STATE_TRANSITIONS`, and named predicates (`canRetryJobStatus`, `canCancelJobStatus`) to enforce transitions in one place.
+- **Project settings**: `routes/projects.js` no longer imports DB; `services/project-settings.js` centralizes business rules and delegates SQL to `services/project-settings-repository.js`.
 - **Analyze-website persistence**: `services/website-analysis-persistence.js` — saveAnalysisResult() encapsulates priority-based org resolution (user-owned → adopt anonymous by URL → new; anonymous by URL → new), organization + organization_intelligence upsert, and CTA clear/store. Handler in index.js: validate URL → scrape → OpenAI → lead capture → persistence service → narrative job → response. Validation for URL uses ValidationError so global handler can map 400.
 
 ## 8. Remaining Hotspots (candidates for future refactor)

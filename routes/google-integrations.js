@@ -19,6 +19,13 @@ const GOOGLE_SCOPES = {
   analytics: ['https://www.googleapis.com/auth/analytics.readonly']
 };
 
+/** Base OAuth callback URL (trimmed). Must match exactly what is in Google Cloud Console. No query string. */
+function getGoogleRedirectUri() {
+  const uri = (process.env.GOOGLE_REDIRECT_URI || '').trim();
+  if (!uri) return '';
+  return uri.replace(/\?.*$/, ''); // strip any existing query
+}
+
 /** Map URL service to DB service_name for app credentials */
 const SERVICE_TO_DB_NAME = {
   search_console: 'google_search_console',
@@ -26,7 +33,7 @@ const SERVICE_TO_DB_NAME = {
 };
 
 /**
- * Resolve client_id and client_secret for a user+service: self-serve app credentials if stored, else env.
+ * Resolve client_id and client_secret: per-user encrypted store, then platform encrypted store, then env.
  */
 async function getGoogleOAuthClientConfig(userId, service) {
   const dbName = SERVICE_TO_DB_NAME[service];
@@ -34,6 +41,10 @@ async function getGoogleOAuthClientConfig(userId, service) {
   const appCreds = await oauthManager.getAppCredentials(userId, dbName);
   if (appCreds?.client_id && appCreds?.client_secret) {
     return { clientId: appCreds.client_id, clientSecret: appCreds.client_secret };
+  }
+  const platformCreds = await oauthManager.getPlatformAppCredentials(dbName);
+  if (platformCreds?.client_id && platformCreds?.client_secret) {
+    return { clientId: platformCreds.client_id, clientSecret: platformCreds.client_secret };
   }
   if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     return {
@@ -49,14 +60,32 @@ async function getGoogleOAuthClientConfig(userId, service) {
 // ========================================
 
 /**
+ * GET /api/v1/google/oauth/config
+ * Public: whether the backend has Google OAuth client configured (encrypted store or env).
+ * Frontend can use this to show/hide "Connect Google" or display a setup message.
+ */
+router.get('/oauth/config', async (_req, res) => {
+  let clientConfigured = !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  if (!clientConfigured) {
+    const sc = await oauthManager.getPlatformAppCredentials('google_search_console');
+    const ga = await oauthManager.getPlatformAppCredentials('google_analytics');
+    clientConfigured = !!(sc?.client_id && sc?.client_secret) || !!(ga?.client_id && ga?.client_secret);
+  }
+  res.json({ success: true, clientConfigured });
+});
+
+/**
  * POST /api/v1/google/oauth/credentials
- * Self-serve: store the user's OAuth client credentials for Search Console or Analytics.
+ * Store OAuth client credentials in encrypted store (per-user or platform).
+ * Body: { service, client_id, client_secret } and optionally { platform: true }.
+ * - Per-user (default): any authenticated user stores their own credentials.
+ * - Platform: { platform: true } stores one set for the whole app; super_admin only.
  * JWT required. Do not log or expose client_secret.
  */
 router.post('/oauth/credentials', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { service, client_id: clientId, client_secret: clientSecret } = req.body || {};
+    const { service, client_id: clientId, client_secret: clientSecret, platform } = req.body || {};
 
     if (!service || !clientId || !clientSecret) {
       return res.status(400).json({
@@ -73,7 +102,18 @@ router.post('/oauth/credentials', authService.authMiddleware.bind(authService), 
     }
 
     const dbName = SERVICE_TO_DB_NAME[service];
-    await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
+
+    if (platform === true) {
+      if (req.user?.role !== 'super_admin') {
+        return res.status(403).json({
+          success: false,
+          error: 'Platform credentials can only be set by super_admin'
+        });
+      }
+      await oauthManager.storePlatformAppCredentials(dbName, clientId.trim(), clientSecret.trim());
+    } else {
+      await oauthManager.storeAppCredentials(userId, dbName, clientId.trim(), clientSecret.trim());
+    }
 
     res.status(200).json({ success: true });
   } catch (error) {
@@ -110,14 +150,21 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
     if (!config) {
       return res.status(400).json({
         success: false,
-        error: 'Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, or submit credentials via POST /api/v1/google/oauth/credentials.'
+        error: 'Google OAuth not configured. Store credentials via POST /api/v1/google/oauth/credentials (per-user or platform with platform: true for super_admin).'
       });
     }
 
+    const redirectUri = getGoogleRedirectUri();
+    if (!redirectUri) {
+      return res.status(500).json({
+        success: false,
+        error: 'GOOGLE_REDIRECT_URI is not set. Set it in Vercel (e.g. https://<api>/api/v1/google/oauth/callback) for this environment.'
+      });
+    }
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      redirectUri
     );
 
     const authUrl = oauth2Client.generateAuthUrl({
@@ -136,27 +183,35 @@ router.get('/oauth/authorize/:service', authService.authMiddleware.bind(authServ
 
 /**
  * GET /api/v1/google/oauth/callback
- * OAuth callback handler. Uses same client_id/secret as authorize (per-user if stored, else env).
+ * OAuth callback handler. Uses credentials from encrypted store (per-user or platform) or env.
  */
 router.get('/oauth/callback', async (req, res) => {
   try {
-    const { code, state, service } = req.query;
+    const { code, state } = req.query;
 
     if (!code || !state) {
       throw new Error('Missing code or state parameter');
     }
 
-    const { userId } = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+    const statePayload = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
+    const { userId, service } = statePayload;
+    if (!userId || !service) {
+      throw new Error('Invalid state: missing userId or service');
+    }
 
     const config = await getGoogleOAuthClientConfig(userId, service);
     if (!config) {
       throw new Error('Google OAuth client not configured for this user');
     }
 
+    const redirectUri = getGoogleRedirectUri();
+    if (!redirectUri) {
+      throw new Error('GOOGLE_REDIRECT_URI is not set');
+    }
     const oauth2Client = new google.auth.OAuth2(
       config.clientId,
       config.clientSecret,
-      `${process.env.GOOGLE_REDIRECT_URI}?service=${service}`
+      redirectUri
     );
 
     const { tokens } = await oauth2Client.getToken(code);
@@ -186,11 +241,13 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     const { service } = req.params;
     const userId = req.user.userId;
 
-    // Google Trends: no OAuth; dashboard home tile uses { connected: true/false }
+    // Google Trends: no OAuth; match response shape of other services (expires_at, scopes) for frontend
     if (service === 'trends') {
       return res.json({
         success: true,
         connected: true,
+        expires_at: null,
+        scopes: [],
         message: 'Google Trends uses public API - no authentication required'
       });
     }
@@ -200,8 +257,8 @@ router.get('/oauth/status/:service', authService.authMiddleware.bind(authService
     res.json({
       success: true,
       connected: !!credentials,
-      expires_at: credentials?.expires_at,
-      scopes: credentials?.scopes
+      expires_at: credentials?.expires_at ?? null,
+      scopes: credentials?.scopes ?? []
     });
   } catch (error) {
     console.error('OAuth status check error:', error);
@@ -356,29 +413,11 @@ router.get('/integration-pitch/stream', authService.authMiddleware.bind(authServ
  * Fetch actual trending topics for the user and stream LLM summary
  * Shows immediate value when connecting Google Trends
  * SSE endpoint. Events: chunk, complete, error.
+ * Auth: cookie (preferred for EventSource withCredentials) or ?token= for legacy.
  * SECURITY: Do not log or expose the token query parameter.
  */
-router.get('/trends/preview', async (req, res) => {
-  // Token from query only (EventSource cannot send headers). Never log req.query or token.
-  const token = req.query.token;
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'Access denied',
-      message: 'No token provided'
-    });
-  }
-
-  let userId;
-  try {
-    const decoded = authService.verifyToken(token);
-    userId = decoded.userId;
-  } catch (error) {
-    return res.status(401).json({
-      error: 'Access denied',
-      message: 'Invalid token'
-    });
-  }
+router.get('/trends/preview', authService.authMiddlewareFlexible.bind(authService), async (req, res) => {
+  const userId = req.user.userId;
 
   // Set SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
@@ -594,8 +633,9 @@ REQUIREMENTS:
 /**
  * GET /api/v1/google/trends/topics
  * Return cached emerging/trending topics for the current user (from google_trends_cache).
- * Use this to display "Find Emerging Topics" in the UI. Data is populated by POST /trends/refresh or the daily cron.
- * Requires JWT.
+ * Use this to display "Find Emerging Topics" in the UI.
+ * If cache is empty and the user has strategies with SEO keywords, triggers a one-time
+ * refresh so the response includes data (first load may take a few seconds).
  * Query: limit (optional, default 20).
  */
 router.get('/trends/topics', authService.authMiddleware.bind(authService), async (req, res) => {
@@ -609,14 +649,43 @@ router.get('/trends/topics', authService.authMiddleware.bind(authService), async
       });
     }
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
-    const data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+    let data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+
+    // If empty, refresh: try default keywords first (fast, ~5s), then strategy-based if still empty
+    if (data.length === 0) {
+      await fetchTrendsForContentCalendar(userId, []);
+      data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+    }
+    if (data.length === 0) {
+      let strategyResult = await db.query(
+        `SELECT DISTINCT a.id
+         FROM audiences a
+         WHERE a.user_id = $1
+           AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
+        [userId]
+      );
+      let strategyIds = strategyResult.rows.map((r) => r.id);
+      if (strategyIds.length === 0) {
+        strategyResult = await db.query(
+          `SELECT id FROM audiences
+           WHERE user_id = $1
+             AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+          [userId]
+        );
+        strategyIds = strategyResult.rows.map((r) => r.id);
+      }
+      await fetchTrendsForContentCalendar(userId, strategyIds);
+      data = await googleContentOptimizer.getTrendingTopicsForUser(String(userId), limit);
+    }
+
     res.json({ success: true, data });
   } catch (error) {
     console.error('Google Trends topics error:', error);
+    const message = error?.message ?? 'Failed to get trending topics';
     res.status(500).json({
       success: false,
       error: 'Failed to get trending topics',
-      message: error.message
+      message
     });
   }
 });
@@ -639,25 +708,27 @@ router.post('/trends/refresh', authService.authMiddleware.bind(authService), asy
       });
     }
 
-    const strategyResult = await db.query(
+    let strategyResult = await db.query(
       `SELECT DISTINCT a.id
        FROM audiences a
        WHERE a.user_id = $1
          AND EXISTS (SELECT 1 FROM seo_keywords WHERE audience_id = a.id)`,
       [userId]
     );
-    const strategyIds = strategyResult.rows.map((r) => r.id);
+    let strategyIds = strategyResult.rows.map((r) => r.id);
 
+    // If no strategies have SEO keywords, try audiences with target_segment/customer_problem (fallback for trends)
     if (strategyIds.length === 0) {
-      return res.status(200).json({
-        success: true,
-        fetched: 0,
-        keywordCount: 0,
-        errorCount: 0,
-        message: 'No strategies with keywords found. Add keywords to your strategies to refresh emerging topics.'
-      });
+      strategyResult = await db.query(
+        `SELECT id FROM audiences
+         WHERE user_id = $1
+           AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+        [userId]
+      );
+      strategyIds = strategyResult.rows.map((r) => r.id);
     }
 
+    // When no strategies: service uses generic keywords so user still gets topics
     const result = await fetchTrendsForContentCalendar(userId, strategyIds);
 
     res.json({
@@ -760,6 +831,109 @@ router.get('/trends/interest-over-time', async (req, res) => {
 });
 
 /**
+ * GET /api/v1/google/funnel
+ * Per-post funnel metrics: Search Impressions → Search Clicks → Time on Site → Internal Links Clicked → CTA Clicks.
+ * Requires pageUrl, siteUrl (for GSC), propertyId (for GA), and date range. Returns partial funnel when only GSC or only GA is connected.
+ *
+ * Query params:
+ * - pageUrl (required): The post's URL (full URL for GSC; path for GA pagePath—use same value if your site uses one format for both)
+ * - siteUrl (required): Site URL in GSC (e.g. https://example.com or sc-domain:example.com)
+ * - propertyId (required): GA4 Property ID
+ * - startDate (required): YYYY-MM-DD
+ * - endDate (required): YYYY-MM-DD
+ */
+router.get('/funnel', authService.authMiddleware.bind(authService), async (req, res) => {
+  try {
+    const { pageUrl, siteUrl, propertyId, startDate, endDate } = req.query;
+
+    if (!pageUrl || !siteUrl || !propertyId || !startDate || !endDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'pageUrl, siteUrl, propertyId, startDate, and endDate are required'
+      });
+    }
+
+    const userId = req.user.userId;
+    const funnel = {
+      search_impressions: null,
+      search_clicks: null,
+      time_on_site_seconds: null,
+      internal_links_clicked: null,
+      cta_clicks: null
+    };
+    const meta = { start_date: startDate, end_date: endDate, gsc_connected: false, ga_connected: false };
+
+    // GSC: Search Impressions + Search Clicks
+    const gscCredentials = await oauthManager.getCredentials(userId, 'google_search_console');
+    if (gscCredentials) {
+      meta.gsc_connected = true;
+      await googleSearchConsoleService.initializeAuth(gscCredentials);
+      const gscResult = await googleSearchConsoleService.getPagePerformance(
+        siteUrl,
+        pageUrl,
+        startDate,
+        endDate
+      );
+      if (gscResult?.data) {
+        funnel.search_impressions = gscResult.data.impressions ?? 0;
+        funnel.search_clicks = gscResult.data.clicks ?? 0;
+      } else {
+        funnel.search_impressions = 0;
+        funnel.search_clicks = 0;
+      }
+    }
+
+    // GA: Time on Site, Internal Links Clicked, CTA Clicks
+    const gaCredentials = await oauthManager.getCredentials(userId, 'google_analytics');
+    if (gaCredentials) {
+      meta.ga_connected = true;
+      await googleAnalyticsService.initializeAuth(gaCredentials);
+      const gaPerf = await googleAnalyticsService.getPagePerformance(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate
+      );
+      if (gaPerf?.avgSessionDuration != null) {
+        funnel.time_on_site_seconds = Math.round(gaPerf.avgSessionDuration);
+      } else {
+        funnel.time_on_site_seconds = 0;
+      }
+      const internalLinks = await googleAnalyticsService.getPageEventCount(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate,
+        'internal_link_click'
+      );
+      const ctaClicks = await googleAnalyticsService.getPageEventCount(
+        propertyId,
+        pageUrl,
+        startDate,
+        endDate,
+        'cta_click'
+      );
+      funnel.internal_links_clicked = internalLinks;
+      funnel.cta_clicks = ctaClicks;
+    }
+
+    res.json({ success: true, funnel, meta });
+  } catch (error) {
+    console.error('Google funnel error:', error);
+
+    if (error.code === 401 || error.message?.includes('invalid_grant') || error.message?.includes('invalid credentials')) {
+      return res.status(401).json({
+        success: false,
+        error: 'OAuth token expired or invalid. Please reconnect Google Search Console or Analytics.',
+        needsReconnect: true
+      });
+    }
+
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * GET /api/v1/google/search-console/top-queries
  * Get top performing queries from Google Search Console
  *
@@ -771,7 +945,7 @@ router.get('/trends/interest-over-time', async (req, res) => {
  *
  * NOTE: Requires user authentication and OAuth tokens
  */
-router.get('/search-console/top-queries', async (req, res) => {
+router.get('/search-console/top-queries', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { siteUrl, startDate, endDate, limit = 100 } = req.query;
 
@@ -828,7 +1002,7 @@ router.get('/search-console/top-queries', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/search-console/page-performance', async (req, res) => {
+router.get('/search-console/page-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { siteUrl, pageUrl, startDate, endDate } = req.query;
 
@@ -885,7 +1059,7 @@ router.get('/search-console/page-performance', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/analytics/page-performance', async (req, res) => {
+router.get('/analytics/page-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, pageUrl, startDate, endDate } = req.query;
 
@@ -941,7 +1115,7 @@ router.get('/analytics/page-performance', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.get('/analytics/traffic-sources', async (req, res) => {
+router.get('/analytics/traffic-sources', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, startDate, endDate } = req.query;
 
@@ -998,7 +1172,7 @@ router.get('/analytics/traffic-sources', async (req, res) => {
  * - startDate (required): Start date (YYYY-MM-DD)
  * - endDate (required): End date (YYYY-MM-DD)
  */
-router.post('/analytics/compare-trend-performance', async (req, res) => {
+router.post('/analytics/compare-trend-performance', authService.authMiddleware.bind(authService), async (req, res) => {
   try {
     const { propertyId, trendInformedUrls, standardUrls, startDate, endDate } = req.body;
 

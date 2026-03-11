@@ -25,37 +25,98 @@ const TRENDS_FETCH_DELAY_MS = 2000;
 /** Max keywords to fetch trends for before generating calendar (keeps job time bounded). */
 const MAX_TRENDS_KEYWORDS = 10;
 
+/** Last-resort keywords when user has no strategies or no extractable keywords (so topics are never empty). */
+const DEFAULT_TRENDS_KEYWORDS = ['content marketing', 'digital marketing'];
+
+/** Google Trends returns rising data for short queries; long phrases usually return empty. */
+const MAX_KEYWORD_LENGTH_FOR_TRENDS = 40;
+
 /**
  * Run a one-time Google Trends fetch for the user's strategy keywords and populate cache.
  * Call this before generating the content calendar so getTrendingTopicsForUser returns fresh data.
- * Only runs when strategies have seo_keywords; safe to call when they don't.
+ * Uses seo_keywords, then target_segment/customer_problem fallback, then generic keywords so data is usually returned.
  *
  * @param {string} userId - User ID (for cache ownership)
- * @param {string[]} strategyIds - Audience/strategy IDs to collect keywords from
+ * @param {string[]} strategyIds - Audience/strategy IDs to collect keywords from (may be empty)
  * @returns {Promise<{ fetched: number, keywordCount: number, errorCount: number }>}
  */
 export async function fetchTrendsForContentCalendar(userId, strategyIds) {
-  if (!userId || !Array.isArray(strategyIds) || strategyIds.length === 0) {
+  if (!userId) {
     return { fetched: 0, keywordCount: 0, errorCount: 0 };
   }
+  const ids = Array.isArray(strategyIds) ? strategyIds : [];
 
   try {
-    const keywordsResult = await db.query(
-      `SELECT sk.keyword
-       FROM seo_keywords sk
-       WHERE sk.audience_id = ANY($1::uuid[])
-       ORDER BY sk.relevance_score DESC NULLS LAST
-       LIMIT $2`,
-      [strategyIds, MAX_TRENDS_KEYWORDS * 2]
-    );
+    let keywords = [];
+    if (ids.length > 0) {
+      const keywordsResult = await db.query(
+        `SELECT sk.keyword
+         FROM seo_keywords sk
+         WHERE sk.audience_id = ANY($1::uuid[])
+         ORDER BY sk.relevance_score DESC NULLS LAST
+         LIMIT $2`,
+        [ids, MAX_TRENDS_KEYWORDS * 2]
+      );
 
-    const seen = new Set();
-    const keywords = (keywordsResult.rows || [])
-      .map((r) => r.keyword?.trim())
-      .filter((k) => k && !seen.has(k) && (seen.add(k), true))
-      .slice(0, MAX_TRENDS_KEYWORDS);
+      const seen = new Set();
+      keywords = (keywordsResult.rows || [])
+        .map((r) => r.keyword?.trim())
+        .filter((k) => k && !seen.has(k) && (seen.add(k), true))
+        .slice(0, MAX_TRENDS_KEYWORDS);
+
+      // Fallback: no SEO keywords yet — derive from target_segment / customer_problem (same as trends preview)
+      if (keywords.length === 0) {
+        const fallbackResult = await db.query(
+          `SELECT id, customer_problem, target_segment
+           FROM audiences
+           WHERE id = ANY($1::uuid[])
+             AND (customer_problem IS NOT NULL AND customer_problem != '' OR target_segment IS NOT NULL)`,
+          [ids]
+        );
+      /** Extract a clean search phrase: prefer customer_problem, then target_segment demographics/psychographics/searchBehavior. */
+      const toPhrases = (row) => {
+        const phrases = [];
+        if (row.customer_problem && typeof row.customer_problem === 'string') {
+          const first = row.customer_problem.replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
+          if (first && first.length > 2) phrases.push(first);
+        }
+        const ts = row.target_segment;
+        if (ts && typeof ts === 'object' && !Array.isArray(ts)) {
+          for (const key of ['demographics', 'psychographics', 'searchBehavior']) {
+            const v = ts[key];
+            if (typeof v === 'string' && v.trim().length > 2) phrases.push(v.trim());
+          }
+        }
+        if (ts && typeof ts === 'string') {
+          const first = ts.replace(/\s+/g, ' ').split(/[,.\n]/)[0]?.trim();
+          if (first && first.length > 2) phrases.push(first);
+        }
+        return phrases;
+      };
+        for (const row of fallbackResult.rows || []) {
+          for (const phrase of toPhrases(row)) {
+            if (phrase.length > 2 && phrase.length < 80 && !seen.has(phrase)) {
+              seen.add(phrase);
+              keywords.push(phrase);
+              if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
+            }
+          }
+          if (keywords.length >= MAX_TRENDS_KEYWORDS) break;
+        }
+      }
+    }
+    // Last resort: no strategies or no extractable keywords — use generic terms so user still sees topics
     if (keywords.length === 0) {
-      return { fetched: 0, keywordCount: 0, errorCount: 0 };
+      keywords = DEFAULT_TRENDS_KEYWORDS.slice(0, 2);
+      console.log(`📈 Using default trends keywords for user ${userId}: ${keywords.join(', ')}`);
+    } else {
+      // Fallback often yields long phrases; Google Trends rarely returns rising data for those.
+      // Use ONLY default keywords (no long phrases) so we finish in ~5s and avoid serverless timeout.
+      const hasShortKeyword = keywords.some((k) => k.length <= MAX_KEYWORD_LENGTH_FOR_TRENDS);
+      if (!hasShortKeyword) {
+        keywords = DEFAULT_TRENDS_KEYWORDS.slice(0, 2);
+        console.log(`📈 Using default trends keywords only (audience phrases too long for Trends): ${keywords.join(', ')}`);
+      }
     }
 
     let fetched = 0;

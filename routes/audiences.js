@@ -73,7 +73,6 @@ const extractUserContext = (req) => {
   if (isDev) {
     console.log('🔍 extractUserContext debug:', {
       hasAuthHeader: !!req.headers.authorization,
-      authHeaderStart: req.headers.authorization?.substring(0, 20),
       hasReqUser: !!req.user,
       reqUserKeys: req.user ? Object.keys(req.user) : [],
       reqUserId: req.user?.userId,

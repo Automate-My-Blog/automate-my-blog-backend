@@ -157,3 +157,77 @@ Refactor focused on business logic clarity, safety, and testability without chan
 
 **Verification**
 - Docs only; no behavior change.
+
+---
+
+## Chunk 9: Project settings flow — thin route + centralized service/repository
+
+**What changed**
+- Added `services/project-settings-repository.js` to own SQL for:
+  - project access lookup (`owner` or `organization_members`),
+  - settings merge update (`COALESCE(settings, '{}') || patch`).
+- Added `services/project-settings.js` for business rules:
+  - `normalizeProjectSettingsPatch(...)` (allowed keys + string coercion + `ctaGoals` normalization),
+  - `getProjectSettingsForUser(...)`,
+  - `saveProjectSettingsForUser(...)`,
+  - `toProjectSettingsResponse(...)`.
+- Refactored `routes/projects.js`:
+  - removed direct `db` usage and inline settings normalization logic,
+  - route now parses request input and delegates to service only,
+  - centralized route-level error translation preserving current response shape:
+    - 401 `{ error: 'Authentication required' }`
+    - 404 `{ error: 'Project not found' }`
+    - 500 `{ error: 'Failed to load/save project settings' }`.
+
+**Why**
+- Makes handler responsibilities explicit (HTTP only) and isolates domain rules + data access.
+- Normalization logic is now unit-testable as a pure function.
+- Reduces duplication and prevents route/service query drift.
+
+**Verification**
+- Added `tests/unit/project-settings.test.js` (normalization, auth/not-found semantics, response mapping).
+- Added `tests/unit/projects-api.test.js` (route behavior and response shape with mocked service).
+- Targeted tests run:
+  - `npm test -- tests/unit/project-settings.test.js tests/unit/projects-api.test.js`
+
+---
+
+## Chunk 10: Job state transitions — explicit predicates and transition map
+
+**What changed**
+- `services/job-queue.js`:
+  - Added exported transition table `JOB_STATE_TRANSITIONS`.
+  - Added exported predicates:
+    - `canRetryJobStatus(status)`
+    - `canCancelJobStatus(status)`
+  - Added internal guards:
+    - `assertCanRetry(status)`
+    - `assertCanCancel(status)`
+  - `retryJob(...)` and `cancelJob(...)` now enforce transitions through these guards.
+- `tests/unit/job-queue.test.js`:
+  - Added assertions for `JOB_STATE_TRANSITIONS`.
+  - Added table-driven tests for `canRetryJobStatus`/`canCancelJobStatus`.
+
+**Why**
+- Transition rules are now named and centralized in one place instead of inline conditionals.
+- Table-driven tests make allowed/disallowed states explicit and easier to maintain safely.
+
+**Verification**
+- Targeted tests run:
+  - `npm test -- tests/unit/job-queue.test.js`
+
+---
+
+## Chunk 11: Logic map refresh
+
+**What changed**
+- Updated `docs/logic-map.md` to reflect current architecture:
+  - project settings as a top flow,
+  - new `project-settings` service/repository split,
+  - explicit job transition predicates/table.
+
+**Why**
+- Keeps the system map aligned with the refactor so future changes have a reliable source of truth.
+
+**Verification**
+- Docs only; no runtime behavior change.
