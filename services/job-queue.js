@@ -20,6 +20,39 @@ const JOB_TYPES = ['website_analysis', 'content_generation', 'analyze_voice_samp
 export const RETRIABLE_STATUS = 'failed';
 /** Only queued or running jobs can be cancelled (worker checks cancelled_at). */
 export const CANCELLABLE_STATUSES = Object.freeze(['queued', 'running']);
+/** Documented transition rules for API and worker consumers. */
+export const JOB_STATE_TRANSITIONS = Object.freeze({
+  retryFrom: Object.freeze([RETRIABLE_STATUS]),
+  cancelFrom: CANCELLABLE_STATUSES
+});
+
+/**
+ * @param {string} status
+ * @returns {boolean}
+ */
+export function canRetryJobStatus(status) {
+  return status === RETRIABLE_STATUS;
+}
+
+/**
+ * @param {string} status
+ * @returns {boolean}
+ */
+export function canCancelJobStatus(status) {
+  return CANCELLABLE_STATUSES.includes(status);
+}
+
+function assertCanRetry(status) {
+  if (!canRetryJobStatus(status)) {
+    throw new InvariantViolation('Job is not in failed state', 400);
+  }
+}
+
+function assertCanCancel(status) {
+  if (!canCancelJobStatus(status)) {
+    throw new InvariantViolation('Job is not cancellable', 400);
+  }
+}
 
 let _connection = null;
 let _queue = null;
@@ -259,9 +292,7 @@ export async function retryJob(jobId, context) {
   ensureRedis();
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
-  if (row.status !== RETRIABLE_STATUS) {
-    throw new InvariantViolation('Job is not in failed state', 400);
-  }
+  assertCanRetry(row.status);
 
   await db.query(
     `UPDATE jobs SET status = 'queued', progress = 0, current_step = NULL, error = NULL, result = NULL,
@@ -283,9 +314,7 @@ export async function retryJob(jobId, context) {
 export async function cancelJob(jobId, context) {
   const row = await getJobForAccess(jobId, context);
   if (!row) return null;
-  if (!CANCELLABLE_STATUSES.includes(row.status)) {
-    throw new InvariantViolation('Job is not cancellable', 400);
-  }
+  assertCanCancel(row.status);
 
   await db.query(
     `UPDATE jobs SET cancelled_at = NOW(), updated_at = NOW() WHERE id = $1`,
@@ -383,4 +412,11 @@ export async function getNarrativeStream(jobId) {
   return arr;
 }
 
-export { getQueue, getConnection, JOB_TYPES, QUEUE_NAME, normalizeRedisUrl, isRedisUrlValid };
+export {
+  getQueue,
+  getConnection,
+  JOB_TYPES,
+  QUEUE_NAME,
+  normalizeRedisUrl,
+  isRedisUrlValid
+};

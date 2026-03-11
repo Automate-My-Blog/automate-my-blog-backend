@@ -39,6 +39,24 @@ describe('job-queue', () => {
     it('exports retry and cancel transition rules', () => {
       expect(jobQueue.RETRIABLE_STATUS).toBe('failed');
       expect(jobQueue.CANCELLABLE_STATUSES).toEqual(['queued', 'running']);
+      expect(jobQueue.JOB_STATE_TRANSITIONS).toEqual({
+        retryFrom: ['failed'],
+        cancelFrom: ['queued', 'running']
+      });
+    });
+
+    it('evaluates transition predicates (table-driven)', () => {
+      const cases = [
+        { status: 'queued', retry: false, cancel: true },
+        { status: 'running', retry: false, cancel: true },
+        { status: 'failed', retry: true, cancel: false },
+        { status: 'succeeded', retry: false, cancel: false },
+      ];
+
+      for (const c of cases) {
+        expect(jobQueue.canRetryJobStatus(c.status)).toBe(c.retry);
+        expect(jobQueue.canCancelJobStatus(c.status)).toBe(c.cancel);
+      }
     });
   });
 
