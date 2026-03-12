@@ -6,6 +6,7 @@ import { getConnectionCredentials } from '../services/publishing-connections.js'
 import { publishToContentful } from '../services/contentful-publish.js';
 import { publishToGhost } from '../services/ghost-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
+import { publishToSanity } from '../services/sanity-publish.js';
 import { publishToSubstack } from '../services/substack-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
 import postsAutomationRoutes from './posts-automation.js';
@@ -599,6 +600,31 @@ router.post('/:id/publish', async (req, res) => {
           });
         } catch (err) {
           console.error('Contentful publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'sanity') {
+        const creds = await getConnectionCredentials(context.userId, 'sanity');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Sanity connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToSanity(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Sanity'
+          });
+        } catch (err) {
+          console.error('Sanity publish failed:', err.message);
           platformPublications.push({
             platform: platformKey,
             status: 'failed',
