@@ -469,6 +469,7 @@ export async function mediumOAuthCallback(req, res) {
     }
 
     let account = 'Medium';
+    let mediumUserId = null;
     try {
       const meRes = await fetch('https://api.medium.com/v1/me', {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -476,6 +477,7 @@ export async function mediumOAuthCallback(req, res) {
       if (meRes.ok) {
         const me = await meRes.json();
         account = me?.data?.username || me?.data?.name || account;
+        mediumUserId = me?.data?.id || null;
       }
     } catch (e) {
       console.warn('Medium /me failed, using default account label:', e.message);
@@ -485,7 +487,8 @@ export async function mediumOAuthCallback(req, res) {
       JSON.stringify({
         access_token: accessToken,
         refresh_token: refreshToken || null,
-        expires_at: expiresAt || null
+        expires_at: expiresAt || null,
+        medium_user_id: mediumUserId
       })
     );
 
