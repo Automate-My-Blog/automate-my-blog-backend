@@ -24,6 +24,14 @@ These scripts in the project root are typically run manually for debugging, migr
 
 If a script is no longer needed, consider moving it to `scripts/archive/` or removing it.
 
+## scripts/ (staging & real-world flows)
+
+| Script | Description |
+|--------|-------------|
+| `scripts/vercel-staging-logs.js` | Fetch and analyze Vercel staging logs (see docs/setup/VERCEL_STAGING_LOGS.md). |
+| `scripts/test-content-calendar-staging.js` | Full API test of content calendar against staging (BACKEND_URL, TEST_JWT). |
+| `scripts/publish-test-post-wordpress.js` | **Real-world flow:** generate blog via stream → create post → publish to WordPress. Uses same API sequence as frontend (POST blog/generate-stream, SSE, POST /posts, POST /posts/:id/publish). Requires TEST_JWT for a user with WordPress connected and credits. |
+
 ## Module Surface Area Notes
 
 - **link-validator**, **content-validator**: Used in tests and root `test-cta-simple.js` only; not wired into production routes.
