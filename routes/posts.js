@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToGhost } from '../services/ghost-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
 import postsAutomationRoutes from './posts-automation.js';
@@ -501,6 +502,31 @@ router.post('/:id/publish', async (req, res) => {
             message: err.message || 'Publish failed'
           });
         }
+      } else if (platformKey === 'ghost') {
+        const creds = await getConnectionCredentials(context.userId, 'ghost');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Ghost connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToGhost(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url || undefined,
+            label: 'Ghost'
+          });
+        } catch (err) {
+          console.error('Ghost publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
       } else if (platformKey === 'medium') {
         const creds = await getConnectionCredentials(context.userId, 'medium');
         if (!creds) {
@@ -527,7 +553,7 @@ router.post('/:id/publish', async (req, res) => {
           });
         }
       } else {
-        // Substack, Ghost, etc.: not yet implemented; leave as publishing
+        // Substack, etc.: not yet implemented; leave as publishing
         platformPublications.push({ platform: platformKey, status: 'publishing' });
       }
     }
