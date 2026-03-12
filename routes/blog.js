@@ -9,6 +9,7 @@ import express from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import enhancedBlogGenerationService from '../services/enhanced-blog-generation.js';
 import billingService from '../services/billing.js';
+import { COOKIE_NAMES } from '../lib/auth-cookies.js';
 
 const router = express.Router();
 
@@ -60,7 +61,7 @@ router.post('/generate-stream', async (req, res) => {
     const connectionId = uuidv4();
 
     const baseUrl = req.protocol + '://' + (req.get('host') || '');
-    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
+    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[COOKIE_NAMES.access] || '';
     const streamUrl = token
       ? `${baseUrl}/api/v1/stream/${connectionId}?token=${encodeURIComponent(token)}`
       : `${baseUrl}/api/v1/stream/${connectionId}`;

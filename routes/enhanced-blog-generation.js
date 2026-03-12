@@ -2,6 +2,7 @@ import express from 'express';
 import enhancedBlogGenerationService from '../services/enhanced-blog-generation.js';
 import billingService from '../services/billing.js';
 import { waitUntil } from '@vercel/functions';
+import { COOKIE_NAMES } from '../lib/auth-cookies.js';
 
 // Mock SEO analysis service for now
 const seoAnalysisService = {
@@ -223,9 +224,9 @@ router.post('/generate', async (req, res) => {
 
 /**
  * POST /api/v1/enhanced-blog-generation/generate-stream (Phase 2)
- * Start streaming blog content. Client must open GET /api/v1/stream?token= first to get connectionId.
+ * Start streaming blog content. Client opens the returned streamUrl (GET /api/v1/stream/:connectionId?token=) to receive SSE.
  * Body: { connectionId, topic, businessInfo, organizationId, additionalInstructions?, options? }
- * Returns 202 { connectionId, streamUrl }. Events: content-chunk, complete, error.
+ * Returns 202 { connectionId, streamUrl }. streamUrl includes connectionId and token when available. Events: content-chunk, complete, error.
  */
 router.post('/generate-stream', async (req, res) => {
   try {
@@ -268,8 +269,10 @@ router.post('/generate-stream', async (req, res) => {
     }
 
     const baseUrl = req.protocol + '://' + (req.get('host') || '');
-    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || '';
-    const streamUrl = token ? `${baseUrl}/api/v1/stream?token=${encodeURIComponent(token)}` : `${baseUrl}/api/v1/stream`;
+    const token = req.query?.token || req.headers?.authorization?.replace(/^Bearer\s+/i, '') || req.cookies?.[COOKIE_NAMES.access] || '';
+    const streamUrl = token
+      ? `${baseUrl}/api/v1/stream/${connectionId}?token=${encodeURIComponent(token)}`
+      : `${baseUrl}/api/v1/stream/${connectionId}`;
 
     setImmediate(() => {
       enhancedBlogGenerationService.generateBlogPostStream(
