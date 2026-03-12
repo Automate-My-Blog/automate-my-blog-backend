@@ -76,7 +76,8 @@ Production (`main`) keeps using the existing **Production** env vars; deployment
 | `CORS_ORIGINS` | Optional; add staging frontend URL if not covered by `*.vercel.app` |
 | `GOOGLE_REDIRECT_URI` | Backend OAuth callback URL, e.g. `https://<staging-api>/api/v1/google/oauth/callback` |
 | `OAUTH_ENCRYPTION_KEY` | 64 hex chars; encrypts OAuth tokens and app credentials (required for Google OAuth) |
-| Others | Google OAuth app credentials go in the **encrypted store** (POST `/oauth/credentials` with `platform: true` by super_admin)—see [GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](./GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md). `YOUTUBE_API_KEY`, `NEWS_API_KEY`, `GOOGLE_TRENDS_API_KEY`, etc. as needed |
+| `FRONTEND_URL` | Staging frontend base URL (e.g. `https://staging-app.vercel.app`); used for OAuth success/error redirects (e.g. Medium, Shopify). |
+| Others | **Publishing OAuth** (Medium, Shopify, Webflow, etc.): app credentials go in the **encrypted store** — super_admin calls **POST /api/v1/publishing-platforms/oauth/credentials** with `{ platform, client_id, client_secret }`. See [MEDIUM_OAUTH_STAGING_SETUP.md](./MEDIUM_OAUTH_STAGING_SETUP.md). Env vars (e.g. `MEDIUM_CLIENT_ID`) are optional fallback. Google OAuth app credentials go in the **encrypted store** (POST `/oauth/credentials` with `platform: true` by super_admin)—see [GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](./GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md). `YOUTUBE_API_KEY`, `NEWS_API_KEY`, `GOOGLE_TRENDS_API_KEY`, etc. as needed |
 
 ---
 

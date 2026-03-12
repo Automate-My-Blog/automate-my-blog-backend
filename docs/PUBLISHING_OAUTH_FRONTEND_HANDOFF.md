@@ -1,6 +1,8 @@
 # Publishing OAuth — Frontend handoff
 
-This doc describes what the frontend must do to support **OAuth-based publishing connections** after the backend implements OAuth for Medium, Shopify, Webflow, Squarespace, Wix, HubSpot, and Drupal. Use it with your existing **INTEGRATION_BACKEND_HANDOFF** and **DIRECT_PLATFORM_PUBLISHING_BACKEND_HANDOFF** in `docs/publishing/`.
+This doc describes what the frontend must do to support **OAuth-based publishing connections** for Medium, Shopify, Webflow, Squarespace, Wix, HubSpot, and Drupal. Use it with your existing **INTEGRATION_BACKEND_HANDOFF** and **DIRECT_PLATFORM_PUBLISHING_BACKEND_HANDOFF** in `docs/publishing/`.
+
+**Backend credentials:** OAuth app credentials (client ID/secret) for these platforms are stored in the **encrypted secrets table**, not as environment variables. A **super_admin** adds them once via **POST /api/v1/publishing-platforms/oauth/credentials** with body `{ "platform": "medium", "client_id": "...", "client_secret": "..." }` (or `shopify`, `webflow`, `squarespace`, `wix`, `hubspot`, `drupal`). Env vars remain an optional fallback.
 
 ---
 
@@ -26,7 +28,7 @@ All OAuth platforms use the same endpoint: `POST /api/v1/publishing-platforms/co
 
 **Response (error):**  
 - **400** — Missing required field (e.g. `shop` for Shopify, `site_url` for Drupal). Show `error.message`.  
-- **503** — OAuth not configured for that platform (missing env vars). Show `message` and suggest contacting support or try another platform.
+- **503** — OAuth app not configured for that platform (credentials not in store and no env vars). Show `message`; suggest contacting support or try another platform.
 
 ---
 
