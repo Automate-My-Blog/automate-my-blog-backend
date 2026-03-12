@@ -21,7 +21,15 @@ import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import postsRoutes from './routes/posts.js';
-import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
+import publishingPlatformsRoutes, {
+  mediumOAuthCallback,
+  shopifyOAuthCallback,
+  webflowOAuthCallback,
+  squarespaceOAuthCallback,
+  wixOAuthCallback,
+  hubspotOAuthCallback,
+  drupalOAuthCallback
+} from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
@@ -262,8 +270,14 @@ app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
 app.use('/api/v1/users', optionalAuth, userRoutes);
 app.use('/api/v1/recommendations', requireAuth, recommendationsRoutes);
 app.use('/api/v1/posts', optionalAuth, postsRoutes);
-// Medium OAuth callback (no JWT; user is redirected from Medium)
+// OAuth callbacks (no JWT; user is redirected from provider)
 app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
+app.get('/api/v1/publishing-platforms/shopify/callback', shopifyOAuthCallback);
+app.get('/api/v1/publishing-platforms/webflow/callback', webflowOAuthCallback);
+app.get('/api/v1/publishing-platforms/squarespace/callback', squarespaceOAuthCallback);
+app.get('/api/v1/publishing-platforms/wix/callback', wixOAuthCallback);
+app.get('/api/v1/publishing-platforms/hubspot/callback', hubspotOAuthCallback);
+app.get('/api/v1/publishing-platforms/drupal/callback', drupalOAuthCallback);
 app.use('/api/v1/publishing-platforms', requireAuth, publishingPlatformsRoutes);
 app.use('/api/v1/analysis', optionalAuth, analysisRoutes);
 app.use('/api/v1/jobs', optionalAuth, jobsRoutes);
