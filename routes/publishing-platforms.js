@@ -547,13 +547,12 @@ router.post('/connect', requireAuth, async (req, res) => {
       return res.json({ success: true, authorization_url: authUrl.toString(), state });
     }
 
-    // Wix: OAuth, body { platform: 'wix' }. Requires WIX_APP_ID and WIX_APP_SECRET.
+    // Wix: OAuth, body { platform: 'wix' }. Credentials from store or WIX_APP_ID / WIX_APP_SECRET.
     if (platform === 'wix') {
-      const appId = process.env.WIX_APP_ID;
-      const appSecret = process.env.WIX_APP_SECRET;
+      const creds = await getPublishingAppCredentials('wix');
       const redirectUri = getOAuthRedirectUri('wix');
-      if (!appId || !appSecret) {
-        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Wix OAuth is not configured (WIX_APP_ID, WIX_APP_SECRET).' });
+      if (!creds?.clientId || !creds?.clientSecret) {
+        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Wix OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set WIX_APP_ID and WIX_APP_SECRET.' });
       }
       if (!redirectUri) {
         return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Wix redirect URI not set. Set BACKEND_URL or WIX_REDIRECT_URI.' });
@@ -564,7 +563,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL('https://www.wix.com/installer/install');
-      authUrl.searchParams.set('appId', appId);
+      authUrl.searchParams.set('appId', creds.clientId);
       authUrl.searchParams.set('redirectUrl', redirectUri);
       authUrl.searchParams.set('state', state);
       return res.json({ success: true, authorization_url: authUrl.toString(), state });
@@ -1029,17 +1028,16 @@ export async function squarespaceOAuthCallback(req, res) {
 
 export async function wixOAuthCallback(req, res) {
   await handleOAuthCallback(req, res, 'wix', async (code) => {
-    const appId = process.env.WIX_APP_ID;
-    const appSecret = process.env.WIX_APP_SECRET;
+    const creds = await getPublishingAppCredentials('wix');
     const redirectUri = getOAuthRedirectUri('wix');
-    if (!appId || !appSecret || !redirectUri) throw new Error('Wix OAuth not configured');
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) throw new Error('Wix OAuth not configured');
     const tokenRes = await fetch('https://www.wix.com/oauth/access', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         grant_type: 'authorization_code',
-        client_id: appId,
-        client_secret: appSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         code,
         redirect_uri: redirectUri
       })
