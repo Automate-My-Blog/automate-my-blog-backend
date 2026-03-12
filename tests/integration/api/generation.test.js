@@ -2,7 +2,7 @@
  * Integration tests: Content generation (valid input, structure, error handling).
  * Mock OpenAI. Require DATABASE_URL for DB-dependent paths; basic flow works without.
  *
- * @see docs/testing-strategy.md — Must Have
+ * @see docs/reference/testing-strategy.md — Must Have
  */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import request from 'supertest';

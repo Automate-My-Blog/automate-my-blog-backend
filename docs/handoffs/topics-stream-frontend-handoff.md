@@ -132,7 +132,7 @@ Reuse your existing SSE connection + auth + cleanup logic; add a handler that sw
 
 ## 7. Reference
 
-- SSE stream auth (JWT vs session): [docs/sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
-- Shared SSE docs: [docs/sse-streaming.md](./sse-streaming.md)
+- SSE stream auth (JWT vs session): [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
+- Shared SSE docs: [../reference/sse-streaming.md](../reference/sse-streaming.md)
 - Backend route: `routes/topics.js` — `POST /generate-stream`
 - Backend stream logic: `services/openai.js` — `generateTrendingTopicsStream()`

@@ -61,4 +61,4 @@ curl -X POST "https://YOUR_API_URL/api/v1/strategies/STRATEGY_ID/subscribe" \
 - Auth: `services/auth-database.js` → `authMiddlewareFlexible` (lines ~873–898).
 - Mount: `index.js` → `app.use('/api/v1/strategies', authService.authMiddlewareFlexible.bind(authService), strategyRoutes)`.
 - Subscribe handler: `routes/strategy-subscriptions.js` → `POST /:id/subscribe` (req.user is set by middleware when token is valid).
-- Frontend auth: `docs/strategy-routes-auth-frontend-handoff.md`.
+- Frontend auth: `docs/handoffs/strategy-routes-auth-frontend-handoff.md`.

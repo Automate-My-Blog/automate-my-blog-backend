@@ -144,4 +144,4 @@ Once the backend follows this contract, the frontend can rely on it and simplify
 
 - **Stream handling:** `src/services/api.js` (`connectToStream`, `content-chunk` / `complete` listeners).
 - **Chunk extraction / filtering:** `src/utils/streamingUtils.js` (`extractStreamChunk`, `extractStreamCompleteContent`, `isAppendableContentChunk`).
-- **Preview:** `StreamingPreview` → `HTMLPreview`; content is also run through `replaceTweetPlaceholders` (see `docs/RELEVANT_TWEETS_FLOW.md`).
+- **Preview:** `StreamingPreview` → `HTMLPreview`; content is also run through `replaceTweetPlaceholders` (see tweet placeholder flow in content-generation stream handoff).

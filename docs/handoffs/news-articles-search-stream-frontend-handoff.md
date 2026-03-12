@@ -139,9 +139,9 @@ Reuse your existing SSE connection + auth + cleanup logic; add a handler that sw
 
 ## 7. Reference
 
-- SSE stream auth (JWT vs session): [docs/sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
-- Tweet search stream (similar): [docs/tweets-search-stream-frontend-handoff.md](./tweets-search-stream-frontend-handoff.md)
-- YouTube video search (similar): [docs/youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md)
+- SSE stream auth (JWT vs session): [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
+- Tweet search stream (similar): [tweets-search-stream-frontend-handoff.md](./tweets-search-stream-frontend-handoff.md)
+- YouTube video search (similar): [youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md)
 - Backend route: `routes/news-articles.js` — `POST /search-for-topic-stream`
 - Backend stream logic: `services/enhanced-blog-generation.js` — `searchForTopicStreamNews()`
 - News search service: `services/news-article-search.js`

@@ -68,7 +68,7 @@ See the [Multi-Agent Guardrails](./MULTI_AGENT_GUARDRAILS.md) for complete detai
 
 - **TypeScript**: Use strict mode, prefer `interface` over `type` for object shapes
 - **Error Handling**: Always handle errors explicitly, use try-catch for async operations
-- **Testing**: Add tests for new features (see `docs/testing-strategy.md`)
+- **Testing**: Add tests for new features (see `docs/reference/testing-strategy.md`)
 - **Documentation**: Update relevant docs if you change functionality
 - **Commits**: Write clear, descriptive commit messages
 

@@ -23,7 +23,7 @@
   - `database/26_jobs_table.sql` – creates the `jobs` table.
   - `database/27_cta_analysis_unique_constraint.sql` – CTA constraint (if needed).
 
-  With Neon: use the [Neon SQL Editor](https://console.neon.tech) and paste/run each file, or run `psql "$DATABASE_URL" -f database/26_jobs_table.sql` (and 27) locally with your Neon connection string. See **docs/redis-setup.md** for Neon-specific steps.
+  With Neon: use the [Neon SQL Editor](https://console.neon.tech) and paste/run each file, or run `psql "$DATABASE_URL" -f database/26_jobs_table.sql` (and 27) locally with your Neon connection string. See **docs/setup/redis-setup.md** for Neon-specific steps.
 
 - **Env:** Add to `.env`:
 
@@ -115,4 +115,4 @@ Single job runs: **analyze → audiences → pitches → audience images**.
 
 ## Frontend handoff
 
-See **`docs/frontend-job-queue-handoff.md`** for passback instructions for the frontend team (API usage, polling, progress, retry/cancel, resumption).
+See **`docs/reference/frontend-job-queue-handoff.md`** for passback instructions for the frontend team (API usage, polling, progress, retry/cancel, resumption).

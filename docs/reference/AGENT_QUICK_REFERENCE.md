@@ -39,4 +39,4 @@
 - Broke something? Create fix PR immediately
 - See broken code? Comment on PR, don't merge
 
-**Full guide:** `docs/MULTI_AGENT_GUARDRAILS.md`
+**Full guide:** `docs/reference/MULTI_AGENT_GUARDRAILS.md`

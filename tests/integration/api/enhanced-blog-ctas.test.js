@@ -3,7 +3,7 @@
  * Mocks enhancedBlogGenerationService.generateCompleteEnhancedBlog and billing.
  * Requires DATABASE_URL for auth (register + token).
  *
- * @see docs/testing-strategy.md
+ * @see docs/reference/testing-strategy.md
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 import request from 'supertest';

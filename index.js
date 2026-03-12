@@ -311,7 +311,7 @@ app.use('/api/v1/stripe', (req, res, next) => {
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', requireAuth, bundleSubscriptionRoutes);
-// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
+// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/reference/STRATEGY_ROUTES_ORDER.md.
 app.use('/api/v1/strategies', requireFlexibleAuth, strategyRoutes);
 
 // Analytics routes - all require authentication

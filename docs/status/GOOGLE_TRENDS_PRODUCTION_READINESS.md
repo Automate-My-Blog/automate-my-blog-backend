@@ -131,7 +131,7 @@
 ## 9. Documentation and Configuration
 
 - `.env.example`: `GOOGLE_TRENDS_API_KEY=` — current implementation does **not** use an API key (uses unofficial package). Comment or remove to avoid confusion.
-- `docs/issue-269-trending-integration-comment.md`: Notes that Google Trends is unofficial and to document cost/rate limits before Phase 2 — aligned with this checklist.
+- `docs/issues/issue-269-trending-integration-comment.md`: Notes that Google Trends is unofficial and to document cost/rate limits before Phase 2 — aligned with this checklist.
 
 **Recommendation:** Update `.env.example` to state that Trends uses the unofficial package and does not require an API key; link to this doc or a short “Trends” section in a runbook.
 

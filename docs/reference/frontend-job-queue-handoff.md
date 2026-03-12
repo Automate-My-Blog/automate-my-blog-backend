@@ -2,7 +2,7 @@
 
 **Audience:** Frontend team  
 **Purpose:** Step-by-step instructions to switch from sync endpoints to the new job-queue APIs for website analysis and content generation.  
-**Related:** Backend spec and implementation — `docs/backend-queue-system.md`, `docs/backend-audit.md` (§ queue).
+**Related:** Backend spec and implementation — `docs/reference/backend-queue-system.md`, `docs/reference/backend-audit.md` (§ queue).
 
 **Streaming (optional):** Instead of (or in addition to) polling `GET /api/v1/jobs/:jobId/status`, you can open `GET /api/v1/jobs/:jobId/stream?token=...` (or `?sessionId=...`) and receive **progress-update** and **partial-result** events in real time. See [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) for content-generation events and [website-analysis-stream-frontend-handoff.md](./website-analysis-stream-frontend-handoff.md) for website-analysis events. Full event schema: [job-stream-sse.md](./job-stream-sse.md).
 
@@ -184,7 +184,7 @@ Progress is optional; you may see a single “running” step or simple 0–100 
 ## 8. When to switch
 
 - Backend deploys the new job queue and runs the worker (`npm run worker`).
-- Redis and migrations are in place (see `docs/backend-queue-system.md`).
+- Redis and migrations are in place (see `docs/reference/backend-queue-system.md`).
 - You can run E2E against staging that uses the new async APIs.
 
 Until then, existing sync endpoints remain available. Once you’ve fully migrated, those can be deprecated or redirected.
@@ -193,7 +193,7 @@ Until then, existing sync endpoints remain available. Once you’ve fully migrat
 
 ## 9. Reference
 
-- **Backend queue system:** `docs/backend-queue-system.md`  
+- **Backend queue system:** `docs/reference/backend-queue-system.md`  
 - **API base:** same as current (e.g. `https://your-api-host/api/v1/jobs`).
 - **Job stream (SSE):** [job-stream-sse.md](./job-stream-sse.md) — event schema.  
 - **Content-generation stream:** [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) — partial events (context, blog, visuals, seo).  

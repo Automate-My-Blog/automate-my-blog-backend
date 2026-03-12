@@ -2,8 +2,8 @@
  * API contract tests: response shapes, error handling, required fields.
  * Require DATABASE_URL (app loads DB). Skip when not set.
  *
- * @see docs/testing-strategy.md — Should Have
- * @see docs/API_RESPONSE_CONTRACTS.md — Response shape consistency and cache-backed endpoints
+ * @see docs/reference/testing-strategy.md — Should Have
+ * @see docs/reference/API_RESPONSE_CONTRACTS.md — Response shape consistency and cache-backed endpoints
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';

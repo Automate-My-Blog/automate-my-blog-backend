@@ -225,9 +225,9 @@ Examples:
 2. `scripts/test-strategy-subscriptions.js`
 
 **Documentation** (3 files):
-1. `docs/STRATEGY_SUBSCRIPTION_TESTING.md` (comprehensive API testing guide)
-2. `docs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md` (frontend starter guide)
-3. `docs/SESSION_SUMMARY_STRATEGY_SUBSCRIPTIONS.md` (this document)
+1. `docs/reference/STRATEGY_SUBSCRIPTION_TESTING.md` (comprehensive API testing guide)
+2. `docs/handoffs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md` (frontend starter guide)
+3. `docs/reference/SESSION_SUMMARY_STRATEGY_SUBSCRIPTIONS.md` (this document)
 
 ### Modified Backend Files
 
@@ -262,7 +262,7 @@ Examples:
 
 ### Phase 3 Status: Ready to Start
 
-**Documentation**: Complete implementation guide created at `docs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md`
+**Documentation**: Complete implementation guide created at `docs/handoffs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md`
 
 **Estimated Timeline**: 18-27 hours of development
 
@@ -487,8 +487,8 @@ if (subscription.posts_remaining <= 0) {
 ## 🔗 Related Resources
 
 ### Documentation
-- **Testing Guide**: `docs/STRATEGY_SUBSCRIPTION_TESTING.md`
-- **Phase 3 Guide**: `docs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md`
+- **Testing Guide**: `docs/reference/STRATEGY_SUBSCRIPTION_TESTING.md`
+- **Phase 3 Guide**: `docs/handoffs/PHASE_3_FRONTEND_IMPLEMENTATION_GUIDE.md`
 - **Migration Scripts**: `database/migrations/028-030_*.sql`
 
 ### External Resources

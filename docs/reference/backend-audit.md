@@ -187,7 +187,7 @@ Some things I couldn't confirm from the code:
 
 ## Next Steps
 
-I've written up a detailed implementation plan in `docs/analytics-and-growth-plan.md` that covers:
+I've written up a detailed implementation plan in `docs/status/analytics-and-growth-plan.md` that covers:
 - Analytics spine MVP (can be done in a week)
 - SendGrid integration
 - Recommendation engine
