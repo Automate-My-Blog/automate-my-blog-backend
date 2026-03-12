@@ -5,6 +5,7 @@ import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../l
 import { getConnectionCredentials } from '../services/publishing-connections.js';
 import { publishToGhost } from '../services/ghost-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
+import { publishToSubstack } from '../services/substack-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
 import postsAutomationRoutes from './posts-automation.js';
 
@@ -552,8 +553,33 @@ router.post('/:id/publish', async (req, res) => {
             message: err.message || 'Publish failed'
           });
         }
+      } else if (platformKey === 'substack') {
+        const creds = await getConnectionCredentials(context.userId, 'substack');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Substack connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToSubstack(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Substack'
+          });
+        } catch (err) {
+          console.error('Substack publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
       } else {
-        // Substack, etc.: not yet implemented; leave as publishing
+        // Other platforms: not yet implemented; leave as publishing
         platformPublications.push({ platform: platformKey, status: 'publishing' });
       }
     }
