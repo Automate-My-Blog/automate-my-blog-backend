@@ -501,12 +501,11 @@ router.post('/connect', requireAuth, async (req, res) => {
 
     // Webflow: OAuth 2.0, body { platform: 'webflow' }
     if (platform === 'webflow') {
-      const clientId = process.env.WEBFLOW_CLIENT_ID;
-      const clientSecret = process.env.WEBFLOW_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('webflow');
       const redirectUri = getOAuthRedirectUri('webflow');
       const scopes = (process.env.WEBFLOW_SCOPES || 'sites:read,cms:read,cms:write').trim();
-      if (!clientId || !clientSecret) {
-        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Webflow OAuth is not configured (WEBFLOW_CLIENT_ID, WEBFLOW_CLIENT_SECRET).' });
+      if (!creds?.clientId || !creds?.clientSecret) {
+        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Webflow OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set WEBFLOW_CLIENT_ID and WEBFLOW_CLIENT_SECRET.' });
       }
       if (!redirectUri) {
         return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Webflow redirect URI not set. Set BACKEND_URL or WEBFLOW_REDIRECT_URI.' });
@@ -517,7 +516,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL('https://webflow.com/oauth/authorize');
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('scope', scopes);
       authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -959,14 +958,13 @@ async function handleOAuthCallback(req, res, platformKey, tokenExchange, storeRo
 
 export async function webflowOAuthCallback(req, res) {
   await handleOAuthCallback(req, res, 'webflow', async (code) => {
-    const clientId = process.env.WEBFLOW_CLIENT_ID;
-    const clientSecret = process.env.WEBFLOW_CLIENT_SECRET;
+    const creds = await getPublishingAppCredentials('webflow');
     const redirectUri = getOAuthRedirectUri('webflow');
-    if (!clientId || !clientSecret || !redirectUri) throw new Error('Webflow OAuth not configured');
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) throw new Error('Webflow OAuth not configured');
     const tokenRes = await fetch('https://api.webflow.com/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, grant_type: 'authorization_code' })
+      body: JSON.stringify({ client_id: creds.clientId, client_secret: creds.clientSecret, code, grant_type: 'authorization_code' })
     });
     if (!tokenRes.ok) {
       const t = await tokenRes.text();
