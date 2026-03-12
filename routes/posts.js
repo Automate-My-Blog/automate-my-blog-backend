@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToContentful } from '../services/contentful-publish.js';
 import { publishToGhost } from '../services/ghost-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
 import { publishToSubstack } from '../services/substack-publish.js';
@@ -573,6 +574,31 @@ router.post('/:id/publish', async (req, res) => {
           });
         } catch (err) {
           console.error('Substack publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'contentful') {
+        const creds = await getConnectionCredentials(context.userId, 'contentful');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Contentful connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToContentful(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Contentful'
+          });
+        } catch (err) {
+          console.error('Contentful publish failed:', err.message);
           platformPublications.push({
             platform: platformKey,
             status: 'failed',
