@@ -7,6 +7,7 @@ import { publishToContentful } from '../services/contentful-publish.js';
 import { publishToGhost } from '../services/ghost-publish.js';
 import { publishToJekyll } from '../services/jekyll-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
+import { publishToNextjs } from '../services/nextjs-publish.js';
 import { publishToSanity } from '../services/sanity-publish.js';
 import { publishToSubstack } from '../services/substack-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
@@ -651,6 +652,31 @@ router.post('/:id/publish', async (req, res) => {
           });
         } catch (err) {
           console.error('Jekyll publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'nextjs') {
+        const creds = await getConnectionCredentials(context.userId, 'nextjs');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Next.js connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToNextjs(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Next.js'
+          });
+        } catch (err) {
+          console.error('Next.js publish failed:', err.message);
           platformPublications.push({
             platform: platformKey,
             status: 'failed',
