@@ -575,12 +575,11 @@ router.post('/connect', requireAuth, async (req, res) => {
 
     // HubSpot: OAuth 2.0, body { platform: 'hubspot' }
     if (platform === 'hubspot') {
-      const clientId = process.env.HUBSPOT_CLIENT_ID;
-      const clientSecret = process.env.HUBSPOT_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('hubspot');
       const redirectUri = getOAuthRedirectUri('hubspot');
       const scopes = (process.env.HUBSPOT_SCOPES || 'content cms.sites.read cms.sites.write').trim();
-      if (!clientId || !clientSecret) {
-        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'HubSpot OAuth is not configured (HUBSPOT_CLIENT_ID, HUBSPOT_CLIENT_SECRET).' });
+      if (!creds?.clientId || !creds?.clientSecret) {
+        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'HubSpot OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set HUBSPOT_CLIENT_ID and HUBSPOT_CLIENT_SECRET.' });
       }
       if (!redirectUri) {
         return res.status(503).json({ success: false, error: 'Service unavailable', message: 'HubSpot redirect URI not set. Set BACKEND_URL or HUBSPOT_REDIRECT_URI.' });
@@ -591,7 +590,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL('https://app.hubspot.com/oauth/authorize');
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('scope', scopes);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('state', state);
@@ -1075,17 +1074,16 @@ export async function wixOAuthCallback(req, res) {
 
 export async function hubspotOAuthCallback(req, res) {
   await handleOAuthCallback(req, res, 'hubspot', async (code) => {
-    const clientId = process.env.HUBSPOT_CLIENT_ID;
-    const clientSecret = process.env.HUBSPOT_CLIENT_SECRET;
+    const creds = await getPublishingAppCredentials('hubspot');
     const redirectUri = getOAuthRedirectUri('hubspot');
-    if (!clientId || !clientSecret || !redirectUri) throw new Error('HubSpot OAuth not configured');
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) throw new Error('HubSpot OAuth not configured');
     const tokenRes = await fetch('https://api.hubapi.com/oauth/v1/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         redirect_uri: redirectUri,
         code
       })
