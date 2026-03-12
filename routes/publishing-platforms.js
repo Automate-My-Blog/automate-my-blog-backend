@@ -604,11 +604,10 @@ router.post('/connect', requireAuth, async (req, res) => {
           message: 'Drupal connection requires site_url (e.g. https://mysite.com).'
         });
       }
-      const clientId = process.env.DRUPAL_CLIENT_ID;
-      const clientSecret = process.env.DRUPAL_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('drupal');
       const redirectUri = getOAuthRedirectUri('drupal');
-      if (!clientId || !clientSecret) {
-        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Drupal OAuth is not configured (DRUPAL_CLIENT_ID, DRUPAL_CLIENT_SECRET).' });
+      if (!creds?.clientId || !creds?.clientSecret) {
+        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Drupal OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set DRUPAL_CLIENT_ID and DRUPAL_CLIENT_SECRET.' });
       }
       if (!redirectUri) {
         return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Drupal redirect URI not set. Set BACKEND_URL or DRUPAL_REDIRECT_URI.' });
@@ -620,7 +619,7 @@ router.post('/connect', requireAuth, async (req, res) => {
       );
       const authBase = siteUrl.replace(/\/+$/, '');
       const authUrl = new URL(`${authBase}/oauth2/authorize`);
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('state', state);
@@ -1125,10 +1124,9 @@ export async function drupalOAuthCallback(req, res) {
     }
     const userId = payload.userId;
     const siteUrl = payload.site_url.replace(/\/+$/, '');
-    const clientId = process.env.DRUPAL_CLIENT_ID;
-    const clientSecret = process.env.DRUPAL_CLIENT_SECRET;
+    const creds = await getPublishingAppCredentials('drupal');
     const redirectUri = getOAuthRedirectUri('drupal');
-    if (!clientId || !clientSecret || !redirectUri) {
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) {
       return res.redirect(errorRedirect('Drupal OAuth not configured'));
     }
     const tokenRes = await fetch(`${siteUrl}/oauth2/token`, {
@@ -1136,8 +1134,8 @@ export async function drupalOAuthCallback(req, res) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         redirect_uri: redirectUri,
         code
       })
