@@ -206,7 +206,7 @@ router.post('/connect', requireAuth, async (req, res) => {
     }
 
     if (platform === 'wordpress') {
-      const { site_url, username, application_password } = rest;
+      const { site_url, username, application_password, use_index_php_rest_route } = rest;
       if (!site_url || typeof application_password !== 'string' || !application_password.trim()) {
         return res.status(400).json({
           success: false,
@@ -216,11 +216,13 @@ router.post('/connect', requireAuth, async (req, res) => {
       }
       const wpUsername = typeof username === 'string' && username.trim() ? username.trim() : null;
       const url = String(site_url).trim().replace(/\/+$/, '');
+      const useIndexPhpRestRoute = use_index_php_rest_route === true || use_index_php_rest_route === 'true';
       const credentialsEncrypted = oauthManager.encryptToken(
         JSON.stringify({
           site_url: url,
           username: wpUsername,
-          application_password: application_password.trim()
+          application_password: application_password.trim(),
+          useIndexPhpRestRoute: !!useIndexPhpRestRoute
         })
       );
       await db.query(

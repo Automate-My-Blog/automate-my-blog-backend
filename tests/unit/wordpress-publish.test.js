@@ -94,7 +94,8 @@ describe('wordpress-publish', () => {
     ).rejects.toThrow(/credentials|username|password/);
   });
 
-  it('throws on 404 with REST API message', async () => {
+  it('throws on 404 with REST API message (after retry with index.php)', async () => {
+    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404 });
     globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404 });
 
     await expect(
@@ -103,5 +104,24 @@ describe('wordpress-publish', () => {
         { title: 'T', content: 'C' }
       )
     ).rejects.toThrow(/REST API|not found/);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch.mock.calls[0][0]).toBe('https://wp.example.com/wp-json/wp/v2/posts');
+    expect(globalThis.fetch.mock.calls[1][0]).toBe('https://wp.example.com/index.php?rest_route=/wp/v2/posts');
+  });
+
+  it('uses index.php?rest_route= URL when useIndexPhpRestRoute is true', async () => {
+    globalThis.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 1, link: 'https://wp.example.com/?p=1' })
+    });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p', useIndexPhpRestRoute: true },
+      { title: 'T', content: 'C' }
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch.mock.calls[0][0]).toBe('https://wp.example.com/index.php?rest_route=/wp/v2/posts');
   });
 });

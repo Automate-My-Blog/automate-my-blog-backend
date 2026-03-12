@@ -1,19 +1,30 @@
 /**
  * Publish a post to WordPress via REST API (Application Passwords / Basic auth).
  * @see https://developer.wordpress.org/rest-api/reference/posts/#create-a-post
+ *
+ * Supports two REST URL styles:
+ * - Pretty: {site_url}/wp-json/wp/v2/posts
+ * - Index.php (no pretty permalinks): {site_url}/index.php?rest_route=/wp/v2/posts
+ * Set credentials.useIndexPhpRestRoute = true to use the index.php form, or we retry on 404.
  */
 const WP_POSTS_PATH = '/wp-json/wp/v2/posts';
+const WP_POSTS_REST_ROUTE = '/index.php?rest_route=/wp/v2/posts';
+
+function buildPostsUrl(baseUrl, useIndexPhpRestRoute) {
+  const base = String(baseUrl).trim().replace(/\/+$/, '');
+  return useIndexPhpRestRoute ? `${base}${WP_POSTS_REST_ROUTE}` : `${base}${WP_POSTS_PATH}`;
+}
 
 /**
  * Publish a post to WordPress.
- * @param {object} credentials - { site_url, username, application_password }
+ * @param {object} credentials - { site_url, username, application_password, useIndexPhpRestRoute?: boolean }
  * @param {object} post - { title, content }
  * @param {{ status?: 'publish'|'draft' }} [opts] - optional status (default 'publish')
  * @returns {Promise<{ url: string, id: number }>}
  * @throws {Error} on auth failure, invalid response, or network error
  */
 export async function publishToWordPress(credentials, post, opts = {}) {
-  const { site_url, username, application_password } = credentials || {};
+  const { site_url, username, application_password, useIndexPhpRestRoute } = credentials || {};
   if (!site_url || !application_password) {
     throw new Error('WordPress connection missing site_url or application_password');
   }
@@ -22,9 +33,7 @@ export async function publishToWordPress(credentials, post, opts = {}) {
   }
 
   const baseUrl = String(site_url).trim().replace(/\/+$/, '');
-  const url = `${baseUrl}${WP_POSTS_PATH}`;
   const auth = Buffer.from(`${username}:${application_password}`, 'utf8').toString('base64');
-
   const status = opts.status === 'draft' ? 'draft' : 'publish';
   const body = JSON.stringify({
     title: post.title || 'Untitled',
@@ -32,20 +41,25 @@ export async function publishToWordPress(credentials, post, opts = {}) {
     status
   });
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${auth}`,
-      'Content-Type': 'application/json'
-    },
-    body
-  });
+  const headers = {
+    Authorization: `Basic ${auth}`,
+    'Content-Type': 'application/json'
+  };
+
+  let url = buildPostsUrl(baseUrl, !!useIndexPhpRestRoute);
+  let res = await fetch(url, { method: 'POST', headers, body });
+
+  // If 404 and we used pretty permalinks, retry with index.php?rest_route= (sites without pretty REST)
+  if (res.status === 404 && !useIndexPhpRestRoute) {
+    url = buildPostsUrl(baseUrl, true);
+    res = await fetch(url, { method: 'POST', headers, body });
+  }
 
   if (res.status === 401) {
     throw new Error('WordPress rejected credentials. Check username and application password.');
   }
   if (res.status === 404) {
-    throw new Error('WordPress REST API not found. Ensure your site has REST API enabled and the URL is correct.');
+    throw new Error('WordPress REST API not found. Ensure your site has REST API enabled and the URL is correct. If your site uses index.php for the REST API, reconnect WordPress and enable "Use index.php?rest_route= for REST API".');
   }
   if (!res.ok) {
     const text = await res.text();

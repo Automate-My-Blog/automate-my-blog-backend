@@ -76,7 +76,8 @@ Authorization: Bearer {token}
       "label": "WordPress",
       "connected": true,
       "site_name": null,
-      "site_url": "https://myblog.com"
+      "site_url": "https://myblog.com",
+      "account": "wpuser"
     },
     {
       "platform": "medium",
@@ -95,7 +96,7 @@ Authorization: Bearer {token}
 | `connected`| boolean | Always `true` in this list (only connected platforms are returned). |
 | `site_name`| string  | Optional. WordPress/Ghost site name. |
 | `site_url` | string  | Optional. WordPress/Ghost/Substack base URL. |
-| `account`  | string  | Optional. Medium/Substack account or publication identifier. |
+| `account`  | string  | Optional. WordPress username (when set on connect), or Medium/Substack account or publication identifier. |
 
 Use this list to:
 
@@ -127,15 +128,17 @@ All connect requests include `platform` in the body. Other fields depend on the 
   "platform": "wordpress",
   "site_url": "https://myblog.com",
   "username": "wpuser",
-  "application_password": "xxxx xxxx xxxx xxxx"
+  "application_password": "xxxx xxxx xxxx xxxx",
+  "use_index_php_rest_route": false
 }
 ```
 
-| Field                   | Type   | Required | Notes |
-|-------------------------|--------|----------|--------|
-| `site_url`              | string | Yes      | Base URL of the WordPress site (no trailing slash). |
-| `application_password`  | string | Yes      | Application password from WP (Users → Profile → Application Passwords). |
-| `username`              | string | Recommended | WordPress login. **Required for publishing.** If omitted, connect succeeds but publish will fail until the user reconnects with username. |
+| Field                       | Type    | Required | Notes |
+|-----------------------------|---------|----------|--------|
+| `site_url`                 | string  | Yes      | Base URL of the WordPress site (no trailing slash). |
+| `application_password`     | string  | Yes      | Application password from WP (Users → Profile → Application Passwords). |
+| `username`                 | string  | Recommended | WordPress login. **Required for publishing.** If omitted, connect succeeds but publish will fail until the user reconnects with username. |
+| `use_index_php_rest_route`  | boolean | No       | If `true`, use `{site_url}/index.php?rest_route=/wp/v2/posts` instead of `{site_url}/wp-json/wp/v2/posts`. Set for WordPress installs that don’t have pretty permalinks for the REST API. |
 
 **Response (200):** `{ "success": true, "platform": "wordpress" }`
 
