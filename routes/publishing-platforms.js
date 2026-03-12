@@ -466,14 +466,13 @@ router.post('/connect', requireAuth, async (req, res) => {
           message: 'Shopify connection requires shop (e.g. your-store.myshopify.com or your-store).'
         });
       }
-      const clientId = process.env.SHOPIFY_CLIENT_ID;
-      const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('shopify');
       const redirectUri = getShopifyRedirectUri();
-      if (!clientId || !clientSecret) {
+      if (!creds?.clientId || !creds?.clientSecret) {
         return res.status(503).json({
           success: false,
           error: 'Service unavailable',
-          message: 'Shopify OAuth is not configured (SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET).'
+          message: 'Shopify OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET.'
         });
       }
       if (!redirectUri) {
@@ -489,7 +488,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL(`https://${shop}/admin/oauth/authorize`);
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('scope', SHOPIFY_SCOPES);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('state', state);
@@ -841,13 +840,13 @@ export async function shopifyOAuthCallback(req, res) {
       return res.redirect(errorRedirect('Missing code, shop, or state from Shopify'));
     }
 
-    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
-    if (!clientSecret) {
+    const creds = await getPublishingAppCredentials('shopify');
+    if (!creds?.clientId || !creds?.clientSecret) {
       return res.redirect(errorRedirect('Shopify OAuth not configured'));
     }
     const queryForHmac = { ...req.query };
     delete queryForHmac.hmac;
-    if (!verifyShopifyHmac(queryForHmac, clientSecret)) {
+    if (!verifyShopifyHmac(queryForHmac, creds.clientSecret)) {
       return res.redirect(errorRedirect('Invalid HMAC from Shopify'));
     }
 
@@ -868,9 +867,8 @@ export async function shopifyOAuthCallback(req, res) {
     }
     const userId = payload.userId;
 
-    const clientId = process.env.SHOPIFY_CLIENT_ID;
     const redirectUri = getShopifyRedirectUri();
-    if (!clientId || !redirectUri) {
+    if (!redirectUri) {
       return res.redirect(errorRedirect('Shopify OAuth not configured'));
     }
 
@@ -878,8 +876,8 @@ export async function shopifyOAuthCallback(req, res) {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         code
       })
     });
