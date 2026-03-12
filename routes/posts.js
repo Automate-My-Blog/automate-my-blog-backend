@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToMedium } from '../services/medium-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
 import postsAutomationRoutes from './posts-automation.js';
 
@@ -500,8 +501,33 @@ router.post('/:id/publish', async (req, res) => {
             message: err.message || 'Publish failed'
           });
         }
+      } else if (platformKey === 'medium') {
+        const creds = await getConnectionCredentials(context.userId, 'medium');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Medium connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToMedium(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url || undefined,
+            label: 'Medium'
+          });
+        } catch (err) {
+          console.error('Medium publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
       } else {
-        // Medium, Substack, Ghost: not yet implemented; leave as publishing
+        // Substack, Ghost, etc.: not yet implemented; leave as publishing
         platformPublications.push({ platform: platformKey, status: 'publishing' });
       }
     }
