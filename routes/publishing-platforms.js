@@ -57,6 +57,32 @@ const FRONTEND_BASE = () => (process.env.FRONTEND_URL || 'http://localhost:3000'
 const SUCCESS_REDIRECT = (platform) => `${FRONTEND_BASE()}/settings?publishing=connected&platform=${platform}`;
 const ERROR_REDIRECT = (message) => `${FRONTEND_BASE()}/settings?publishing=error&message=${encodeURIComponent(message)}`;
 
+/** Env var names per platform for fallback when no credentials in store. */
+const PUBLISHING_APP_ENV_KEYS = {
+  medium: ['MEDIUM_CLIENT_ID', 'MEDIUM_CLIENT_SECRET'],
+  shopify: ['SHOPIFY_CLIENT_ID', 'SHOPIFY_CLIENT_SECRET'],
+  webflow: ['WEBFLOW_CLIENT_ID', 'WEBFLOW_CLIENT_SECRET'],
+  squarespace: ['SQUARESPACE_CLIENT_ID', 'SQUARESPACE_CLIENT_SECRET'],
+  wix: ['WIX_APP_ID', 'WIX_APP_SECRET'],
+  hubspot: ['HUBSPOT_CLIENT_ID', 'HUBSPOT_CLIENT_SECRET'],
+  drupal: ['DRUPAL_CLIENT_ID', 'DRUPAL_CLIENT_SECRET']
+};
+
+/** Resolve OAuth app credentials: encrypted store first, then env. Returns { clientId, clientSecret } or null. */
+async function getPublishingAppCredentials(platformKey) {
+  const stored = await oauthManager.getPlatformPublishingAppCredentials(platformKey);
+  if (stored?.client_id && stored?.client_secret) {
+    return { clientId: stored.client_id, clientSecret: stored.client_secret };
+  }
+  const keys = PUBLISHING_APP_ENV_KEYS[platformKey];
+  if (!keys) return null;
+  const [idKey, secretKey] = keys;
+  const clientId = process.env[idKey];
+  const clientSecret = process.env[secretKey];
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
+}
+
 function requireAuth(req, res, next) {
   if (!req.user?.userId) {
     return res.status(401).json({
@@ -101,6 +127,64 @@ router.get('/connections', requireAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to list connections',
+      message: err.message
+    });
+  }
+});
+
+/** Allowed platform keys for storing OAuth app credentials (super_admin only). */
+const PUBLISHING_OAUTH_CREDENTIAL_PLATFORMS = ['medium', 'shopify', 'webflow', 'squarespace', 'wix', 'hubspot', 'drupal'];
+
+/**
+ * POST /oauth/credentials — store OAuth app credentials for a publishing platform (super_admin only).
+ * Body: { platform, client_id, client_secret }. Credentials are stored encrypted; no env vars required.
+ */
+router.post('/oauth/credentials', requireAuth, async (req, res) => {
+  try {
+    if (req.user?.role !== 'super_admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Forbidden',
+        message: 'Only super_admin can set platform OAuth credentials.'
+      });
+    }
+    const { platform: rawPlatform, client_id: clientId, client_secret: clientSecret } = req.body || {};
+    const platform = normalizePlatform(rawPlatform);
+    if (!platform || !PUBLISHING_OAUTH_CREDENTIAL_PLATFORMS.includes(platform)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid platform',
+        message: `platform must be one of: ${PUBLISHING_OAUTH_CREDENTIAL_PLATFORMS.join(', ')}`
+      });
+    }
+    if (!clientId || typeof clientId !== 'string' || !clientId.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing client_id',
+        message: 'client_id is required'
+      });
+    }
+    if (!clientSecret || typeof clientSecret !== 'string' || !clientSecret.trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing client_secret',
+        message: 'client_secret is required'
+      });
+    }
+    await oauthManager.storePlatformPublishingAppCredentials(platform, clientId.trim(), clientSecret.trim());
+    res.json({ success: true, platform });
+  } catch (err) {
+    if (err.message && err.message.includes('OAUTH_ENCRYPTION_KEY')) {
+      return res.status(503).json({
+        success: false,
+        error: 'Service unavailable',
+        message: 'Encryption key not configured. Contact support.'
+      });
+    }
+    console.error('Store publishing OAuth credentials failed:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to store credentials',
       message: err.message
     });
   }
@@ -183,14 +267,13 @@ router.post('/connect', requireAuth, async (req, res) => {
     }
 
     if (platform === 'medium') {
-      const clientId = process.env.MEDIUM_CLIENT_ID;
-      const clientSecret = process.env.MEDIUM_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('medium');
       const redirectUri = getMediumRedirectUri();
-      if (!clientId || !clientSecret) {
+      if (!creds?.clientId || !creds?.clientSecret) {
         return res.status(503).json({
           success: false,
           error: 'Service unavailable',
-          message: 'Medium OAuth is not configured (MEDIUM_CLIENT_ID, MEDIUM_CLIENT_SECRET).'
+          message: 'Medium OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set MEDIUM_CLIENT_ID and MEDIUM_CLIENT_SECRET.'
         });
       }
       if (!redirectUri) {
@@ -206,7 +289,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL(MEDIUM_AUTH_URL);
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('scope', MEDIUM_SCOPES);
       authUrl.searchParams.set('state', state);
       authUrl.searchParams.set('response_type', 'code');
@@ -649,10 +732,9 @@ export async function mediumOAuthCallback(req, res) {
     }
     const userId = payload.userId;
 
-    const clientId = process.env.MEDIUM_CLIENT_ID;
-    const clientSecret = process.env.MEDIUM_CLIENT_SECRET;
+    const creds = await getPublishingAppCredentials('medium');
     const redirectUri = getMediumRedirectUri();
-    if (!clientId || !clientSecret || !redirectUri) {
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) {
       return res.redirect(errorRedirect('Medium OAuth not configured'));
     }
 
@@ -661,8 +743,8 @@ export async function mediumOAuthCallback(req, res) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri
       })
