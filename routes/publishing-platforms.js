@@ -526,11 +526,10 @@ router.post('/connect', requireAuth, async (req, res) => {
 
     // Squarespace: OAuth 2.0, body { platform: 'squarespace' }
     if (platform === 'squarespace') {
-      const clientId = process.env.SQUARESPACE_CLIENT_ID;
-      const clientSecret = process.env.SQUARESPACE_CLIENT_SECRET;
+      const creds = await getPublishingAppCredentials('squarespace');
       const redirectUri = getOAuthRedirectUri('squarespace');
-      if (!clientId || !clientSecret) {
-        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Squarespace OAuth is not configured (SQUARESPACE_CLIENT_ID, SQUARESPACE_CLIENT_SECRET).' });
+      if (!creds?.clientId || !creds?.clientSecret) {
+        return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Squarespace OAuth is not configured. Add credentials via POST /api/v1/publishing-platforms/oauth/credentials (super_admin) or set SQUARESPACE_CLIENT_ID and SQUARESPACE_CLIENT_SECRET.' });
       }
       if (!redirectUri) {
         return res.status(503).json({ success: false, error: 'Service unavailable', message: 'Squarespace redirect URI not set. Set BACKEND_URL or SQUARESPACE_REDIRECT_URI.' });
@@ -541,7 +540,7 @@ router.post('/connect', requireAuth, async (req, res) => {
         { expiresIn: '600s' }
       );
       const authUrl = new URL('https://login.squarespace.com/api/1/login/oauth/provider/authorize');
-      authUrl.searchParams.set('client_id', clientId);
+      authUrl.searchParams.set('client_id', creds.clientId);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('response_type', 'code');
       authUrl.searchParams.set('state', state);
@@ -991,16 +990,15 @@ export async function webflowOAuthCallback(req, res) {
 
 export async function squarespaceOAuthCallback(req, res) {
   await handleOAuthCallback(req, res, 'squarespace', async (code) => {
-    const clientId = process.env.SQUARESPACE_CLIENT_ID;
-    const clientSecret = process.env.SQUARESPACE_CLIENT_SECRET;
+    const creds = await getPublishingAppCredentials('squarespace');
     const redirectUri = getOAuthRedirectUri('squarespace');
-    if (!clientId || !clientSecret || !redirectUri) throw new Error('Squarespace OAuth not configured');
+    if (!creds?.clientId || !creds?.clientSecret || !redirectUri) throw new Error('Squarespace OAuth not configured');
     const tokenRes = await fetch('https://login.squarespace.com/api/1/login/oauth/provider/tokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        client_id: clientId,
-        client_secret: clientSecret,
+        client_id: creds.clientId,
+        client_secret: creds.clientSecret,
         grant_type: 'authorization_code',
         redirect_uri: redirectUri,
         code
