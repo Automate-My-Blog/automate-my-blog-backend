@@ -225,15 +225,16 @@ router.post('/connect', requireAuth, async (req, res) => {
       );
       await db.query(
         `INSERT INTO publishing_platform_connections
-         (user_id, platform, credentials_encrypted, site_url, connected, updated_at)
-         VALUES ($1, $2, $3, $4, true, NOW())
+         (user_id, platform, credentials_encrypted, site_url, account, connected, updated_at)
+         VALUES ($1, $2, $3, $4, $5, true, NOW())
          ON CONFLICT (user_id, platform)
          DO UPDATE SET
            credentials_encrypted = EXCLUDED.credentials_encrypted,
            site_url = EXCLUDED.site_url,
+           account = EXCLUDED.account,
            connected = true,
            updated_at = NOW()`,
-        [userId, platform, credentialsEncrypted, url]
+        [userId, platform, credentialsEncrypted, url, wpUsername]
       );
       return res.json({ success: true, platform });
     }
