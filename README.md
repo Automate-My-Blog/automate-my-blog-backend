@@ -73,7 +73,7 @@ Copy `.env.example` to `.env` and fill in values. Key variables:
 | `STRIPE_SECRET_KEY` | For billing | Stripe API key |
 | `STRIPE_WEBHOOK_SECRET` | For webhooks | Stripe webhook signing secret |
 
-For **Google OAuth** (Search Console, Analytics), credentials are stored in the **encrypted store** (no Vercel env vars required): super_admin calls POST `/api/v1/google/oauth/credentials` with `platform: true` once, or users store their own via the same endpoint. Backend needs `GOOGLE_REDIRECT_URI` and `OAUTH_ENCRYPTION_KEY`. See [docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](docs/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md).
+For **Google OAuth** (Search Console, Analytics), credentials are stored in the **encrypted store** (no Vercel env vars required): super_admin calls POST `/api/v1/google/oauth/credentials` with `platform: true` once, or users store their own via the same endpoint. Backend needs `GOOGLE_REDIRECT_URI` and `OAUTH_ENCRYPTION_KEY`. See [docs/issues/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md](docs/issues/GOOGLE_OAUTH_CREDENTIALS_ISSUE_504.md).
 
 See `.env.example` for the full list.
 
@@ -163,8 +163,8 @@ This project uses GitHub Actions for continuous integration:
 - **Smoke Test** - Starts the server and hits `/health` on every push and PR
 - **Stale Issues** - Automatic issue management
 
-See [docs/github-actions-quick-wins.md](./docs/github-actions-quick-wins.md) for details on all workflows. **Vercel** builds only **main** and **staging** (PR and other branch builds are disabled); see [docs/vercel-preview-builds.md](./docs/vercel-preview-builds.md). Recent changes are summarized in [docs/RECENT_UPDATES.md](./docs/RECENT_UPDATES.md).
+See [docs/reference/github-actions-quick-wins.md](./docs/reference/github-actions-quick-wins.md) for details on all workflows. **Vercel** builds only **main** and **staging** (PR and other branch builds are disabled); see [docs/setup/vercel-preview-builds.md](./docs/setup/vercel-preview-builds.md). Recent changes are summarized in [docs/status/RECENT_UPDATES.md](./docs/status/RECENT_UPDATES.md).
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](./docs/CONTRIBUTING.md) for guidelines.
+We welcome contributions! Please see [docs/reference/CONTRIBUTING.md](./docs/reference/CONTRIBUTING.md) for guidelines.

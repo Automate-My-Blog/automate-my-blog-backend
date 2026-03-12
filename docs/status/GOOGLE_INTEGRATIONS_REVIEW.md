@@ -13,7 +13,7 @@ Quick audit of Google integration routes and services (Trends, Search Console, A
 | analytics      | Yes (JWT)     | same           | Same as search_console |
 
 - **Contract test:** `tests/integration/api/contract.test.js` asserts all three return the same keys and types.
-- **Doc:** `docs/API_RESPONSE_CONTRACTS.md`.
+- **Doc:** `docs/reference/API_RESPONSE_CONTRACTS.md`.
 
 ---
 

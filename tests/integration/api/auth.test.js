@@ -2,7 +2,7 @@
  * Integration tests: Auth (registration, login, JWT, protected routes, own-data).
  * Require DATABASE_URL + test DB. Skip when not set (e.g. unit-only runs).
  *
- * @see docs/testing-strategy.md — Must Have
+ * @see docs/reference/testing-strategy.md — Must Have
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';

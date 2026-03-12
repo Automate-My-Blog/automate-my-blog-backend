@@ -23,11 +23,11 @@ Use this as the **prompt/instructions for the frontend Cursor agent** (or fronte
 - **blog-result** and **complete** (and sync response `data`) include `preloadedTweets`, `preloadedArticles`, `preloadedVideos` so the frontend can replace `[TWEET:0]` with `preloadedTweets[0]`, etc., in the preview.
 
 - **References:**  
-  - `docs/content-generation-stream-frontend-handoff.md` (request body, events)  
-  - `docs/blog-content-stream-frontend-handoff.md` (embed placeholders)  
+  - [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) (request body, events)
+  - [blog-content-stream-frontend-handoff.md](./blog-content-stream-frontend-handoff.md) (embed placeholders)
   - Tweet stream: tweet search SSE → `data.tweets`  
-  - News stream: `docs/news-articles-search-stream-frontend-handoff.md` → `data.articles`  
-  - Video stream: `docs/youtube-videos-search-stream-frontend-handoff.md` → `data.videos`
+  - News stream: [news-articles-search-stream-frontend-handoff.md](./news-articles-search-stream-frontend-handoff.md) → `data.articles`
+  - Video stream: [youtube-videos-search-stream-frontend-handoff.md](./youtube-videos-search-stream-frontend-handoff.md) → `data.videos`
 
 ---
 
@@ -109,7 +109,7 @@ We need the blog generation flow to:
    - options.preloadedTweets = array of tweet objects from tweet stream
    - options.preloadedArticles = array of article objects from news-articles stream
    - options.preloadedVideos = array of video objects from YouTube stream
-   If we don't pass these, the backend won't insert [TWEET:0], [ARTICLE:0], [VIDEO:0] in the post. See docs/content-generation-stream-frontend-handoff.md and docs/blog-content-stream-frontend-handoff.md.
+   If we don't pass these, the backend won't insert [TWEET:0], [ARTICLE:0], [VIDEO:0] in the post. See [content-generation-stream-frontend-handoff.md](./content-generation-stream-frontend-handoff.md) and [blog-content-stream-frontend-handoff.md](./blog-content-stream-frontend-handoff.md).
 
 3. When we receive blog-result or complete, replace [TWEET:0], [ARTICLE:0], [VIDEO:0] in the post content with the actual embeds using the preloadedTweets, preloadedArticles, preloadedVideos arrays from the same payload (index 0 → first item, etc.).
 

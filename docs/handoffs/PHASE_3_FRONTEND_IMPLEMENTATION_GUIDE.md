@@ -921,7 +921,7 @@ Before going live:
 ## 📞 Support Resources
 
 ### Backend API Documentation
-- Testing Guide: `/backend/docs/STRATEGY_SUBSCRIPTION_TESTING.md`
+- Testing Guide: `docs/reference/STRATEGY_SUBSCRIPTION_TESTING.md`
 - All endpoints documented with curl examples
 - Database schema documented
 

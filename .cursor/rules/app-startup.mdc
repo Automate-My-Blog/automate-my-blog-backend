@@ -24,7 +24,7 @@ When the user asks to **start the app**, **run the app**, **start the applicatio
 3. **Redis**  
    The queue (BullMQ) needs Redis. If the user reports job/narrative 404s or queue issues:
    - Check Redis is running (e.g. Docker container on 6379, or `redis-cli ping` if available).
-   - Local URL in `.env`: `REDIS_URL=redis://localhost:6379`. See `docs/redis-setup.md` for install/options (Homebrew, Docker).
+   - Local URL in `.env`: `REDIS_URL=redis://localhost:6379`. See `docs/setup/redis-setup.md` for install/options (Homebrew, Docker).
 
 4. **Optional**  
    If the user also asked to use latest code: `git checkout staging && git pull origin staging` before starting.

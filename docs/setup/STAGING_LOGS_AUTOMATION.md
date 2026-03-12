@@ -29,7 +29,7 @@ node scripts/analyze-staging-logs-create-issues.js --dry-run   # no issues creat
 
 ## Prerequisites
 
-- **Vercel:** `vercel link` and `vercel login` (or `VERCEL_TOKEN`). See [docs/VERCEL_STAGING_LOGS.md](./VERCEL_STAGING_LOGS.md).
+- **Vercel:** `vercel link` and `vercel login` (or `VERCEL_TOKEN`). See [VERCEL_STAGING_LOGS.md](./VERCEL_STAGING_LOGS.md).
 - **GitHub:** `gh` CLI installed and `gh auth login`. Repo is inferred from current directory.
 
 ## Cursor

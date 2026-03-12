@@ -132,6 +132,6 @@ Reuse your existing SSE connection + auth + cleanup logic; add a handler that sw
 
 ## 7. Reference
 
-- Topics stream contract (same events): [docs/topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
+- Topics stream contract (same events): [topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
 - Backend route: `routes/topics.js` — `POST /stream` (mounted at `/api/v1/trending-topics`) and `POST /generate-stream` (mounted at `/api/v1/topics`)
 - Backend stream logic: `services/openai.js` — `generateTrendingTopicsStream()`

@@ -137,7 +137,7 @@ Reuse your existing SSE connection + auth + cleanup logic; add a handler that sw
 
 ## 7. Reference
 
-- SSE stream auth (JWT vs session): [docs/sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
-- Topics stream contract: [docs/topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
+- SSE stream auth (JWT vs session): [sse-stream-auth-frontend-handoff.md](./sse-stream-auth-frontend-handoff.md)
+- Topics stream contract: [topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
 - Backend route: `routes/tweets.js` — `POST /search-for-topic-stream`
 - Backend stream logic: `services/enhanced-blog-generation.js` — `searchForTopicStream()`

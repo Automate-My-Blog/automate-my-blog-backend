@@ -35,7 +35,7 @@ Before implementing any of the proposed changes, we need to set up automated tes
 1. **Week 0: Testing Foundation** - Set up Jest, write critical path tests (auth, content generation, billing)
 2. **Week 1+: Implementation** - Proceed with analytics/growth features (with tests protecting us)
 
-See `docs/testing-strategy.md` for detailed testing plan.
+See `docs/reference/testing-strategy.md` for detailed testing plan.
 
 ---
 
@@ -154,13 +154,13 @@ See `docs/testing-strategy.md` for detailed testing plan.
 
 ## Next Steps
 
-1. **Set up testing** - Install Jest, write critical path tests (see `docs/testing-strategy.md`)
+1. **Set up testing** - Install Jest, write critical path tests (see `docs/reference/testing-strategy.md`)
 2. **Approve plan** - Review detailed implementation docs
 3. **Week 1 kickoff** - Start analytics events and SendGrid integration (with tests in place)
 4. **Week 2 follow-up** - Deploy recommendations and SEO strategy
 5. **Ongoing** - Monitor metrics, iterate based on data
 
 **Detailed Documentation:**
-- `docs/testing-strategy.md` - Testing approach (read this first!)
-- `docs/backend-audit.md` - Full technical audit
-- `docs/analytics-and-growth-plan.md` - Complete implementation plan
+- `docs/reference/testing-strategy.md` - Testing approach (read this first!)
+- `docs/reference/backend-audit.md` - Full technical audit
+- `docs/status/analytics-and-growth-plan.md` - Complete implementation plan

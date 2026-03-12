@@ -81,8 +81,8 @@ No frontend change is required if you already use `streamUrl` from the response;
 
 ## 5. Reference
 
-- Topics stream contract: [docs/topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
-- Tweet search stream contract: [docs/tweets-search-stream-frontend-handoff.md](./tweets-search-stream-frontend-handoff.md)
+- Topics stream contract: [topics-stream-frontend-handoff.md](./topics-stream-frontend-handoff.md)
+- Tweet search stream contract: [tweets-search-stream-frontend-handoff.md](./tweets-search-stream-frontend-handoff.md)
 - Backend stream route: `routes/stream.js` — `GET /api/v1/stream/:connectionId`
 - Backend topics stream: `routes/topics.js` — `POST /api/v1/topics/generate-stream`
 - Backend tweets stream: `routes/tweets.js` — `POST /api/v1/tweets/search-for-topic-stream`

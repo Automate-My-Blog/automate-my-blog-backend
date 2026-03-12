@@ -5,7 +5,7 @@ Refactor focused on business logic clarity, safety, and testability without chan
 ## Chunk 1: Logic map and refactor status
 
 **What changed**
-- Updated `docs/logic-map.md` with a new section **7. Refactor Status** summarizing where domain errors, auth validation, blog post validation, job error mapping, and job state transitions live after this refactor.
+- Updated `docs/reference/logic-map.md` with a new section **7. Refactor Status** summarizing where domain errors, auth validation, blog post validation, job error mapping, and job state transitions live after this refactor.
 
 **Why**
 - Single place to see current state of “where rules live” for future refactors and onboarding.
@@ -150,7 +150,7 @@ Refactor focused on business logic clarity, safety, and testability without chan
 ## Chunk 8: Logic map and remaining hotspots
 
 **What changed**
-- `docs/logic-map.md`: Added **§7** bullet for analyze-website persistence service and handler flow; added **§8. Remaining Hotspots** (handlers that don’t use next(error), Stripe/other routes).
+- `docs/reference/logic-map.md`: Added **§7** bullet for analyze-website persistence service and handler flow; added **§8. Remaining Hotspots** (handlers that don’t use next(error), Stripe/other routes).
 
 **Why**
 - Single place to see where persistence and remaining ad-hoc error handling live for future refactors.
@@ -221,7 +221,7 @@ Refactor focused on business logic clarity, safety, and testability without chan
 ## Chunk 11: Logic map refresh
 
 **What changed**
-- Updated `docs/logic-map.md` to reflect current architecture:
+- Updated `docs/reference/logic-map.md` to reflect current architecture:
   - project settings as a top flow,
   - new `project-settings` service/repository split,
   - explicit job transition predicates/table.
