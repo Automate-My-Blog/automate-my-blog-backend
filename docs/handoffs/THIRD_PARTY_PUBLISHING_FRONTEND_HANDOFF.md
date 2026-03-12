@@ -76,7 +76,8 @@ Authorization: Bearer {token}
       "label": "WordPress",
       "connected": true,
       "site_name": null,
-      "site_url": "https://myblog.com"
+      "site_url": "https://myblog.com",
+      "account": "wpuser"
     },
     {
       "platform": "medium",
@@ -95,7 +96,7 @@ Authorization: Bearer {token}
 | `connected`| boolean | Always `true` in this list (only connected platforms are returned). |
 | `site_name`| string  | Optional. WordPress/Ghost site name. |
 | `site_url` | string  | Optional. WordPress/Ghost/Substack base URL. |
-| `account`  | string  | Optional. Medium/Substack account or publication identifier. |
+| `account`  | string  | Optional. WordPress username (when set on connect), or Medium/Substack account or publication identifier. |
 
 Use this list to:
 
