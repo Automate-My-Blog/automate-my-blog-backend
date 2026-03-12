@@ -422,7 +422,7 @@ router.post('/:id/publish', async (req, res) => {
     }
 
     const { id } = req.params;
-    const { platforms } = req.body || {};
+    const { platforms, publish_mode: publishMode, update_existing: updateExisting } = req.body || {};
 
     if (!Array.isArray(platforms) || platforms.length === 0) {
       return res.status(400).json({
@@ -476,6 +476,7 @@ router.post('/:id/publish', async (req, res) => {
 
     const post = selectResult.rows[0];
     const platformPublications = [];
+    const isDraft = publishMode === 'draft';
 
     for (const platformKey of normalizedPlatforms) {
       if (platformKey === 'wordpress') {
@@ -488,7 +489,7 @@ router.post('/:id/publish', async (req, res) => {
           const result = await publishToWordPress(creds, {
             title: post.title,
             content: post.content || ''
-          });
+          }, { status: isDraft ? 'draft' : 'publish' });
           platformPublications.push({
             platform: platformKey,
             status: 'published',
@@ -537,7 +538,7 @@ router.post('/:id/publish', async (req, res) => {
           const result = await publishToMedium(creds, {
             title: post.title,
             content: post.content || ''
-          });
+          }, { publishStatus: isDraft ? 'draft' : 'public' });
           platformPublications.push({
             platform: platformKey,
             status: 'published',
