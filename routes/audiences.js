@@ -931,9 +931,11 @@ router.post('/:id/request-content-calendar', async (req, res) => {
       });
     }
 
+    // Exclude jobs older than 30 min (stale: no worker processed them) so user can re-request
     const existingJob = await db.query(
       `SELECT id FROM jobs
        WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+         AND created_at > NOW() - INTERVAL '30 minutes'
          AND user_id = $1 AND (input->'strategyIds') @> to_jsonb(ARRAY[$2]::text[])
        ORDER BY created_at DESC LIMIT 1`,
       [userContext.userId, audienceId]
@@ -1035,9 +1037,11 @@ router.get('/:id', async (req, res) => {
     const calendarReady = contentIdeas.length > 0 || audience.content_calendar_generated_at;
     let contentCalendarJobId = null;
     if (!calendarReady && userContext.isAuthenticated && userContext.userId) {
+      // Only show "still generating" for recent jobs; older = stale (worker not running)
       const jobRow = await db.query(
         `SELECT id FROM jobs
          WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+           AND created_at > NOW() - INTERVAL '30 minutes'
            AND user_id = $1 AND (input->'strategyIds') @> to_jsonb(ARRAY[$2]::text[])
          ORDER BY created_at DESC LIMIT 1`,
         [userContext.userId, id]

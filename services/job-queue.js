@@ -205,9 +205,12 @@ export async function createJob(type, input, context = {}, queueOptions = {}) {
   return { jobId };
 }
 
+/** Jobs queued/running longer than this are considered stale (no worker processed them). Don't block re-request. */
+const STALE_CONTENT_CALENDAR_JOB_MINUTES = 30;
+
 /**
  * Check if a content_calendar job is already queued or running for the same user and strategy set.
- * Used to avoid duplicate jobs (e.g. Stripe webhook retries).
+ * Ignores jobs older than STALE_CONTENT_CALENDAR_JOB_MINUTES so a missing worker doesn't block forever.
  * @param {string} userId
  * @param {string[]} strategyIds
  * @returns {Promise<boolean>}
@@ -217,9 +220,10 @@ export async function hasContentCalendarJobInProgress(userId, strategyIds) {
   const r = await db.query(
     `SELECT 1 FROM jobs
      WHERE type = 'content_calendar' AND status IN ('queued', 'running')
+       AND created_at > NOW() - INTERVAL '1 minute' * $3
        AND user_id = $1 AND (input->'strategyIds') = to_jsonb($2::text[])
      LIMIT 1`,
-    [userId, strategyIds]
+    [userId, strategyIds, STALE_CONTENT_CALENDAR_JOB_MINUTES]
   );
   return r.rows.length > 0;
 }

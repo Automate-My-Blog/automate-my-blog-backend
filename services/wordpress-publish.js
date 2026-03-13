@@ -6,7 +6,11 @@
  * - Pretty: {site_url}/wp-json/wp/v2/posts
  * - Index.php (no pretty permalinks): {site_url}/index.php?rest_route=/wp/v2/posts
  * Set credentials.useIndexPhpRestRoute = true to use the index.php form, or we retry on 404.
+ *
+ * Post content is converted from markdown to HTML before sending so it renders correctly on WordPress.
  */
+import { markdownToHtml } from '../lib/markdown-to-html.js';
+
 const WP_POSTS_PATH = '/wp-json/wp/v2/posts';
 const WP_POSTS_REST_ROUTE = '/index.php?rest_route=/wp/v2/posts';
 
@@ -35,9 +39,10 @@ export async function publishToWordPress(credentials, post, opts = {}) {
   const baseUrl = String(site_url).trim().replace(/\/+$/, '');
   const auth = Buffer.from(`${username}:${application_password}`, 'utf8').toString('base64');
   const status = opts.status === 'draft' ? 'draft' : 'publish';
+  const contentHtml = markdownToHtml(post.content ?? '');
   const body = JSON.stringify({
     title: post.title || 'Untitled',
-    content: post.content || '',
+    content: contentHtml,
     status
   });
 
