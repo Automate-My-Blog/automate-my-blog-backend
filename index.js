@@ -188,9 +188,11 @@ app.use(cors({
 // Rate limiting (after CORS so error responses still have CORS headers)
 const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
 const isDev = process.env.NODE_ENV === 'development';
+const rateLimitWindowMs = Math.max(60000, parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || 15 * 60 * 1000);
+const rateLimitMax = Math.max(50, parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || (isDevelopment ? 10000 : 200));
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: isDevelopment ? 10000 : 100, // Increased for local dev with many API calls
+  windowMs: rateLimitWindowMs,
+  max: rateLimitMax,
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },

@@ -4,6 +4,10 @@
  * Mirrors the frontend: POST blog/generate-stream, consume SSE (content-chunk + complete),
  * POST /posts to create, POST /posts/:id/publish with platforms: ["wordpress"].
  *
+ * The backend converts post body from markdown to HTML before sending to WordPress so
+ * posts render correctly (headings, lists, links, etc.). This script verifies that
+ * conversion using the same lib/markdown-to-html.js helper.
+ *
  * Usage:
  *   BACKEND_URL=https://automate-my-blog-backend-env-staging-automate-my-blog.vercel.app \
  *   TEST_JWT=<your-jwt> \
@@ -14,10 +18,17 @@
  *
  * WordPress: If your site uses index.php?rest_route= for the REST API, reconnect in Settings
  * with "Use index.php?rest_route= for REST API" (or POST /connect with use_index_php_rest_route: true).
+ *
+ * Options:
+ *   --verify-markdown-only   Run only the markdown→HTML conversion check (no API calls); no TEST_JWT needed.
  */
 
 import dotenv from 'dotenv';
+import { markdownToHtml } from '../lib/markdown-to-html.js';
+
 dotenv.config();
+
+const VERIFY_MARKDOWN_ONLY = process.argv.includes('--verify-markdown-only');
 
 const BASE = process.env.BACKEND_URL ||
   'https://automate-my-blog-backend-env-staging-automate-my-blog.vercel.app';
@@ -91,6 +102,19 @@ async function main() {
   console.log('\n📮 WordPress test post — real-world flow');
   console.log('==========================================');
   console.log('Backend:', BASE);
+
+  if (VERIFY_MARKDOWN_ONLY) {
+    const sample = '# Test heading\n\nParagraph with **bold** and [link](https://example.com).';
+    const html = markdownToHtml(sample);
+    const ok = html.includes('<h1>') && html.includes('Test heading') && html.includes('<strong>bold</strong>') && html.includes('<a href="https://example.com"');
+    if (ok) {
+      log('Markdown→HTML conversion (same logic used when publishing to WordPress): OK', 'ok');
+      console.log('');
+      process.exit(0);
+    }
+    log('Markdown→HTML conversion check failed.', 'err');
+    process.exit(1);
+  }
 
   if (!token) {
     console.error('\n❌ TEST_JWT (or STAGING_TEST_TOKEN) is required.');
@@ -185,6 +209,17 @@ async function main() {
   const title = result.title || topic.title;
   const content = result.content || '';
   log(`Stream complete; title="${title.slice(0, 40)}..."`, 'ok');
+
+  // 4b. Verify markdown→HTML conversion (same logic backend uses when publishing to WordPress)
+  const contentHtml = markdownToHtml(content);
+  const hasMarkdown = /^#+\s|\[.+\]\(.+\)|\*\*[^*]+\*\*|^\s*[-*]\s/m.test(content);
+  const hasHtml = /<h[1-6]|<\/p>|<a\s|<ul|<ol|<li/.test(contentHtml);
+  if (hasMarkdown && contentHtml && contentHtml.length > 0) {
+    log('Markdown→HTML: content will be sent to WordPress as rendered HTML', 'ok');
+    if (!hasHtml && content.trim().length > 20) {
+      log('Note: converted HTML has no common block tags (content may be plain).', '');
+    }
+  }
 
   // 5. Create post (same as frontend after generation: POST /api/v1/posts)
   log('Creating post (POST /api/v1/posts)...');
