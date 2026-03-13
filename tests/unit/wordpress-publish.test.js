@@ -104,6 +104,58 @@ describe('wordpress-publish', () => {
     expect(body.content).toContain('<a href="https://example.com"');
   });
 
+  it('replaces image and chart placeholders with HTML for WordPress', async () => {
+    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
+    globalThis.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: async () => JSON.stringify(jsonBody),
+      json: async () => jsonBody
+    });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+      {
+        title: 'Post',
+        content: 'Intro.\n\n![IMAGE:hero_image:Sunset over mountains]\n\n![CHART:bar|Sales 2024|Q1,Q2,Q3|10,20,30]'
+      }
+    );
+
+    const [, opts] = globalThis.fetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.content).toContain('[Image:');
+    expect(body.content).toContain('Sunset over mountains');
+    expect(body.content).toContain('[Chart:');
+    expect(body.content).toContain('Sales 2024');
+    expect(body.content).not.toContain('![IMAGE:');
+    expect(body.content).not.toContain('![CHART:');
+  });
+
+  it('replaces tweet placeholders with blockquote HTML for WordPress', async () => {
+    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
+    globalThis.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: async () => JSON.stringify(jsonBody),
+      json: async () => jsonBody
+    });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+      {
+        title: 'Post',
+        content: 'Text.\n\n![TWEET:https://x.com/user/status/123]\n\nMore.'
+      }
+    );
+
+    const [, opts] = globalThis.fetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.content).toContain('twitter-tweet-embed');
+    expect(body.content).toContain('href="https://x.com/user/status/123"');
+    expect(body.content).toContain('View tweet on X');
+    expect(body.content).not.toContain('![TWEET:');
+  });
+
   it('throws on 401 with clear message', async () => {
     globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => '' });
 
