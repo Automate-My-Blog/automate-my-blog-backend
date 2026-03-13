@@ -28,20 +28,39 @@ async function fetchTweetOEmbedHtml(tweetUrl) {
   return `<blockquote class="twitter-tweet-embed" style="border-left: 4px solid #1da1f2; padding: 12px 16px; margin: 16px 0; background: #f8f9fa; border-radius: 8px;"><a href="${tweetUrl.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer" style="color: #1da1f2;">View tweet on X</a></blockquote>`;
 }
 
+/**
+ * Wrap our image/chart figures in WordPress block format so the block editor preserves them.
+ * Without this, WordPress can strip <figure>/<img> and leave only the figcaption text.
+ */
+function wrapFiguresInBlockFormat(html) {
+  let out = html;
+  // Image placeholder: wrap in wp:image and add wp-block-image class
+  const imageFigureRe = /<figure class="amb-image-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
+  out = out.replace(imageFigureRe, (_, attrs, inner) =>
+    `<!-- wp:image -->\n<figure class="wp-block-image amb-image-placeholder"${attrs}>${inner}</figure>\n<!-- /wp:image -->`);
+  // Chart placeholder: same
+  const chartFigureRe = /<figure class="amb-chart-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
+  out = out.replace(chartFigureRe, (_, attrs, inner) =>
+    `<!-- wp:image -->\n<figure class="wp-block-image amb-chart-placeholder"${attrs}>${inner}</figure>\n<!-- /wp:image -->`);
+  return out;
+}
+
 /** Prepare post content for WordPress: markdown→HTML and replace tweet markers with oEmbed HTML. */
 async function prepareContentForWordPress(content) {
   const raw = content ?? '';
   const { html, tweetUrls } = markdownToHtml(raw, { forWordPressTweetEmbeds: true });
-  if (tweetUrls.length === 0) return html;
+  let out = wrapFiguresInBlockFormat(html);
+  if (tweetUrls.length === 0) return out;
   const oEmbedHtmls = [];
   for (let i = 0; i < tweetUrls.length; i++) {
     oEmbedHtmls.push(await fetchTweetOEmbedHtml(tweetUrls[i]));
     if (i < tweetUrls.length - 1) await new Promise((r) => setTimeout(r, 300));
   }
-  let out = html;
   for (let i = 0; i < oEmbedHtmls.length; i++) {
     const marker = `<!-- ${TWEET_EMBED_MARKER}${i} -->`;
-    out = out.split(marker).join(oEmbedHtmls[i]);
+    const embedHtml = oEmbedHtmls[i];
+    const wrapped = embedHtml.trim().startsWith('<!--') ? embedHtml : `<!-- wp:html -->\n${embedHtml}\n<!-- /wp:html -->`;
+    out = out.split(marker).join(wrapped);
   }
   return out;
 }

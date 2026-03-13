@@ -21,6 +21,9 @@
  *
  * Options:
  *   --verify-markdown-only   Run only the markdown→HTML conversion check (no API calls); no TEST_JWT needed.
+ *   --verify-placeholders   Run only the image/tweet placeholder conversion check (no API calls); no TEST_JWT needed.
+ *   --no-placeholders      Do not append image/tweet placeholders (default is to append them so the published post can be fully verified).
+ *   (Use both to verify full local transform: --verify-markdown-only --verify-placeholders)
  */
 
 import dotenv from 'dotenv';
@@ -29,6 +32,20 @@ import { markdownToHtml } from '../lib/markdown-to-html.js';
 dotenv.config();
 
 const VERIFY_MARKDOWN_ONLY = process.argv.includes('--verify-markdown-only');
+const VERIFY_PLACEHOLDERS = process.argv.includes('--verify-placeholders');
+const WITH_PLACEHOLDERS = !process.argv.includes('--no-placeholders');
+
+/** Content block appended when --with-placeholders (default) so the published post has images and a tweet to verify. */
+const SAMPLE_IMAGE_AND_TWEET = `
+
+## Test section: image and tweet
+
+[Image: A professional photo of a laptop and notebook on a desk, with coffee and plants, representing productivity and testing.]
+
+![TWEET:https://x.com/WordPress/status/1360456723093266432]
+
+Above: placeholder image and Twitter embed for WordPress publish verification.
+`;
 
 const BASE = process.env.BACKEND_URL ||
   'https://automate-my-blog-backend-env-staging-automate-my-blog.vercel.app';
@@ -103,16 +120,49 @@ async function main() {
   console.log('==========================================');
   console.log('Backend:', BASE);
 
-  if (VERIFY_MARKDOWN_ONLY) {
-    const sample = '# Test heading\n\nParagraph with **bold** and [link](https://example.com).';
-    const html = markdownToHtml(sample);
-    const ok = html.includes('<h1>') && html.includes('Test heading') && html.includes('<strong>bold</strong>') && html.includes('<a href="https://example.com"');
-    if (ok) {
-      log('Markdown→HTML conversion (same logic used when publishing to WordPress): OK', 'ok');
+  if (VERIFY_MARKDOWN_ONLY || VERIFY_PLACEHOLDERS) {
+    let allOk = true;
+    if (VERIFY_MARKDOWN_ONLY) {
+      const sample = '# Test heading\n\nParagraph with **bold** and [link](https://example.com).';
+      const html = markdownToHtml(sample);
+      const ok = html.includes('<h1>') && html.includes('Test heading') && html.includes('<strong>bold</strong>') && html.includes('<a href="https://example.com"');
+      if (ok) {
+        log('Markdown→HTML conversion (same logic used when publishing to WordPress): OK', 'ok');
+      } else {
+        log('Markdown→HTML conversion check failed.', 'err');
+        allOk = false;
+      }
+    }
+    if (VERIFY_PLACEHOLDERS) {
+      const sampleWithPlaceholders = `
+# Title
+[Image: An immersive fantasy landscape with castles and forests]
+## Section
+[TWEET:1]
+[VIDEO:3]
+[TWEET:0]
+`;
+      const { html } = markdownToHtml(sampleWithPlaceholders, { forWordPressTweetEmbeds: true });
+      const hasImg = /<img\s/i.test(html) && /via\.placeholder\.com/.test(html);
+      const hasFigure = /<figure/i.test(html);
+      const noRawImage = !/\[Image:\s*[^\]]*\]/.test(html);
+      const noRawTweetIndex = !/\[TWEET:0\]/.test(html) && !/\[TWEET:1\]/.test(html);
+      const noRawVideo = !/\[VIDEO:3\]/.test(html);
+      if (hasImg && hasFigure && noRawImage && noRawTweetIndex && noRawVideo) {
+        log('Image/tweet/video placeholders → <figure><img> or removed: OK', 'ok');
+      } else {
+        if (!hasImg) log('Placeholder check: expected <img> with via.placeholder.com', 'err');
+        if (!hasFigure) log('Placeholder check: expected <figure>', 'err');
+        if (!noRawImage) log('Placeholder check: raw [Image: ...] should be replaced', 'err');
+        if (!noRawTweetIndex) log('Placeholder check: raw [TWEET:0]/[TWEET:1] should be removed', 'err');
+        if (!noRawVideo) log('Placeholder check: raw [VIDEO:3] should be removed', 'err');
+        allOk = false;
+      }
+    }
+    if (allOk) {
       console.log('');
       process.exit(0);
     }
-    log('Markdown→HTML conversion check failed.', 'err');
     process.exit(1);
   }
 
@@ -207,7 +257,11 @@ async function main() {
   }
 
   const title = result.title || topic.title;
-  const content = result.content || '';
+  let content = result.content || '';
+  if (WITH_PLACEHOLDERS) {
+    content = content + SAMPLE_IMAGE_AND_TWEET;
+    log('Appended image + tweet placeholders for full publish verification', 'ok');
+  }
   log(`Stream complete; title="${title.slice(0, 40)}..."`, 'ok');
 
   // 4b. Verify markdown→HTML conversion (same logic backend uses when publishing to WordPress)
@@ -272,6 +326,23 @@ async function main() {
   if (wpPub?.status === 'published' && wpPub?.url) {
     console.log('\n✅ Published to WordPress');
     console.log('   URL:', wpPub.url);
+    // Verify the live post has images/tweets (no raw placeholders)
+    try {
+      const pageRes = await fetch(wpPub.url, { redirect: 'follow' });
+      const pageHtml = await pageRes.text();
+      const hasImageOrBlock = /<img\s/i.test(pageHtml) || /wp:image/.test(pageHtml) || /wp-block-image/.test(pageHtml);
+      const hasTweetEmbed = /twitter-tweet|wp:html/.test(pageHtml) || /blockquote.*twitter/.test(pageHtml);
+      const hasRawPlaceholders = /\[Image:\s*[^\]]*\]/.test(pageHtml) || /\[TWEET:\d+\]/.test(pageHtml);
+      if (hasRawPlaceholders) {
+        log('Verification: post still contains raw placeholders [Image:...] or [TWEET:n] on the page', 'err');
+      } else if (hasImageOrBlock || hasTweetEmbed) {
+        log('Verification: post has images or tweet embeds on the live page', 'ok');
+      } else {
+        log('Verification: no image/tweet blocks found (post may have no placeholders in content)', '');
+      }
+    } catch (e) {
+      log('Verification: could not fetch post page: ' + e.message, '');
+    }
   } else if (wpPub?.status === 'failed') {
     log('WordPress publish failed: ' + (wpPub.message || 'Unknown error'), 'err');
     process.exit(1);
