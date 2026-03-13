@@ -131,6 +131,8 @@ describe('wordpress-publish', () => {
     expect(body.content).not.toContain('![CHART:');
     expect(body.content).toContain('<!-- wp:image -->');
     expect(body.content).toContain('wp-block-image');
+    expect(body.content).not.toMatch(/<figure[^>]*\sstyle=/);
+    expect(body.content).not.toMatch(/<img[^>]*\sstyle=/);
   });
 
   it('replaces tweet placeholders with oEmbed or fallback HTML for WordPress', async () => {

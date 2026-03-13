@@ -28,20 +28,29 @@ async function fetchTweetOEmbedHtml(tweetUrl) {
   return `<blockquote class="twitter-tweet-embed" style="border-left: 4px solid #1da1f2; padding: 12px 16px; margin: 16px 0; background: #f8f9fa; border-radius: 8px;"><a href="${tweetUrl.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer" style="color: #1da1f2;">View tweet on X</a></blockquote>`;
 }
 
+/** Remove inline style attributes so strict WordPress/KSES configs don't strip our tags. */
+function stripStyleAttrs(html) {
+  return html.replace(/\s+style="[^"]*"/g, '');
+}
+
 /**
  * Wrap our image/chart figures in WordPress block format so the block editor preserves them.
- * Without this, WordPress can strip <figure>/<img> and leave only the figcaption text.
+ * Uses minimal HTML (no inline styles) to avoid being stripped by strict filters.
  */
 function wrapFiguresInBlockFormat(html) {
   let out = html;
-  // Image placeholder: wrap in wp:image and add wp-block-image class
+  // Image placeholder: wrap in wp:image, add wp-block-image, strip styles for compatibility
   const imageFigureRe = /<figure class="amb-image-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
-  out = out.replace(imageFigureRe, (_, attrs, inner) =>
-    `<!-- wp:image -->\n<figure class="wp-block-image amb-image-placeholder"${attrs}>${inner}</figure>\n<!-- /wp:image -->`);
+  out = out.replace(imageFigureRe, (_, attrs, inner) => {
+    const minimal = `<!-- wp:image -->\n<figure class="wp-block-image amb-image-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:image -->`;
+    return minimal;
+  });
   // Chart placeholder: same
   const chartFigureRe = /<figure class="amb-chart-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
-  out = out.replace(chartFigureRe, (_, attrs, inner) =>
-    `<!-- wp:image -->\n<figure class="wp-block-image amb-chart-placeholder"${attrs}>${inner}</figure>\n<!-- /wp:image -->`);
+  out = out.replace(chartFigureRe, (_, attrs, inner) => {
+    const minimal = `<!-- wp:image -->\n<figure class="wp-block-image amb-chart-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:image -->`;
+    return minimal;
+  });
   return out;
 }
 
