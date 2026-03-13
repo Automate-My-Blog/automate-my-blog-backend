@@ -56,13 +56,12 @@ describe('wordpress-publish', () => {
   });
 
   it('calls WordPress API and returns url and id on 201', async () => {
+    const jsonBody = { id: 42, link: 'https://wp.example.com/2025/03/my-post/' };
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
       status: 201,
-      json: async () => ({
-        id: 42,
-        link: 'https://wp.example.com/2025/03/my-post/'
-      })
+      text: async () => JSON.stringify(jsonBody),
+      json: async () => jsonBody
     });
 
     const result = await publishToWordPress(
@@ -84,7 +83,7 @@ describe('wordpress-publish', () => {
   });
 
   it('throws on 401 with clear message', async () => {
-    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 401 });
+    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => '' });
 
     await expect(
       publishToWordPress(
@@ -95,8 +94,8 @@ describe('wordpress-publish', () => {
   });
 
   it('throws on 404 with REST API message (after retry with index.php)', async () => {
-    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404 });
-    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404 });
+    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' });
+    globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 404, text: async () => '' });
 
     await expect(
       publishToWordPress(
@@ -109,11 +108,28 @@ describe('wordpress-publish', () => {
     expect(globalThis.fetch.mock.calls[1][0]).toBe('https://wp.example.com/index.php?rest_route=/wp/v2/posts');
   });
 
+  it('throws when WordPress returns HTML instead of JSON (200)', async () => {
+    globalThis.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => '<!DOCTYPE html><html><body>Not JSON</body></html>'
+    });
+
+    await expect(
+      publishToWordPress(
+        { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+        { title: 'T', content: 'C' }
+      )
+    ).rejects.toThrow(/HTML page instead of JSON|not valid JSON/);
+  });
+
   it('uses index.php?rest_route= URL when useIndexPhpRestRoute is true', async () => {
+    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
       status: 201,
-      json: async () => ({ id: 1, link: 'https://wp.example.com/?p=1' })
+      text: async () => JSON.stringify(jsonBody),
+      json: async () => jsonBody
     });
 
     await publishToWordPress(

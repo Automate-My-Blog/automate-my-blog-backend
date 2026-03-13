@@ -213,12 +213,15 @@ async function main() {
   log(`Post created: ${postId}`, 'ok');
 
   // 6. Publish to WordPress (same request as frontend: platforms + optional publish_mode)
+  const useIndexPhp = process.env.USE_INDEX_PHP_REST_ROUTE === 'true' || process.env.USE_INDEX_PHP_REST_ROUTE === '1';
+  if (useIndexPhp) log('Publishing with wordpress_use_index_php_rest_route: true', 'ok');
   log('Publishing to WordPress (POST /api/v1/posts/:id/publish)...');
   const publishRes = await fetchJson(`/api/v1/posts/${postId}/publish`, {
     method: 'POST',
     body: JSON.stringify({
       platforms: ['wordpress'],
-      publish_mode: 'live'
+      publish_mode: 'live',
+      ...(useIndexPhp && { wordpress_use_index_php_rest_route: true })
     })
   });
 
