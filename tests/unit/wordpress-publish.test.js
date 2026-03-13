@@ -82,6 +82,28 @@ describe('wordpress-publish', () => {
     expect(body.status).toBe('publish');
   });
 
+  it('converts markdown content to HTML before sending to WordPress', async () => {
+    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
+    globalThis.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: async () => JSON.stringify(jsonBody),
+      json: async () => jsonBody
+    });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+      { title: 'Test', content: '# Hello\n\nThis is **bold** and a [link](https://example.com).' }
+    );
+
+    const [, opts] = globalThis.fetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.content).toContain('<h1>');
+    expect(body.content).toContain('Hello');
+    expect(body.content).toContain('<strong>bold</strong>');
+    expect(body.content).toContain('<a href="https://example.com"');
+  });
+
   it('throws on 401 with clear message', async () => {
     globalThis.fetch.mockResolvedValueOnce({ ok: false, status: 401, text: async () => '' });
 

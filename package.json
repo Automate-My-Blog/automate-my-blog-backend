@@ -48,6 +48,7 @@
     "ioredis": "^5.9.2",
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.11.0",
+    "marked": "^17.0.4",
     "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
