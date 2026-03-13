@@ -35,20 +35,21 @@ function stripStyleAttrs(html) {
 
 /**
  * Wrap our image/chart figures in WordPress block format so the block editor preserves them.
- * Uses minimal HTML (no inline styles) to avoid being stripped by strict filters.
+ * Uses wp:html (Custom HTML block) so both images and tweets are stored the same way; some
+ * setups strip wp:image but preserve wp:html. Minimal HTML (no inline styles) for strict filters.
  */
 function wrapFiguresInBlockFormat(html) {
   let out = html;
-  // Image placeholder: wrap in wp:image, add wp-block-image, strip styles for compatibility
+  // Image placeholder: wrap in wp:html (Custom HTML) so it survives when wp:image is stripped
   const imageFigureRe = /<figure class="amb-image-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
   out = out.replace(imageFigureRe, (_, attrs, inner) => {
-    const minimal = `<!-- wp:image -->\n<figure class="wp-block-image amb-image-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:image -->`;
+    const minimal = `<!-- wp:html -->\n<figure class="wp-block-image amb-image-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:html -->`;
     return minimal;
   });
   // Chart placeholder: same
   const chartFigureRe = /<figure class="amb-chart-placeholder"([^>]*)>([\s\S]*?)<\/figure>/g;
   out = out.replace(chartFigureRe, (_, attrs, inner) => {
-    const minimal = `<!-- wp:image -->\n<figure class="wp-block-image amb-chart-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:image -->`;
+    const minimal = `<!-- wp:html -->\n<figure class="wp-block-image amb-chart-placeholder"${stripStyleAttrs(attrs)}>${stripStyleAttrs(inner)}</figure>\n<!-- /wp:html -->`;
     return minimal;
   });
   return out;
