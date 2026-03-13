@@ -114,16 +114,17 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
   }
 
   const updateExistingOrg = async (id) => {
+    const ownerIdToSet = userId || null;
     const sessionIdToSet = userId ? null : (sessionId || null);
     await db.query(
       `UPDATE organizations SET
         website_url = $1, business_type = $2, industry_category = $3, business_model = $4,
         company_size = $5, description = $6, target_audience = $7, brand_voice = $8,
-        website_goals = $9, last_analyzed_at = $10, session_id = $11, updated_at = NOW()
-       WHERE id = $12`,
+        website_goals = $9, last_analyzed_at = $10, owner_user_id = $11, session_id = $12, updated_at = NOW()
+       WHERE id = $13`,
       [orgData.website_url, orgData.business_type, orgData.industry_category, orgData.business_model,
         orgData.company_size, orgData.description, orgData.target_audience, orgData.brand_voice,
-        orgData.website_goals, orgData.last_analyzed_at, sessionIdToSet, id]
+        orgData.website_goals, orgData.last_analyzed_at, ownerIdToSet, sessionIdToSet, id]
     );
     await db.query(
       'UPDATE organization_intelligence SET is_current = FALSE WHERE organization_id = $1',

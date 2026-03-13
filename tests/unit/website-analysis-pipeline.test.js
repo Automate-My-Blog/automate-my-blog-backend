@@ -165,6 +165,45 @@ describe('website-analysis-pipeline', () => {
       expect(steps.some((s) => s.label?.includes('pitches'))).toBe(true);
       expect(steps.some((s) => s.label?.includes('images'))).toBe(true);
     });
+
+    it('includes owner_user_id in UPDATE when authenticated user re-analyzes a session-based org (regression: chk_organizations_user_or_session)', async () => {
+      const { runWebsiteAnalysisPipeline } = await import('../../services/website-analysis-pipeline.js');
+
+      let capturedOrgUpdateParams = null;
+      vi.mocked(db.query).mockImplementation((sql, params) => {
+        const s = String(sql);
+        if (s.includes('UPDATE organizations SET')) {
+          capturedOrgUpdateParams = params;
+          return Promise.resolve({ rows: [], rowCount: 1 });
+        }
+        if (s.includes('UPDATE organization_intelligence')) {
+          return Promise.resolve({ rows: [], rowCount: 0 });
+        }
+        // First org lookup by userId (owner_user_id = $1): no existing org
+        if (s.includes('WHERE owner_user_id = $1')) {
+          return Promise.resolve({ rows: [] });
+        }
+        // Second lookup by URL + session_id: return existing session-based org
+        if (s.includes('owner_user_id IS NULL AND session_id = $2')) {
+          return Promise.resolve({ rows: [{ id: 'existing-session-org' }] });
+        }
+        if (s.includes('INSERT INTO organization_intelligence')) {
+          return Promise.resolve({ rows: [{ id: 'intel-1' }], rowCount: 1 });
+        }
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      });
+
+      await runWebsiteAnalysisPipeline(
+        { url: 'https://example.com' },
+        { userId: 'u1', sessionId: 's1' }
+      );
+
+      expect(capturedOrgUpdateParams).not.toBeNull();
+      // After the fix: owner_user_id = userId ($11 = index 10), session_id = null ($12 = index 11)
+      // Both cannot be null simultaneously — that was the constraint violation.
+      expect(capturedOrgUpdateParams[10]).toBe('u1');  // owner_user_id
+      expect(capturedOrgUpdateParams[11]).toBeNull();  // session_id
+    });
   });
 
   describe('PROGRESS_STEPS', () => {
