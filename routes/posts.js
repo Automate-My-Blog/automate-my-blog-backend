@@ -427,7 +427,7 @@ router.post('/:id/publish', async (req, res) => {
     }
 
     const { id } = req.params;
-    const { platforms, publish_mode: publishMode, update_existing: updateExisting } = req.body || {};
+    const { platforms, publish_mode: publishMode, update_existing: updateExisting, wordpress_use_index_php_rest_route } = req.body || {};
 
     if (!Array.isArray(platforms) || platforms.length === 0) {
       return res.status(400).json({
@@ -490,8 +490,11 @@ router.post('/:id/publish', async (req, res) => {
           platformPublications.push({ platform: platformKey, status: 'failed', message: 'WordPress connection not found' });
           continue;
         }
+        const wpCreds = wordpress_use_index_php_rest_route === true || wordpress_use_index_php_rest_route === 'true'
+          ? { ...creds, useIndexPhpRestRoute: true }
+          : creds;
         try {
-          const result = await publishToWordPress(creds, {
+          const result = await publishToWordPress(wpCreds, {
             title: post.title,
             content: post.content || ''
           }, { status: isDraft ? 'draft' : 'publish' });

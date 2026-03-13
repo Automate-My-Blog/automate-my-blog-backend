@@ -55,14 +55,24 @@ export async function publishToWordPress(credentials, post, opts = {}) {
     res = await fetch(url, { method: 'POST', headers, body });
   }
 
+  const text = await res.text();
   if (res.status === 401) {
+    try {
+      const json = JSON.parse(text);
+      if (json.code === 'rest_cannot_create' || (json.message && json.message.includes('not allowed to create posts'))) {
+        throw new Error('WordPress user does not have permission to create posts. In WordPress, set the user\'s role to Editor or Administrator (Users → edit user → Role).');
+      }
+    } catch (e) {
+      if (e.message && e.message.includes('permission to create posts')) throw e;
+    }
     throw new Error('WordPress rejected credentials. Check username and application password.');
   }
   if (res.status === 404) {
     throw new Error('WordPress REST API not found. Ensure your site has REST API enabled and the URL is correct. If your site uses index.php for the REST API, reconnect WordPress and enable "Use index.php?rest_route= for REST API".');
   }
+  const looksLikeHtml = /^\s*<\s*!?\s*DOCTYPE|^\s*<\s*html\b/i.test(text.trim());
+
   if (!res.ok) {
-    const text = await res.text();
     let message = `WordPress returned ${res.status}`;
     try {
       const json = JSON.parse(text);
@@ -70,11 +80,23 @@ export async function publishToWordPress(credentials, post, opts = {}) {
       else if (json.code) message = json.code;
     } catch {
       if (text && text.length < 200) message = text;
+      else if (looksLikeHtml) message = `WordPress returned ${res.status} with an HTML page instead of JSON. Check REST API URL and server configuration.`;
     }
     throw new Error(message);
   }
 
-  const data = await res.json();
+  if (looksLikeHtml) {
+    throw new Error(
+      'WordPress returned an HTML page instead of JSON. The REST API URL may be wrong, or a plugin/server is serving a page instead of the API. Try the other REST URL option (index.php?rest_route=) or check WordPress plugins and server config.'
+    );
+  }
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('WordPress response was not valid JSON. The server may be returning an HTML or error page.');
+  }
   const link = data.link || (data.guid && data.guid.rendered) || null;
   const id = data.id != null ? data.id : 0;
   if (!link && !id) {
