@@ -4,7 +4,7 @@ When posts published from Automate My Blog show only caption text (or links) ins
 
 ## What we send
 
-- **Images:** `<!-- wp:image -->` + `<figure class="wp-block-image"><img src="https://via.placeholder.com/..." alt="..." /></figure>` + `<!-- /wp:image -->` (no inline `style` to avoid strict filters).
+- **Images:** `<!-- wp:html -->` (Custom HTML block) + `<figure class="wp-block-image"><img src="https://via.placeholder.com/..." alt="..." /></figure>` + `<!-- /wp:html -->` (no inline `style`). Same block type as tweets so both are preserved consistently.
 - **Tweets:** `<!-- wp:html -->` + oEmbed/fallback HTML + `<!-- /wp:html -->`.
 
 ## Checks on the WordPress side

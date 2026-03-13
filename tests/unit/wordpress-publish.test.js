@@ -129,7 +129,7 @@ describe('wordpress-publish', () => {
     expect(body.content).toContain('via.placeholder.com');
     expect(body.content).not.toContain('![IMAGE:');
     expect(body.content).not.toContain('![CHART:');
-    expect(body.content).toContain('<!-- wp:image -->');
+    expect(body.content).toContain('<!-- wp:html -->');
     expect(body.content).toContain('wp-block-image');
     expect(body.content).not.toMatch(/<figure[^>]*\sstyle=/);
     expect(body.content).not.toMatch(/<img[^>]*\sstyle=/);
