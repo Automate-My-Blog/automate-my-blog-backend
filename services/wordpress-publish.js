@@ -7,12 +7,44 @@
  * - Index.php (no pretty permalinks): {site_url}/index.php?rest_route=/wp/v2/posts
  * Set credentials.useIndexPhpRestRoute = true to use the index.php form, or we retry on 404.
  *
- * Post content is converted from markdown to HTML before sending so it renders correctly on WordPress.
+ * Post content is converted from markdown to HTML; tweet placeholders are replaced with Twitter oEmbed HTML so tweets display.
  */
-import { markdownToHtml } from '../lib/markdown-to-html.js';
+import { markdownToHtml, TWEET_EMBED_MARKER } from '../lib/markdown-to-html.js';
 
 const WP_POSTS_PATH = '/wp-json/wp/v2/posts';
 const WP_POSTS_REST_ROUTE = '/index.php?rest_route=/wp/v2/posts';
+
+/** Fetch Twitter/X oEmbed HTML for a tweet URL. Returns embed HTML or fallback link on failure. */
+async function fetchTweetOEmbedHtml(tweetUrl) {
+  try {
+    const oEmbedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(tweetUrl)}&dnt=true`;
+    const res = await fetch(oEmbedUrl, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`oEmbed ${res.status}`);
+    const data = await res.json();
+    if (data && typeof data.html === 'string') return data.html.trim();
+  } catch (e) {
+    console.warn('Tweet oEmbed fetch failed:', tweetUrl, e?.message || e);
+  }
+  return `<blockquote class="twitter-tweet-embed" style="border-left: 4px solid #1da1f2; padding: 12px 16px; margin: 16px 0; background: #f8f9fa; border-radius: 8px;"><a href="${tweetUrl.replace(/"/g, '&quot;')}" target="_blank" rel="noopener noreferrer" style="color: #1da1f2;">View tweet on X</a></blockquote>`;
+}
+
+/** Prepare post content for WordPress: markdown→HTML and replace tweet markers with oEmbed HTML. */
+async function prepareContentForWordPress(content) {
+  const raw = content ?? '';
+  const { html, tweetUrls } = markdownToHtml(raw, { forWordPressTweetEmbeds: true });
+  if (tweetUrls.length === 0) return html;
+  const oEmbedHtmls = [];
+  for (let i = 0; i < tweetUrls.length; i++) {
+    oEmbedHtmls.push(await fetchTweetOEmbedHtml(tweetUrls[i]));
+    if (i < tweetUrls.length - 1) await new Promise((r) => setTimeout(r, 300));
+  }
+  let out = html;
+  for (let i = 0; i < oEmbedHtmls.length; i++) {
+    const marker = `<!-- ${TWEET_EMBED_MARKER}${i} -->`;
+    out = out.split(marker).join(oEmbedHtmls[i]);
+  }
+  return out;
+}
 
 function buildPostsUrl(baseUrl, useIndexPhpRestRoute) {
   const base = String(baseUrl).trim().replace(/\/+$/, '');
@@ -39,7 +71,7 @@ export async function publishToWordPress(credentials, post, opts = {}) {
   const baseUrl = String(site_url).trim().replace(/\/+$/, '');
   const auth = Buffer.from(`${username}:${application_password}`, 'utf8').toString('base64');
   const status = opts.status === 'draft' ? 'draft' : 'publish';
-  const contentHtml = markdownToHtml(post.content ?? '');
+  const contentHtml = await prepareContentForWordPress(post.content);
   const body = JSON.stringify({
     title: post.title || 'Untitled',
     content: contentHtml,
