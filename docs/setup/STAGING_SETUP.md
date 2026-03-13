@@ -74,6 +74,7 @@ Production (`main`) keeps using the existing **Production** env vars; deployment
 | `OPENAI_API_KEY` | Same or separate key for staging |
 | `SUPER_ADMIN_EMAILS` | Optional; staging super admins |
 | `CORS_ORIGINS` | Optional; add staging frontend URL if not covered by `*.vercel.app` |
+| `RATE_LIMIT_MAX` | Optional; max requests per IP per window (default 200). Increase (e.g. 400) if you hit 429s during testing. |
 | `GOOGLE_REDIRECT_URI` | Backend OAuth callback URL, e.g. `https://<staging-api>/api/v1/google/oauth/callback` |
 | `OAUTH_ENCRYPTION_KEY` | 64 hex chars; encrypts OAuth tokens and app credentials (required for Google OAuth) |
 | `FRONTEND_URL` | Staging frontend base URL (e.g. `https://staging-app.vercel.app`); used for OAuth success/error redirects (e.g. Medium, Shopify). |
