@@ -31,6 +31,7 @@ If a script is no longer needed, consider moving it to `scripts/archive/` or rem
 | `scripts/vercel-staging-logs.js` | Fetch and analyze Vercel staging logs (see docs/setup/VERCEL_STAGING_LOGS.md). |
 | `scripts/test-content-calendar-staging.js` | Full API test of content calendar against staging (BACKEND_URL, TEST_JWT). |
 | `scripts/publish-test-post-wordpress.js` | **Real-world flow:** generate blog via stream → create post → publish to WordPress. Uses same API sequence as frontend (POST blog/generate-stream, SSE, POST /posts, POST /posts/:id/publish). Requires TEST_JWT for a user with WordPress connected and credits. |
+| `scripts/verify-wordpress-content-transform.js` | **Proof script:** runs the same markdown→HTML + placeholder conversion used when publishing to WordPress. Asserts `[Image: ...]` → `<figure><img>`, `[TWEET:0]`/`[VIDEO:3]` removed. Run with `node scripts/verify-wordpress-content-transform.js`; exit 0 = transformation works. |
 
 ## Module Surface Area Notes
 
