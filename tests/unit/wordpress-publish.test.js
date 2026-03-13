@@ -104,7 +104,7 @@ describe('wordpress-publish', () => {
     expect(body.content).toContain('<a href="https://example.com"');
   });
 
-  it('replaces image and chart placeholders with HTML for WordPress', async () => {
+  it('replaces image and chart placeholders with img tags for WordPress', async () => {
     const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
@@ -123,15 +123,41 @@ describe('wordpress-publish', () => {
 
     const [, opts] = globalThis.fetch.mock.calls[0];
     const body = JSON.parse(opts.body);
-    expect(body.content).toContain('[Image:');
+    expect(body.content).toContain('<img');
     expect(body.content).toContain('Sunset over mountains');
-    expect(body.content).toContain('[Chart:');
     expect(body.content).toContain('Sales 2024');
+    expect(body.content).toContain('via.placeholder.com');
     expect(body.content).not.toContain('![IMAGE:');
     expect(body.content).not.toContain('![CHART:');
   });
 
-  it('replaces tweet placeholders with blockquote HTML for WordPress', async () => {
+  it('replaces tweet placeholders with oEmbed or fallback HTML for WordPress', async () => {
+    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
+    globalThis.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ html: '<blockquote class="twitter-tweet">Embedded tweet</blockquote>' }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        text: async () => JSON.stringify(jsonBody),
+        json: async () => jsonBody
+      });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+      {
+        title: 'Post',
+        content: 'Text.\n\n![TWEET:https://x.com/user/status/123]\n\nMore.'
+      }
+    );
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    const [, wpOpts] = globalThis.fetch.mock.calls[1];
+    const body = JSON.parse(wpOpts.body);
+    expect(body.content).toContain('Embedded tweet');
+    expect(body.content).not.toContain('![TWEET:');
+  });
+
+  it('strips index-based and literal placeholders so they do not appear on WordPress', async () => {
     const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
     globalThis.fetch.mockResolvedValueOnce({
       ok: true,
@@ -144,16 +170,18 @@ describe('wordpress-publish', () => {
       { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
       {
         title: 'Post',
-        content: 'Text.\n\n![TWEET:https://x.com/user/status/123]\n\nMore.'
+        content: 'Intro.\n\n[Image: An immersive fantasy landscape.]\n\nMiddle.\n\n[TWEET:1]\n\n[VIDEO:3]\n\nEnd.'
       }
     );
 
     const [, opts] = globalThis.fetch.mock.calls[0];
     const body = JSON.parse(opts.body);
-    expect(body.content).toContain('twitter-tweet-embed');
-    expect(body.content).toContain('href="https://x.com/user/status/123"');
-    expect(body.content).toContain('View tweet on X');
-    expect(body.content).not.toContain('![TWEET:');
+    expect(body.content).not.toContain('[TWEET:1]');
+    expect(body.content).not.toContain('[VIDEO:3]');
+    expect(body.content).not.toContain('[Image:');
+    expect(body.content).toContain('Intro.');
+    expect(body.content).toContain('Middle.');
+    expect(body.content).toContain('End.');
   });
 
   it('throws on 401 with clear message', async () => {
