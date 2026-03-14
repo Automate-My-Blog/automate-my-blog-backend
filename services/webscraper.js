@@ -1,5 +1,3 @@
-import puppeteer from 'puppeteer-core';
-import { chromium } from 'playwright-core';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import xml2js from 'xml2js';
@@ -13,100 +11,6 @@ export class WebScraperService {
     this.fastPathTimeoutMs = Math.max(2000, parseInt(process.env.SCRAPE_FAST_PATH_TIMEOUT_MS, 10)) || 5000;
     this.fastPathMinContentChars = Math.max(200, parseInt(process.env.SCRAPE_FAST_PATH_MIN_CONTENT_CHARS, 10)) || 500;
     this.browserLaunchTimeoutMs = Math.max(5000, parseInt(process.env.SCRAPE_BROWSER_LAUNCH_TIMEOUT_MS, 10)) || 25000;
-  }
-
-  /**
-   * Run a promise with a timeout so browser launch never hangs indefinitely.
-   * @param {Promise<T>} promise
-   * @param {string} label - For error message
-   * @returns {Promise<T>}
-   */
-  _withLaunchTimeout(promise, label) {
-    return Promise.race([
-      promise,
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`${label} timed out after ${this.browserLaunchTimeoutMs}ms`)),
-          this.browserLaunchTimeoutMs
-        )
-      )
-    ]);
-  }
-
-  /**
-   * Get optimized Puppeteer configuration for serverless environments
-   */
-  async getPuppeteerConfig() {
-    const config = {
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-dev-tools',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-default-apps',
-        '--no-first-run',
-        '--disable-web-security',
-        '--allow-running-insecure-content'
-      ]
-    };
-
-    // For Vercel/serverless environments, use @sparticuz/chromium
-    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      try {
-        console.log('🔧 Attempting to load @sparticuz/chromium for serverless...');
-
-        // Use dynamic import for ES modules
-        const chromiumModule = await import('@sparticuz/chromium');
-        const chromium = chromiumModule.default || chromiumModule;
-
-        // Use the documented 2024 pattern for @sparticuz/chromium
-        config.executablePath = await chromium.executablePath();
-        config.args = [...config.args, ...chromium.args];
-
-        console.log('✅ Using @sparticuz/chromium with executablePath:', config.executablePath);
-        console.log('🔧 Chromium args added:', chromium.args.length);
-
-        return config;
-      } catch (importError) {
-        console.error('❌ Failed to load @sparticuz/chromium:', importError);
-        console.warn('⚠️ Falling back to system Chrome detection...');
-        
-        // Try to find system Chrome as fallback
-        const possiblePaths = [
-          '/usr/bin/google-chrome-stable',
-          '/usr/bin/google-chrome',
-          '/usr/bin/chromium-browser',
-          '/usr/bin/chromium',
-          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        ];
-        
-        for (const path of possiblePaths) {
-          try {
-            const fs = await import('fs');
-            if (fs.existsSync && fs.existsSync(path)) {
-              config.executablePath = path;
-              console.log('✅ Found system Chrome at:', path);
-              return config;
-            }
-          } catch (e) {
-            // Continue checking other paths
-          }
-        }
-        
-        // If no executable found, throw a more specific error
-        throw new Error(`Chrome executable not found. For serverless environments, ensure @sparticuz/chromium is installed. Import error: ${importError.message}`);
-      }
-    }
-
-    console.log('🔧 Using default Puppeteer configuration for local environment');
-    return config;
   }
 
   /**
@@ -175,766 +79,183 @@ export class WebScraperService {
           }
         }
       } catch (fastPathError) {
-        // Expected for JS-heavy or slow sites; fall through to browser
+        // Expected for JS-heavy or slow sites; fall through
       }
 
-      this._scrapeProgress(onScrapeProgress, 'method-puppeteer', 'Trying Puppeteer (dynamic content)');
-      try {
-        return await this.scrapeWithPuppeteer(url, opts);
-      } catch (puppeteerError) {
-        console.error('❌ Puppeteer scraping failed for', url);
-        console.error('❌ Error details:', {
-          message: puppeteerError.message,
-          stack: puppeteerError.stack?.split('\n').slice(0, 3).join('\n'),
-          url: url
-        });
-        this._scrapeProgress(onScrapeProgress, 'fallback-playwright', 'Puppeteer failed, trying Playwright');
-
-        // Try Playwright as first fallback
+      // Cloudflare Browser Rendering crawl (multi-page, markdown); skip if not configured
+      const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+      const apiToken = process.env.CLOUDFLARE_BROWSER_RENDERING_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+      if (accountId && apiToken) {
+        this._scrapeProgress(onScrapeProgress, 'cf-request', 'Requesting crawl (Cloudflare)');
         try {
-          return await this.scrapeWithPlaywright(url, opts);
-        } catch (playwrightError) {
-          console.error('❌ Playwright scraping also failed for', url);
-          console.error('❌ Playwright error details:', {
-            message: playwrightError.message,
-            stack: playwrightError.stack?.split('\n').slice(0, 3).join('\n'),
-            url: url
-          });
-          this._scrapeProgress(onScrapeProgress, 'fallback-browserless', 'Playwright failed, trying Browserless.io');
-
-          // Try Browserless.io as second fallback
-          try {
-            return await this.scrapeWithBrowserService(url, opts);
-          } catch (browserServiceError) {
-            console.error('❌ Browserless service also failed for', url);
-            console.error('❌ Browserless error details:', {
-              message: browserServiceError.message,
-              stack: browserServiceError.stack?.split('\n').slice(0, 3).join('\n'),
-              url: url
-            });
-            this._scrapeProgress(onScrapeProgress, 'fallback-cheerio', 'Trying Cheerio (static HTML)');
-
-            // Final fallback to enhanced Cheerio extraction
-            return await this.scrapeWithCheerio(url, opts);
-          }
+          return await this.scrapeWithCloudflareCrawl(url, opts);
+        } catch (cfError) {
+          console.warn('⚠️ Cloudflare crawl failed, falling back to Cheerio:', cfError?.message || cfError);
+          this._scrapeProgress(onScrapeProgress, 'fallback-cheerio', 'Trying Cheerio (static HTML)');
         }
+      } else {
+        this._scrapeProgress(onScrapeProgress, 'method-cheerio-fallback', 'Cloudflare not configured, using Cheerio');
       }
+
+      return await this.scrapeWithCheerio(url, opts);
     } catch (error) {
       console.error('Website scraping error:', error);
       throw new Error(`Failed to scrape website: ${error.message}`);
     }
   }
 
-  /**
-   * Scrape with Puppeteer for dynamic content
-   * @param {string} url
-   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
-   */
-  async scrapeWithPuppeteer(url, opts = {}) {
-    const { onScrapeProgress } = opts;
-    let browser;
-    let page; // Need page variable for CTA extraction
-    try {
-      console.log('🚀 Starting Puppeteer scraping for:', url);
-      this._scrapeProgress(onScrapeProgress, 'config', 'Getting Puppeteer config');
-      const puppeteerConfig = await this.getPuppeteerConfig();
-      console.log('🔧 Puppeteer config obtained:', JSON.stringify(puppeteerConfig, null, 2));
-      
-      this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching browser');
-      console.log('🌐 Launching browser...');
-      browser = await this._withLaunchTimeout(
-        puppeteer.launch(puppeteerConfig),
-        'Puppeteer launch'
-      );
-      console.log('✅ Browser launched successfully');
-
-      page = await browser.newPage();
-      await page.setUserAgent(this.userAgent);
-      await page.setViewport({ width: 1920, height: 1080 });
-
-      this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
-      await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: this.timeout
-      });
-
-      this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
-      await new Promise(resolve => setTimeout(resolve, this.waitAfterLoadMs));
-
-      await page.waitForFunction(() => {
-        const paragraphs = document.querySelectorAll('p');
-        if (paragraphs.length > 2) {
-          const totalText = Array.from(paragraphs)
-            .map(p => p.innerText || p.textContent || '')
-            .join(' ')
-            .trim();
-          if (totalText.length > 100) return true;
-        }
-        const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-        return bodyText.length > 1000;
-      }, { timeout: this.waitForContentTimeoutMs, polling: 1000 }).catch(() => {
-        console.log('Dynamic content wait timed out, proceeding with extraction...');
-      });
-
-      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
-      // Extract content with enhanced SPA handling
-      const content = await page.evaluate((url) => {
-        console.log('Starting content extraction for URL:', url);
-        console.log('Initial page state:');
-        console.log('- Paragraphs:', document.querySelectorAll('p').length);
-        console.log('- Articles:', document.querySelectorAll('article').length);
-        console.log('- Main elements:', document.querySelectorAll('main').length);
-
-        // Remove unwanted elements for content extraction (but keep them for color analysis)
-        const elementsToRemove = [
-          'script', '.cookie-banner', '.popup', '.modal', '.advertisement'
-        ];
-        
-        elementsToRemove.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => el.remove());
-        });
-
-        // Get title
-        const title = document.title || '';
-
-        // Get meta description
-        const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
-
-        // Enhanced content selectors for better SPA compatibility
-        const mainSelectors = [
-          'main', '[role="main"]', '.main-content', '.content', 
-          'article', '.post-content', '.entry-content', '.blog-post', 
-          '.single-post', '[data-post]', '.content-area', '.post-body'
-        ];
-        
-        let mainContent = '';
-        for (const selector of mainSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            const text = element.innerText || element.textContent || '';
-            if (text.trim().length > 100) { // Only use if meaningful content
-              mainContent = text;
-              console.log(`Found content using selector: ${selector}, length: ${text.length}`);
-              break;
-            }
-          }
-        }
-
-        // If no main content found, try aggressive fallback extraction
-        if (!mainContent || mainContent.trim().length < 100) {
-          console.log('Main content not found, trying aggressive extraction...');
-          
-          // Try paragraphs first
-          const paragraphs = Array.from(document.querySelectorAll('p'))
-            .map(p => p.innerText || p.textContent || '')
-            .filter(text => text.trim().length > 20)
-            .join(' ');
-          
-          if (paragraphs.length > 100) {
-            mainContent = paragraphs;
-            console.log(`Found content from paragraphs, length: ${paragraphs.length}`);
-          } else {
-            // Last resort: use TreeWalker to extract all text nodes
-            const walker = document.createTreeWalker(
-              document.body || document,
-              NodeFilter.SHOW_TEXT,
-              {
-                acceptNode: function(node) {
-                  // Skip script and style content
-                  const parent = node.parentElement;
-                  if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) {
-                    return NodeFilter.FILTER_REJECT;
-                  }
-                  // Only accept nodes with meaningful text
-                  if (node.textContent.trim().length > 10) {
-                    return NodeFilter.FILTER_ACCEPT;
-                  }
-                  return NodeFilter.FILTER_REJECT;
-                }
-              }
-            );
-            
-            const textNodes = [];
-            let node;
-            while (node = walker.nextNode()) {
-              textNodes.push(node.textContent.trim());
-            }
-            
-            const extractedText = textNodes.join(' ').replace(/\s+/g, ' ').trim();
-            if (extractedText.length > mainContent.length) {
-              mainContent = extractedText;
-              console.log(`Found content using TreeWalker, length: ${extractedText.length}`);
-            }
-          }
-        }
-
-        // If still no content, get body text as last resort
-        if (!mainContent || mainContent.trim().length < 50) {
-          mainContent = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-          console.log(`Using body text as fallback, length: ${mainContent.length}`);
-        }
-
-        // Get headings
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
-          .map(h => (h.innerText || h.textContent || '').trim())
-          .filter(text => text.length > 0)
-          .slice(0, 10);
-
-        console.log('Final extraction results:');
-        console.log('- Title:', title);
-        console.log('- Content length:', mainContent.length);
-        console.log('- Headings found:', headings.length);
-
-        return {
-          title: title.trim(),
-          metaDescription: metaDescription.trim(),
-          content: mainContent.trim(),
-          headings,
-          url
-        };
-      }, url);
-
-      // Extract social handles from full HTML (reuse Cheerio parsing)
-      const html = await page.content();
-      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
-      content.socialHandles = extractedFromHtml.socialHandles || {};
-
-      // Extract CTAs using inline extraction logic
-      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
-      console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Puppeteer scraper');
-      let extractedCTAs = [];
-      try {
-        extractedCTAs = await page.evaluate(() => {
-          // Navigation filter patterns
-          const navigationPatterns = [
-            /blog/i, /cart/i, /about/i, /home/i, /services/i,
-            /products/i, /gallery/i, /portfolio/i, /team/i,
-            /careers/i, /faq/i, /privacy/i, /terms/i
-          ];
-
-          const isNavigationLink = (href, text) => {
-            if (!href && !text) return false;
-            const hrefLower = (href || '').toLowerCase();
-            const textLower = (text || '').toLowerCase();
-            return navigationPatterns.some(pattern =>
-              pattern.test(hrefLower) || pattern.test(textLower)
-            );
-          };
-
-          // CTA selectors (same as extractCTAs method)
-          const ctaSelectors = [
-            { selector: 'a[href*="contact"]', type: 'contact_link' },
-            { selector: 'button[class*="contact"]', type: 'contact_link' },
-            { selector: 'a[href^="mailto:"]', type: 'contact_link' },
-            { selector: 'a[href^="tel:"]', type: 'phone_link' },
-            { selector: 'a[href*="schedule"]', type: 'schedule_link' },
-            { selector: 'a[href*="book"]', type: 'schedule_link' },
-            { selector: 'a[href*="appointment"]', type: 'schedule_link' },
-            { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
-            { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
-            { selector: 'a[href*="demo"]', type: 'demo_link' },
-            { selector: 'a[href*="trial"]', type: 'trial_link' },
-            { selector: 'a[href*="free"]', type: 'trial_link' },
-            { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
-            { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
-            { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
-            { selector: 'button[class*="request"]', type: 'request_link' },
-            { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
-            { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
-            { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
-            { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
-            { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
-            { selector: 'input[type="email"]', type: 'email_capture' },
-            { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
-          ];
-
-          const ctaElements = [];
-
-          for (const { selector, type } of ctaSelectors) {
-            const elements = document.querySelectorAll(selector);
-
-            elements.forEach((el, index) => {
-              if (index >= 10) return; // Limit per type
-
-              const text = el.textContent?.trim() || el.placeholder || el.value || '';
-              const href = el.href || '';
-
-              // Enhanced type classification for custom components
-              let actualType = type;
-              const lowerText = text.toLowerCase();
-              const lowerHref = href.toLowerCase();
-
-              if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
-                  lowerText.includes('send us a message')) {
-                actualType = 'contact_link';
-              } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
-                         lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
-                actualType = 'phone_link';
-              } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
-                         lowerText.includes('reach us') || lowerText.includes('reach out')) {
-                actualType = 'contact_link';
-              } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
-                         lowerText.includes('appointment')) {
-                actualType = 'schedule_link';
-              }
-
-              if (!text && !href) return;
-
-              // Filter out navigation links
-              if (isNavigationLink(href, text)) {
-                return;
-              }
-
-              // Validate CTA text
-              if (!text || text.length < 2 || text.length > 100) return;
-
-              // Skip generic/meaningless text
-              const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
-              if (genericTexts.includes(text.toLowerCase())) return;
-
-              // Determine placement
-              let placement = 'unknown';
-              const inNav = el.closest('nav, .nav, .navigation') !== null;
-              if (el.closest('header, .header')) placement = 'header';
-              else if (el.closest('footer, .footer')) placement = 'footer';
-              else if (inNav) placement = 'navigation';
-              else if (el.closest('aside, .sidebar')) placement = 'sidebar';
-              else if (el.closest('.modal, .popup')) placement = 'modal';
-              else placement = 'main_content';
-
-              // Skip navigation links in navigation placement
-              if (inNav && isNavigationLink(href, text)) {
-                return;
-              }
-
-              ctaElements.push({
-                type: actualType,
-                text: text.slice(0, 100),
-                href: href.slice(0, 200),
-                placement,
-                className: el.className || '',
-                tagName: el.tagName.toLowerCase()
-              });
-            });
-          }
-
-          return ctaElements;
-        });
-
-        console.log('✅ [CTA DEBUG] Puppeteer CTA extraction:', {
-          ctaCount: extractedCTAs.length,
-          ctaTypes: extractedCTAs.reduce((acc, cta) => {
-            acc[cta.type] = (acc[cta.type] || 0) + 1;
-            return acc;
-          }, {}),
-          sampleCTAs: extractedCTAs.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
-        });
-      } catch (error) {
-        console.error('❌ [CTA DEBUG] Failed to extract CTAs in Puppeteer:', error.message);
-      }
-
-      // Return combined content with CTAs
-      content.ctas = extractedCTAs;
-      return this.cleanContent(content);
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
-    }
+  /** Default max pages per crawl (configurable via env). */
+  static get CLOUDFLARE_CRAWL_PAGE_LIMIT() {
+    return Math.min(20, Math.max(1, parseInt(process.env.CLOUDFLARE_CRAWL_PAGE_LIMIT, 10) || 5));
   }
 
   /**
-   * Get optimized Playwright configuration for serverless environments
+   * Scrape via Cloudflare Browser Rendering /crawl API (multi-page, markdown + optional HTML for CTAs).
+   * @param {string} url - Start URL (homepage)
+   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
+   * @returns {Promise<object>} Same shape as scrapeWebsite: title, metaDescription, content, headings, ctas, socialHandles, ...
    */
-  async getPlaywrightConfig() {
-    const config = {
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--disable-dev-tools',
-        '--disable-extensions',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-features=TranslateUI',
-        '--disable-default-apps',
-        '--no-first-run',
-        '--disable-web-security',
-        '--allow-running-insecure-content'
-      ]
+  async scrapeWithCloudflareCrawl(url, opts = {}) {
+    const { onScrapeProgress } = opts;
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const apiToken = process.env.CLOUDFLARE_BROWSER_RENDERING_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+    if (!accountId || !apiToken) {
+      throw new Error('Cloudflare Browser Rendering not configured (CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_BROWSER_RENDERING_API_TOKEN)');
+    }
+
+    const limit = this.constructor.CLOUDFLARE_CRAWL_PAGE_LIMIT;
+    const baseUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/browser-rendering/crawl`;
+
+    const body = {
+      url,
+      limit,
+      formats: ['markdown', 'html'],
+      render: true,
+      options: {
+        excludePatterns: [
+          '**/blog/**',
+          '**/posts/**',
+          '**/news/**',
+          '**/articles/**',
+          '**/tag/**',
+          '**/category/**'
+        ]
+      }
     };
 
-    // For Vercel/serverless environments, try to use @sparticuz/chromium
-    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      try {
-        console.log('🔧 Attempting to configure Playwright for serverless...');
+    this._scrapeProgress(onScrapeProgress, 'cf-request', 'Starting crawl job');
+    const startRes = await axios.post(baseUrl, body, {
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000,
+      validateStatus: (s) => s === 200
+    }).catch((err) => {
+      throw new Error(err.response?.data?.errors?.[0]?.message || err.message || 'Cloudflare crawl start failed');
+    });
 
-        // Use dynamic import for ES modules
-        const chromiumModule = await import('@sparticuz/chromium');
-        const chromium = chromiumModule.default || chromiumModule;
-
-        // Set executable path for Playwright
-        config.executablePath = await chromium.executablePath();
-        config.args = [...config.args, ...chromium.args];
-
-        console.log('✅ Using @sparticuz/chromium with Playwright, executablePath:', config.executablePath);
-        console.log('🔧 Chromium args added for Playwright:', chromium.args.length);
-
-        return config;
-      } catch (importError) {
-        console.error('❌ Failed to load @sparticuz/chromium for Playwright:', importError);
-        console.warn('⚠️ Falling back to system Chrome detection for Playwright...');
-        
-        // Try to find system Chrome as fallback
-        const possiblePaths = [
-          '/usr/bin/google-chrome-stable',
-          '/usr/bin/google-chrome',
-          '/usr/bin/chromium-browser',
-          '/usr/bin/chromium',
-          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-        ];
-        
-        for (const path of possiblePaths) {
-          try {
-            const fs = await import('fs');
-            if (fs.existsSync && fs.existsSync(path)) {
-              config.executablePath = path;
-              console.log('✅ Found system Chrome for Playwright at:', path);
-              return config;
-            }
-          } catch (e) {
-            // Continue checking other paths
-          }
-        }
-        
-        // If no executable found, throw a more specific error
-        throw new Error(`Chrome executable not found for Playwright. For serverless environments, ensure @sparticuz/chromium is installed. Import error: ${importError.message}`);
-      }
+    const jobId = startRes.data?.result;
+    if (!jobId) {
+      throw new Error('Cloudflare crawl did not return job id');
     }
 
-    console.log('🔧 Using default Playwright configuration for local environment');
-    return config;
-  }
-
-  /**
-   * Scrape with Playwright for dynamic content (Puppeteer alternative)
-   * @param {string} url
-   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
-   */
-  async scrapeWithPlaywright(url, opts = {}) {
-    const { onScrapeProgress } = opts;
-    let browser;
-    let page;
-    try {
-      console.log('🚀 Starting Playwright scraping for:', url);
-      this._scrapeProgress(onScrapeProgress, 'config', 'Getting Playwright config');
-      const playwrightConfig = await this.getPlaywrightConfig();
-      console.log('🔧 Playwright config obtained:', JSON.stringify(playwrightConfig, null, 2));
-      
-      this._scrapeProgress(onScrapeProgress, 'browser-launch', 'Launching Playwright browser');
-      console.log('🌐 Launching Playwright browser...');
-      browser = await this._withLaunchTimeout(
-        chromium.launch(playwrightConfig),
-        'Playwright launch'
-      );
-      console.log('✅ Playwright browser launched successfully');
-
-      page = await browser.newPage();
-      await page.setExtraHTTPHeaders({ 'User-Agent': this.userAgent });
-      await page.setViewportSize({ width: 1920, height: 1080 });
-
-      this._scrapeProgress(onScrapeProgress, 'navigate', 'Navigating to page');
-      console.log('🌐 Navigating to page with Playwright...');
-      await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: this.timeout
+    this._scrapeProgress(onScrapeProgress, 'cf-wait', 'Waiting for crawl to complete');
+    const pollIntervalMs = 3000;
+    const maxAttempts = 60;
+    let result;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, pollIntervalMs));
+      const getRes = await axios.get(`${baseUrl}/${jobId}`, {
+        params: { limit: 1 },
+        headers: { Authorization: `Bearer ${apiToken}` },
+        timeout: 10000,
+        validateStatus: (s) => s === 200
+      }).catch((err) => {
+        throw new Error(err.response?.data?.errors?.[0]?.message || err.message || 'Cloudflare crawl status failed');
       });
-
-      this._scrapeProgress(onScrapeProgress, 'wait-content', 'Waiting for content to load');
-      await new Promise(r => setTimeout(r, this.waitAfterLoadMs));
-
-      try {
-        await page.waitForFunction(() => {
-          const paragraphs = document.querySelectorAll('p');
-          if (paragraphs.length > 2) {
-            const totalText = Array.from(paragraphs)
-              .map(p => p.innerText || p.textContent || '')
-              .join(' ')
-              .trim();
-            if (totalText.length > 100) return true;
-          }
-          const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-          return bodyText.length > 1000;
-        }, { timeout: this.waitForContentTimeoutMs });
-      } catch (waitError) {
-        console.log('Playwright dynamic content wait timed out, proceeding with extraction...');
+      const status = getRes.data?.result?.status;
+      if (status !== 'running' && status !== undefined) {
+        result = getRes.data.result;
+        break;
       }
-
-      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
-      const content = await page.evaluate((url) => {
-        console.log('Starting Playwright content extraction for URL:', url);
-        console.log('Initial page state:');
-        console.log('- Paragraphs:', document.querySelectorAll('p').length);
-        console.log('- Articles:', document.querySelectorAll('article').length);
-        console.log('- Main elements:', document.querySelectorAll('main').length);
-
-        // Remove unwanted elements for content extraction
-        const elementsToRemove = [
-          'script', '.cookie-banner', '.popup', '.modal', '.advertisement'
-        ];
-        
-        elementsToRemove.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => el.remove());
-        });
-
-        // Get title
-        const title = document.title || '';
-
-        // Get meta description
-        const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
-
-        // Enhanced content selectors for better SPA compatibility
-        const mainSelectors = [
-          'main', '[role="main"]', '.main-content', '.content', 
-          'article', '.post-content', '.entry-content', '.blog-post', 
-          '.single-post', '[data-post]', '.content-area', '.post-body'
-        ];
-        
-        let mainContent = '';
-        for (const selector of mainSelectors) {
-          const element = document.querySelector(selector);
-          if (element) {
-            const text = element.innerText || element.textContent || '';
-            if (text.trim().length > 100) {
-              mainContent = text;
-              console.log(`Playwright found content using selector: ${selector}, length: ${text.length}`);
-              break;
-            }
-          }
-        }
-
-        // If no main content found, try aggressive fallback extraction
-        if (!mainContent || mainContent.trim().length < 100) {
-          console.log('Playwright main content not found, trying aggressive extraction...');
-          
-          // Try paragraphs first
-          const paragraphs = Array.from(document.querySelectorAll('p'))
-            .map(p => p.innerText || p.textContent || '')
-            .filter(text => text.trim().length > 20)
-            .join(' ');
-          
-          if (paragraphs.length > 100) {
-            mainContent = paragraphs;
-            console.log(`Playwright found content from paragraphs, length: ${paragraphs.length}`);
-          } else {
-            // Last resort: use TreeWalker to extract all text nodes
-            const walker = document.createTreeWalker(
-              document.body || document,
-              NodeFilter.SHOW_TEXT,
-              {
-                acceptNode: function(node) {
-                  const parent = node.parentElement;
-                  if (parent && ['SCRIPT', 'STYLE', 'NOSCRIPT'].includes(parent.tagName)) {
-                    return NodeFilter.FILTER_REJECT;
-                  }
-                  if (node.textContent.trim().length > 10) {
-                    return NodeFilter.FILTER_ACCEPT;
-                  }
-                  return NodeFilter.FILTER_REJECT;
-                }
-              }
-            );
-            
-            const textNodes = [];
-            let node;
-            while (node = walker.nextNode()) {
-              textNodes.push(node.textContent.trim());
-            }
-            
-            const extractedText = textNodes.join(' ').replace(/\s+/g, ' ').trim();
-            if (extractedText.length > mainContent.length) {
-              mainContent = extractedText;
-              console.log(`Playwright found content using TreeWalker, length: ${extractedText.length}`);
-            }
-          }
-        }
-
-        // If still no content, get body text as last resort
-        if (!mainContent || mainContent.trim().length < 50) {
-          mainContent = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-          console.log(`Playwright using body text as fallback, length: ${mainContent.length}`);
-        }
-
-        // Get headings
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
-          .map(h => (h.innerText || h.textContent || '').trim())
-          .filter(text => text.length > 0)
-          .slice(0, 10);
-
-        console.log('Playwright final extraction results:');
-        console.log('- Title:', title);
-        console.log('- Content length:', mainContent.length);
-        console.log('- Headings found:', headings.length);
-
-        return {
-          title: title.trim(),
-          metaDescription: metaDescription.trim(),
-          content: mainContent.trim(),
-          headings,
-          url
-        };
-      }, url);
-
-      // Extract social handles from full HTML (reuse Cheerio parsing)
-      const html = await page.content();
-      const extractedFromHtml = this._extractContentAndCTAsFromHTML(html, url);
-      content.socialHandles = extractedFromHtml.socialHandles || {};
-
-      // Extract CTAs using inline extraction logic
-      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
-      console.log('🔍 [CTA DEBUG] Calling extractCTAs() from Playwright scraper');
-      let extractedCTAs = [];
-      try {
-        extractedCTAs = await page.evaluate(() => {
-          // Navigation filter patterns
-          const navigationPatterns = [
-            /blog/i, /cart/i, /about/i, /home/i, /services/i,
-            /products/i, /gallery/i, /portfolio/i, /team/i,
-            /careers/i, /faq/i, /privacy/i, /terms/i
-          ];
-
-          const isNavigationLink = (href, text) => {
-            if (!href && !text) return false;
-            const hrefLower = (href || '').toLowerCase();
-            const textLower = (text || '').toLowerCase();
-            return navigationPatterns.some(pattern =>
-              pattern.test(hrefLower) || pattern.test(textLower)
-            );
-          };
-
-          // CTA selectors (same as extractCTAs method)
-          const ctaSelectors = [
-            { selector: 'a[href*="contact"]', type: 'contact_link' },
-            { selector: 'button[class*="contact"]', type: 'contact_link' },
-            { selector: 'a[href^="mailto:"]', type: 'contact_link' },
-            { selector: 'a[href^="tel:"]', type: 'phone_link' },
-            { selector: 'a[href*="schedule"]', type: 'schedule_link' },
-            { selector: 'a[href*="book"]', type: 'schedule_link' },
-            { selector: 'a[href*="appointment"]', type: 'schedule_link' },
-            { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
-            { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
-            { selector: 'a[href*="demo"]', type: 'demo_link' },
-            { selector: 'a[href*="trial"]', type: 'trial_link' },
-            { selector: 'a[href*="free"]', type: 'trial_link' },
-            { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
-            { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
-            { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
-            { selector: 'button[class*="request"]', type: 'request_link' },
-            { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
-            { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
-            { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
-            { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
-            { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
-            { selector: 'input[type="email"]', type: 'email_capture' },
-            { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
-          ];
-
-          const ctaElements = [];
-
-          for (const { selector, type } of ctaSelectors) {
-            const elements = document.querySelectorAll(selector);
-
-            elements.forEach((el, index) => {
-              if (index >= 10) return; // Limit per type
-
-              const text = el.textContent?.trim() || el.placeholder || el.value || '';
-              const href = el.href || '';
-
-              // Enhanced type classification for custom components
-              let actualType = type;
-              const lowerText = text.toLowerCase();
-              const lowerHref = href.toLowerCase();
-
-              if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
-                  lowerText.includes('send us a message')) {
-                actualType = 'contact_link';
-              } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
-                         lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
-                actualType = 'phone_link';
-              } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
-                         lowerText.includes('reach us') || lowerText.includes('reach out')) {
-                actualType = 'contact_link';
-              } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
-                         lowerText.includes('appointment')) {
-                actualType = 'schedule_link';
-              }
-
-              if (!text && !href) return;
-
-              // Filter out navigation links
-              if (isNavigationLink(href, text)) {
-                return;
-              }
-
-              // Validate CTA text
-              if (!text || text.length < 2 || text.length > 100) return;
-
-              // Skip generic/meaningless text
-              const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
-              if (genericTexts.includes(text.toLowerCase())) return;
-
-              // Determine placement
-              let placement = 'unknown';
-              const inNav = el.closest('nav, .nav, .navigation') !== null;
-              if (el.closest('header, .header')) placement = 'header';
-              else if (el.closest('footer, .footer')) placement = 'footer';
-              else if (inNav) placement = 'navigation';
-              else if (el.closest('aside, .sidebar')) placement = 'sidebar';
-              else if (el.closest('.modal, .popup')) placement = 'modal';
-              else placement = 'main_content';
-
-              // Skip navigation links in navigation placement
-              if (inNav && isNavigationLink(href, text)) {
-                return;
-              }
-
-              ctaElements.push({
-                type: actualType,
-                text: text.slice(0, 100),
-                href: href.slice(0, 200),
-                placement,
-                className: el.className || '',
-                tagName: el.tagName.toLowerCase()
-              });
-            });
-          }
-
-          return ctaElements;
-        });
-
-        console.log('✅ [CTA DEBUG] Playwright CTA extraction:', {
-          ctaCount: extractedCTAs.length,
-          ctaTypes: extractedCTAs.reduce((acc, cta) => {
-            acc[cta.type] = (acc[cta.type] || 0) + 1;
-            return acc;
-          }, {}),
-          sampleCTAs: extractedCTAs.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
-        });
-      } catch (error) {
-        console.error('❌ [CTA DEBUG] Failed to extract CTAs in Playwright:', error.message);
-      }
-
-      // Return combined content with CTAs
-      content.ctas = extractedCTAs;
-      return this.cleanContent(content);
-    } finally {
-      if (browser) {
-        await browser.close();
+      if (i === maxAttempts - 1) {
+        throw new Error('Cloudflare crawl did not complete within timeout');
       }
     }
+
+    if (result?.status === 'errored' || result?.status === 'cancelled_due_to_limits' || result?.status === 'cancelled_due_to_timeout') {
+      throw new Error(`Cloudflare crawl ${result.status}`);
+    }
+
+    this._scrapeProgress(onScrapeProgress, 'cf-parse', 'Processing crawl results');
+    const records = result?.records || [];
+    const completed = records.filter((r) => r.status === 'completed');
+    if (completed.length === 0) {
+      throw new Error('Cloudflare crawl returned no completed pages');
+    }
+
+    const startOrigin = new URL(url).origin;
+    const firstPage = completed.find((r) => {
+      try {
+        return new URL(r.url).origin === startOrigin && (r.url === url || r.url.replace(/\/$/, '') === url.replace(/\/$/, ''));
+      } catch {
+        return false;
+      }
+    }) || completed[0];
+
+    const title = firstPage?.metadata?.title ?? firstPage?.url ?? url;
+    const metaDescription = firstPage?.metadata?.description ?? '';
+
+    const contentParts = [];
+    const allHeadings = [];
+    const allCtas = [];
+    const socialHandlesAcc = {};
+
+    for (const record of completed) {
+      const pageUrl = record.url || url;
+      const md = record.markdown || '';
+      if (md) {
+        contentParts.push(`## ${record.metadata?.title || pageUrl}\n\n${md}`);
+        const headingMatches = md.matchAll(/^#{1,6}\s+(.+)$/gm);
+        for (const m of headingMatches) {
+          const level = (m[0].match(/^#+/) || [''])[0].length;
+          allHeadings.push({ text: m[1].trim(), level, id: '' });
+        }
+      }
+      if (record.html) {
+        try {
+          const extracted = this._extractContentAndCTAsFromHTML(record.html, pageUrl);
+          const ctas = (extracted.ctas || []).map((cta) => ({
+            ...cta,
+            page_url: pageUrl
+          }));
+          allCtas.push(...ctas);
+          if (extracted.socialHandles && typeof extracted.socialHandles === 'object') {
+            Object.assign(socialHandlesAcc, extracted.socialHandles);
+          }
+        } catch (e) {
+          console.warn('[webscraper] CTA/social extract failed for', pageUrl, e?.message);
+        }
+      }
+    }
+
+    const content = contentParts.join('\n\n');
+    const wordCount = content.split(/\s+/).filter((w) => w.length > 0).length;
+    const contentOut = {
+      title: title.trim(),
+      metaDescription: metaDescription.trim(),
+      content,
+      wordCount,
+      headings: allHeadings.length ? allHeadings : [{ text: title, level: 1, id: '' }],
+      url,
+      internalLinks: [],
+      externalLinks: [],
+      ctas: allCtas,
+      socialHandles: socialHandlesAcc,
+      extractionMethod: 'cloudflare_crawl'
+    };
+    return this.cleanContent(contentOut);
   }
 
   /**
@@ -1169,7 +490,7 @@ export class WebScraperService {
   }
 
   /**
-   * Shared HTML → content + CTAs extraction (Cheerio). Used by scrapeWithCheerio and scrapeWithBrowserService.
+   * Shared HTML → content + CTAs extraction (Cheerio). Used by scrapeWithCheerio and Cloudflare crawl.
    * @param {string} html - Raw HTML
    * @param {string} url - Page URL (for internal links and context)
    * @returns {{ title: string, metaDescription: string, content: string, headings: Array<{text:string,level:number,id:string}>, internalLinks: Array<object>, ctas: Array<object>, socialHandles: object }}
@@ -1287,66 +608,6 @@ export class WebScraperService {
     });
 
     return { title, metaDescription, content: mainContent, headings, internalLinks, socialHandles, ctas };
-  }
-
-  /**
-   * Scrape with Browserless.io cloud service (serverless browser automation)
-   * @param {string} url
-   * @param {{ onScrapeProgress?: (phase: string, message: string, detail?: object) => void }} [opts]
-   */
-  async scrapeWithBrowserService(url, opts = {}) {
-    const { onScrapeProgress } = opts;
-    try {
-      console.log('🚀 Starting Browserless.io scraping for:', url);
-      this._scrapeProgress(onScrapeProgress, 'api-request', 'Requesting page from Browserless.io');
-
-      const browserlessToken = process.env.BROWSERLESS_API_TOKEN || process.env.BROWSERLESS_TOKEN;
-      if (!browserlessToken) {
-        console.warn('⚠️ BROWSERLESS_API_TOKEN not found, skipping Browserless.io...');
-        throw new Error('Browserless API token not configured');
-      }
-
-      const browserlessEndpoint = `https://production-sfo.browserless.io/content?token=${browserlessToken}`;
-      const scrapeRequest = {
-        url: url,
-        gotoOptions: {
-          waitUntil: 'networkidle2',
-          timeout: this.timeout
-        }
-      };
-
-      const response = await axios.post(browserlessEndpoint, scrapeRequest, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: this.timeout + 5000
-      });
-
-      if (!response.data) {
-        throw new Error('No data returned from Browserless.io');
-      }
-
-      this._scrapeProgress(onScrapeProgress, 'parse-html', 'Parsing HTML');
-      this._scrapeProgress(onScrapeProgress, 'extract', 'Extracting text and structure');
-      const extracted = this._extractContentAndCTAsFromHTML(response.data, url);
-      this._scrapeProgress(onScrapeProgress, 'ctas', 'Extracting CTAs');
-
-      const content = {
-        title: extracted.title.trim(),
-        metaDescription: extracted.metaDescription.trim(),
-        content: extracted.content.trim(),
-        headings: extracted.headings,
-        url,
-        internalLinks: extracted.internalLinks || [],
-        externalLinks: [],
-        ctas: extracted.ctas || [],
-        socialHandles: extracted.socialHandles || {},
-        extractionMethod: 'browserless'
-      };
-
-      return this.cleanContent(content);
-    } catch (error) {
-      console.error('❌ Browserless.io scraping failed:', error.message);
-      throw error;
-    }
   }
 
   /**
@@ -1806,263 +1067,143 @@ export class WebScraperService {
   }
   
   /**
-   * Detect if a page is a blog index/listing page or individual blog post
+   * Detect if a page is a blog index/listing page or individual blog post (Cheerio-based).
    */
   async detectPageType(pageUrl) {
-    let browser;
     try {
-      browser = await puppeteer.launch(await this.getPuppeteerConfig());
-
-      const page = await browser.newPage();
-      await page.setUserAgent(this.userAgent);
-      await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const pageAnalysis = await page.evaluate(() => {
-        // Indicators of blog index/listing page
-        const indexIndicators = [
-          // Multiple post links (strong indicator)
-          document.querySelectorAll('article a, .post a, .entry a, h2 a, h3 a').length > 3,
-          
-          // Pagination elements
-          document.querySelector('.pagination, .pager, .page-numbers, [class*="pagination"]') !== null,
-          
-          // "Read more" or "Continue reading" links
-          document.querySelectorAll('a').length > 0 && 
-          Array.from(document.querySelectorAll('a')).some(a => 
-            /read\s+more|continue\s+reading|view\s+post/i.test(a.textContent)
-          ),
-          
-          // Archive/listing structure
-          document.querySelector('.archive, .blog-list, .post-list, [class*="archive"], [class*="list"]') !== null,
-          
-          // Multiple date elements (suggests multiple posts)
-          document.querySelectorAll('time, .date, .published, .post-date').length > 2
-        ];
-
-        // Indicators of individual blog post
-        const postIndicators = [
-          // Long main content (typical of full blog posts)
-          (document.querySelector('article, .post-content, .entry-content, main')?.textContent?.length || 0) > 1000,
-          
-          // Single article structure
-          document.querySelectorAll('article').length === 1,
-          
-          // Blog post metadata (single post)
-          document.querySelector('.post-meta, .entry-meta, .byline') !== null,
-          
-          // Comments section
-          document.querySelector('#comments, .comments, [class*="comment"]') !== null,
-          
-          // Social sharing buttons
-          document.querySelector('.share, .social-share, [class*="share"]') !== null,
-          
-          // Author bio
-          document.querySelector('.author-bio, .about-author, [class*="author"]') !== null
-        ];
-
-        const indexScore = indexIndicators.filter(Boolean).length;
-        const postScore = postIndicators.filter(Boolean).length;
-        
-        // URL pattern analysis
-        const urlPatterns = {
-          isIndex: /\/(blog|news|articles|posts)\/?\s*$/i.test(window.location.pathname),
-          isPost: /\/(blog|news|articles|posts)\/[^\/]+/i.test(window.location.pathname) || 
-                 /\/\d{4}\/\d{2}\//.test(window.location.pathname) || // Date-based URLs
-                 /\/[a-z-]+-\d+\/?$/i.test(window.location.pathname) // Slug with ID
-        };
-
-        return {
-          indexScore,
-          postScore,
-          urlPatterns,
-          isLikelyIndex: indexScore > postScore || urlPatterns.isIndex,
-          isLikelyPost: postScore > indexScore || urlPatterns.isPost,
-          confidence: Math.max(indexScore, postScore) / Math.max(indexIndicators.length, postIndicators.length),
-          postLinksFound: document.querySelectorAll('article a, .post a, .entry a, h2 a, h3 a').length
-        };
+      const response = await axios.get(pageUrl, {
+        headers: { 'User-Agent': this.userAgent, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        timeout: this.timeout,
+        maxRedirects: 5
       });
+      if (!response.data || typeof response.data !== 'string') {
+        return { type: 'blog_post', confidence: 0, details: {} };
+      }
+      const $ = cheerio.load(response.data);
+      const pathname = new URL(pageUrl).pathname;
 
+      const indexIndicators = [
+        $('article a, .post a, .entry a, h2 a, h3 a').length > 3,
+        $('.pagination, .pager, .page-numbers, [class*="pagination"]').length > 0,
+        $('a').length > 0 && $('a').toArray().some((el) => /read\s+more|continue\s+reading|view\s+post/i.test($(el).text())),
+        $('.archive, .blog-list, .post-list, [class*="archive"], [class*="list"]').length > 0,
+        $('time, .date, .published, .post-date').length > 2
+      ];
+      const mainEl = $('article, .post-content, .entry-content, main').first();
+      const mainText = mainEl.length ? mainEl.text().trim() : '';
+      const postIndicators = [
+        mainText.length > 1000,
+        $('article').length === 1,
+        $('.post-meta, .entry-meta, .byline').length > 0,
+        $('#comments, .comments, [class*="comment"]').length > 0,
+        $('.share, .social-share, [class*="share"]').length > 0,
+        $('.author-bio, .about-author, [class*="author"]').length > 0
+      ];
+      const indexScore = indexIndicators.filter(Boolean).length;
+      const postScore = postIndicators.filter(Boolean).length;
+      const urlPatterns = {
+        isIndex: /\/(blog|news|articles|posts)\/?\s*$/i.test(pathname),
+        isPost: /\/(blog|news|articles|posts)\/[^/]+/i.test(pathname) || /\/\d{4}\/\d{2}\//.test(pathname) || /\/[a-z-]+-\d+\/?$/i.test(pathname)
+      };
+      const pageAnalysis = {
+        indexScore,
+        postScore,
+        urlPatterns,
+        isLikelyIndex: indexScore > postScore || urlPatterns.isIndex,
+        isLikelyPost: postScore > indexScore || urlPatterns.isPost,
+        confidence: Math.max(indexScore, postScore) / Math.max(indexIndicators.length, postIndicators.length, 1),
+        postLinksFound: $('article a, .post a, .entry a, h2 a, h3 a').length
+      };
       console.log(`📊 Page type analysis for ${pageUrl}:`, pageAnalysis);
-      
       return {
         type: pageAnalysis.isLikelyIndex ? 'blog_index' : 'blog_post',
         confidence: pageAnalysis.confidence,
         details: pageAnalysis
       };
-
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
+    } catch (error) {
+      console.warn('detectPageType failed:', error?.message);
+      return { type: 'blog_post', confidence: 0, details: { error: error?.message } };
     }
   }
 
   /**
-   * Find blog posts on a specific page
+   * Find blog posts on a specific page (Cheerio-based).
    */
   async findBlogPostsOnPage(pageUrl) {
     try {
-      let browser;
+      const response = await axios.get(pageUrl, {
+        headers: { 'User-Agent': this.userAgent, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        timeout: this.timeout,
+        maxRedirects: 5
+      });
+      if (!response.data || typeof response.data !== 'string') return [];
+      const $ = cheerio.load(response.data);
+      const baseUrl = new URL(pageUrl);
+      const baseOrigin = baseUrl.origin;
+      const baseHost = baseUrl.hostname;
+      const foundLinks = new Set();
       const posts = [];
-      
-      try {
-        browser = await puppeteer.launch({
-          headless: 'new',
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-gpu'
-          ]
-        });
-
-        const page = await browser.newPage();
-        await page.setUserAgent(this.userAgent);
-        await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // Extract blog post links and metadata
-        const blogPostData = await page.evaluate((baseUrl) => {
-          const posts = [];
-          const foundLinks = new Set();
-          
-          // Enhanced selectors for blog post links prioritizing quality
-          const postSelectors = [
-            // High priority - title links
-            'article h1 a, article h2 a, article h3 a',
-            '.post-title a, .entry-title a, .blog-post-title a',
-            'h1 a[href*="/blog/"], h2 a[href*="/blog/"], h3 a[href*="/blog/"]',
-            
-            // Medium priority - article and post containers
-            'article > a, .post > a, .entry > a',
-            'article a[href*="/blog/"], article a[href*="/post/"], article a[href*="/news/"]',
-            '.blog-post a, .post-content a, .entry-content a',
-            
-            // Lower priority - general links within blog context
-            '.post a, .article a, .blog-item a',
-            'a[href*="/blog/"], a[href*="/post/"], a[href*="/news/"]',
-            'a[href*="/articles/"], a[href*="/insights/"]'
-          ];
-          
-          // Process selectors in priority order
-          for (const selector of postSelectors) {
-            const elements = document.querySelectorAll(selector);
-            
-            elements.forEach((link, index) => {
-              if (foundLinks.size >= 50) return; // Global limit for performance
-              
-              let href = link.href;
-              if (!href) return;
-              
-              // Ensure absolute URL
-              if (href.startsWith('/')) {
-                const urlObj = new URL(baseUrl);
-                href = `${urlObj.protocol}//${urlObj.host}${href}`;
-              }
-              
-              // Skip duplicates and invalid URLs
-              if (foundLinks.has(href)) return;
-              
-              // Enhanced URL filtering
-              const urlObj = new URL(href);
-              const baseHost = new URL(baseUrl).host;
-              
-              // Must be same domain
-              if (!href.includes(baseHost)) return;
-              
-              // Skip if same as base URL or just blog index
-              if (href === baseUrl || href === baseUrl + '/' || href.match(/\/(blog|news|articles)\/?\s*$/)) return;
-              
-              // Skip navigation, tag, category, and admin URLs
-              if (href.match(/\/(tag|category|archive|admin|wp-admin|login|search|contact|about|privacy)/i)) return;
-              
-              // Skip non-content URLs (CSS, JS, images, etc.)
-              if (href.match(/\.(css|js|jpg|jpeg|png|gif|svg|pdf|zip)$/i)) return;
-              
-              // Prefer URLs that look like individual posts
-              const isLikelyPost = href.match(/\/[a-z0-9-]+\/?$/) || // slug pattern
-                                  href.match(/\/\d{4}\/\d{2}\//) || // date pattern
-                                  href.match(/\/blog\/[^\/]+/) || // blog/post-name
-                                  href.match(/\/post\/[^\/]+/) || // post/post-name
-                                  href.match(/\/news\/[^\/]+/); // news/article-name
-              
-              foundLinks.add(href);
-              
-              // Extract enhanced metadata
-              const article = link.closest('article') || 
-                             link.closest('.post') || 
-                             link.closest('.entry') ||
-                             link.closest('.blog-item') ||
-                             link.closest('.news-item');
-              
-              const titleText = link.textContent?.trim() || 
-                               link.querySelector('h1, h2, h3, h4')?.textContent?.trim() ||
-                               link.title || '';
-              
-              let publishDate = null;
-              let author = null;
-              let excerpt = null;
-              let featuredImage = null;
-              
-              if (article) {
-                // Enhanced date extraction
-                const dateEl = article.querySelector('time, .date, .published, .post-date, .entry-date, [datetime]');
-                if (dateEl) {
-                  publishDate = dateEl.getAttribute('datetime') || 
-                               dateEl.getAttribute('data-date') ||
-                               dateEl.textContent?.trim();
-                }
-                
-                // Enhanced author extraction
-                const authorEl = article.querySelector('.author, .by-author, .post-author, .entry-author, [rel="author"]');
-                if (authorEl) {
-                  author = authorEl.textContent?.replace(/by\s+/i, '').trim();
-                }
-                
-                // Enhanced excerpt extraction
-                const excerptEl = article.querySelector('.excerpt, .summary, .post-excerpt, .entry-summary, p:not(.meta):not(.date)');
-                if (excerptEl) {
-                  excerpt = excerptEl.textContent?.trim().slice(0, 250);
-                }
-                
-                // Featured image extraction
-                const imgEl = article.querySelector('img');
-                if (imgEl && imgEl.src) {
-                  featuredImage = imgEl.src;
-                }
-              }
-              
-              if (titleText.length > 0) {
-                posts.push({
-                  url: href,
-                  title: titleText,
-                  publishDate,
-                  author,
-                  excerpt,
-                  featuredImage,
-                  isLikelyPost: !!isLikelyPost,
-                  discoveredFrom: 'blog_index',
-                  priority: isLikelyPost ? 1 : 2 // Higher priority for likely posts
-                });
-              }
-            });
-            
-            // If we found good quality posts, we can stop early
-            if (posts.filter(p => p.isLikelyPost).length >= 10) break;
+      const postSelectors = [
+        'article h1 a, article h2 a, article h3 a',
+        '.post-title a, .entry-title a, .blog-post-title a',
+        'h1 a[href*="/blog/"], h2 a[href*="/blog/"], h3 a[href*="/blog/"]',
+        'article > a, .post > a, .entry > a',
+        'article a[href*="/blog/"], article a[href*="/post/"], article a[href*="/news/"]',
+        '.blog-post a, .post-content a, .entry-content a',
+        '.post a, .article a, .blog-item a',
+        'a[href*="/blog/"], a[href*="/post/"], a[href*="/news/"], a[href*="/articles/"], a[href*="/insights/"]'
+      ];
+      for (const selector of postSelectors) {
+        if (foundLinks.size >= 50) break;
+        $(selector).each((_, el) => {
+          if (foundLinks.size >= 50) return false;
+          let href = $(el).attr('href');
+          if (!href) return;
+          try {
+            href = new URL(href, pageUrl).href;
+          } catch {
+            return;
           }
-          
-          return posts;
-        }, pageUrl);
-
-        posts.push(...blogPostData);
-        
-      } finally {
-        if (browser) {
-          await browser.close();
-        }
+          if (foundLinks.has(href)) return;
+          const urlObj = new URL(href);
+          if (urlObj.hostname.replace(/^www\./, '') !== baseHost.replace(/^www\./, '')) return;
+          if (href === pageUrl || href === pageUrl.replace(/\/?$/, '/') || /\/(blog|news|articles)\/?\s*$/i.test(urlObj.pathname)) return;
+          if (/\/(tag|category|archive|admin|wp-admin|login|search|contact|about|privacy)/i.test(href)) return;
+          if (/\.(css|js|jpg|jpeg|png|gif|svg|pdf|zip)$/i.test(href)) return;
+          const isLikelyPost = /\/[a-z0-9-]+\/?$/i.test(urlObj.pathname) || /\/\d{4}\/\d{2}\//.test(urlObj.pathname) || /\/blog\/[^/]+/.test(href) || /\/post\/[^/]+/.test(href) || /\/news\/[^/]+/.test(href);
+          foundLinks.add(href);
+          const article = $(el).closest('article, .post, .entry, .blog-item, .news-item');
+          let titleText = $(el).text().trim() || $(el).find('h1, h2, h3, h4').first().text().trim() || $(el).attr('title') || '';
+          let publishDate = null;
+          let author = null;
+          let excerpt = null;
+          let featuredImage = null;
+          if (article.length) {
+            const dateEl = article.find('time, .date, .published, .post-date, .entry-date, [datetime]').first();
+            if (dateEl.length) publishDate = dateEl.attr('datetime') || dateEl.attr('data-date') || dateEl.text().trim();
+            const authorEl = article.find('.author, .by-author, .post-author, .entry-author, [rel="author"]').first();
+            if (authorEl.length) author = authorEl.text().replace(/by\s+/i, '').trim();
+            const excerptEl = article.find('.excerpt, .summary, .post-excerpt, .entry-summary, p').first();
+            if (excerptEl.length) excerpt = excerptEl.text().trim().slice(0, 250);
+            const imgEl = article.find('img').first();
+            if (imgEl.length && imgEl.attr('src')) featuredImage = imgEl.attr('src');
+          }
+          if (titleText.length > 0) {
+            posts.push({
+              url: href,
+              title: titleText,
+              publishDate,
+              author,
+              excerpt,
+              featuredImage,
+              isLikelyPost: !!isLikelyPost,
+              discoveredFrom: 'blog_index',
+              priority: isLikelyPost ? 1 : 2
+            });
+          }
+        });
+        if (posts.filter((p) => p.isLikelyPost).length >= 10) break;
       }
-      
       return posts;
     } catch (error) {
       console.warn(`Failed to find blog posts on ${pageUrl}:`, error.message);
@@ -2101,1049 +1242,82 @@ export class WebScraperService {
   }
   
   /**
-   * Scrape individual blog post with enhanced content extraction
+   * Scrape individual blog post using scrapeWebsite (Cheerio/Cloudflare).
    */
   async scrapeBlogPost(postUrl) {
-    // Normalize the URL to ensure consistency
     const normalizedUrl = this.normalizeUrl(postUrl);
-    
-    let browser;
     try {
-      browser = await puppeteer.launch(await this.getPuppeteerConfig());
-
-      const page = await browser.newPage();
-      await page.setUserAgent(this.userAgent);
-      await page.goto(normalizedUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      
-      // Wait longer for React SPAs and dynamic content to fully load
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // For heavily JS-dependent sites, wait for meaningful content to appear
-      await page.waitForFunction(() => {
-        // Check for paragraphs being present (sign of content loading)
-        const paragraphs = document.querySelectorAll('p');
-        if (paragraphs.length > 2) {
-          const totalText = Array.from(paragraphs)
-            .map(p => p.innerText || p.textContent || '')
-            .join(' ')
-            .trim();
-          if (totalText.length > 100) {
-            return true;
-          }
-        }
-        
-        // Fallback: check if body has substantial text content
-        const bodyText = document.body ? (document.body.innerText || document.body.textContent || '') : '';
-        return bodyText.length > 1000; // Substantial content loaded
-      }, { timeout: 15000, polling: 1000 }).catch(() => {
-        console.log('⚠️ Dynamic content wait timeout - proceeding with best effort extraction');
-      });
-      
-      // Additional wait to ensure rendering is complete
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const postData = await page.evaluate((originalUrl) => {
-        console.log('🔍 Starting blog post content extraction for:', originalUrl);
-        
-        // Extract post metadata first (before removing elements for CTA analysis)
-        const title = document.querySelector('h1')?.textContent?.trim() || 
-                     document.title || '';
-        console.log('📄 Title found:', title);
-
-        // Enhanced content extraction for React SPAs and dynamic sites
-        const contentSelectors = [
-          'article .entry-content',
-          'article .post-content', 
-          'article .content',
-          '.post-body',
-          '.entry-content',
-          '.post-content',
-          '.blog-content',
-          '.post',
-          '.content',
-          '[class*="content"]',
-          '[class*="post"]',
-          '[class*="article"]',
-          'article',
-          'main',
-          'body'
-        ];
-        
-        let content = '';
-        let bestContent = '';
-        let bestLength = 0;
-        let selectorUsed = 'none';
-        
-        console.log('🎯 Trying content selectors...');
-        
-        // Try multiple selectors and pick the one with the most content
-        for (const selector of contentSelectors) {
-          const elements = document.querySelectorAll(selector);
-          console.log(`🔍 Selector "${selector}" found ${elements.length} elements`);
-          
-          for (const element of elements) {
-            if (element) {
-              const elementText = element.innerText || element.textContent || '';
-              const cleanText = elementText.trim();
-              
-              console.log(`📊 Selector "${selector}" content length: ${cleanText.length}`);
-              
-              // Skip if it's just navigation or very short content
-              if (cleanText.length > 100 && cleanText.length > bestLength) {
-                // Check if this element contains mostly text content vs navigation
-                const paragraphs = element.querySelectorAll('p').length;
-                const links = element.querySelectorAll('a').length;
-                
-                console.log(`📊 Selector "${selector}" - paragraphs: ${paragraphs}, links: ${links}`);
-                
-                // Prefer elements with more paragraphs than links (content vs navigation)
-                if (paragraphs > 0 && (paragraphs >= links || cleanText.length > 500)) {
-                  bestContent = cleanText;
-                  bestLength = cleanText.length;
-                  selectorUsed = selector;
-                  console.log(`✅ New best content found with selector "${selector}": ${cleanText.length} chars`);
-                }
-              }
-            }
-          }
-        }
-        
-        content = bestContent || content;
-        
-        console.log(`🎯 Best content selector used: "${selectorUsed}" with ${bestLength} characters`);
-        
-        // If still no content, try aggressive fallback extraction
-        if (content.length < 50) {
-          console.log('⚠️ Content too short, trying aggressive fallback extraction...');
-          
-          // Method 1: Look for any meaningful text in paragraphs
-          const paragraphs = Array.from(document.querySelectorAll('p'))
-            .map(p => p.innerText || p.textContent || '')
-            .filter(text => text.trim().length > 20)
-            .join(' ')
-            .trim();
-            
-          console.log(`📄 Fallback method 1 - paragraphs extraction: ${paragraphs.length} characters`);
-            
-          if (paragraphs.length > content.length) {
-            content = paragraphs;
-            selectorUsed = 'paragraphs_fallback';
-            console.log('✅ Using paragraphs fallback');
-          }
-          
-          // Method 2: If still no content, extract from all text nodes
-          if (content.length < 50) {
-            const walker = document.createTreeWalker(
-              document.body,
-              NodeFilter.SHOW_TEXT,
-              {
-                acceptNode: function(node) {
-                  // Skip script, style, and other non-content elements
-                  const parent = node.parentElement;
-                  if (!parent) return NodeFilter.FILTER_REJECT;
-                  
-                  const tagName = parent.tagName.toLowerCase();
-                  if (['script', 'style', 'noscript', 'svg', 'path'].includes(tagName)) {
-                    return NodeFilter.FILTER_REJECT;
-                  }
-                  
-                  const text = node.textContent.trim();
-                  // Accept text nodes with meaningful content
-                  return text.length > 10 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-                }
-              }
-            );
-            
-            const textNodes = [];
-            let node;
-            while (node = walker.nextNode()) {
-              const text = node.textContent.trim();
-              if (text.length > 10) {
-                textNodes.push(text);
-              }
-            }
-            
-            const extractedText = textNodes.join(' ').trim();
-            if (extractedText.length > content.length) {
-              content = extractedText;
-            }
-          }
-          
-          // Method 3: Last resort - try body text directly
-          if (content.length < 50) {
-            const bodyText = document.body ? (document.body.innerText || document.body.textContent || '').trim() : '';
-            // Filter out obvious CSS/JS content
-            if (bodyText.length > 100 && !bodyText.includes('font-family') && !bodyText.includes('.css-')) {
-              content = bodyText.substring(0, 10000); // Limit to reasonable size
-            }
-          }
-        }
-
-        // Extract metadata
-        const metaDescription = document.querySelector('meta[name="description"]')?.content || '';
-        
-        // Look for publish date
-        let publishDate = null;
-        const dateSelectors = ['time', '.date', '.published', '.post-date', '[datetime]'];
-        for (const selector of dateSelectors) {
-          const dateEl = document.querySelector(selector);
-          if (dateEl) {
-            publishDate = dateEl.getAttribute('datetime') || 
-                         dateEl.getAttribute('content') ||
-                         dateEl.textContent?.trim();
-            if (publishDate) break;
-          }
-        }
-
-        // Look for author
-        let author = null;
-        const authorSelectors = ['.author', '.by-author', '.post-author', '[rel="author"]'];
-        for (const selector of authorSelectors) {
-          const authorEl = document.querySelector(selector);
-          if (authorEl) {
-            author = authorEl.textContent?.trim();
-            if (author) break;
-          }
-        }
-
-        // Extract headings for structure analysis
-        const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4'))
-          .map(h => ({
-            level: parseInt(h.tagName.charAt(1)),
-            text: h.textContent?.trim()
-          }))
-          .filter(h => h.text && h.text.length > 0)
-          .slice(0, 15);
-
-        // Extract internal and external links
-        const links = Array.from(document.querySelectorAll('a[href]'))
-          .map(a => ({
-            url: a.href,
-            text: a.textContent?.trim(),
-            isInternal: a.href.includes(window.location.host)
-          }))
-          .filter(link => link.text && link.text.length > 0)
-          .slice(0, 20);
-
-        const internalLinks = links.filter(l => l.isInternal);
-        const externalLinks = links.filter(l => !l.isInternal);
-
-        // Extract CTAs from the blog post (before removing elements)
-        const ctaElements = [];
-
-        // Navigation link filter - these are NOT conversion CTAs
-        const navigationPatterns = [
-          /blog/i,
-          /cart/i,
-          /about/i,
-          /home/i,
-          /services/i,
-          /products/i,
-          /gallery/i,
-          /portfolio/i,
-          /team/i,
-          /careers/i,
-          /faq/i,
-          /privacy/i,
-          /terms/i
-        ];
-
-        const isNavigationLink = (href, text) => {
-          if (!href && !text) return false;
-
-          const hrefLower = (href || '').toLowerCase();
-          const textLower = (text || '').toLowerCase();
-
-          // Check if href or text matches navigation patterns
-          return navigationPatterns.some(pattern =>
-            pattern.test(hrefLower) || pattern.test(textLower)
-          );
-        };
-
-        // Unified conversion-focused CTA selectors
-        const ctaSelectors = [
-          // Contact CTAs
-          { selector: 'a[href*="contact"]', type: 'contact_link' },
-          { selector: 'button[class*="contact"]', type: 'contact_link' },
-          { selector: 'a[href^="mailto:"]', type: 'contact_link' },
-          { selector: 'a[href^="tel:"]', type: 'phone_link' },
-
-          // Scheduling CTAs
-          { selector: 'a[href*="schedule"]', type: 'schedule_link' },
-          { selector: 'a[href*="book"]', type: 'schedule_link' },
-          { selector: 'a[href*="appointment"]', type: 'schedule_link' },
-          { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
-
-          // Consultation CTAs
-          { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
-
-          // Demo/Trial CTAs
-          { selector: 'a[href*="demo"]', type: 'demo_link' },
-          { selector: 'a[href*="trial"]', type: 'trial_link' },
-          { selector: 'a[href*="free"]', type: 'trial_link' },
-
-          // Purchase CTAs
-          { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
-          { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
-
-          // Request CTAs
-          { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
-          { selector: 'button[class*="request"]', type: 'request_link' },
-
-          // Signup/Subscribe CTAs
-          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
-          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
-
-          // Generic CTA classes
-          { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
-          { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
-
-          // Form CTAs
-          { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
-          { selector: 'input[type="email"]', type: 'email_capture' },
-
-          // Button CTAs (generic, filtered by context)
-          { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
-        ];
-
-        for (const { selector, type } of ctaSelectors) {
-          const elements = document.querySelectorAll(selector);
-          
-          elements.forEach((el, index) => {
-            if (index >= 8) return; // Limit per type for blog posts
-
-            const text = el.textContent?.trim() || el.placeholder || el.value || '';
-            const href = el.href || el.action || '';
-
-            // Enhanced type classification for custom components
-            let actualType = type;  // Start with selector type
-            const lowerText = text.toLowerCase();
-            const lowerHref = href.toLowerCase();
-
-            // Override type if text/href indicates specific CTA type
-            if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
-                lowerText.includes('send us a message')) {
-              actualType = 'contact_link';
-            } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
-                       lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
-              actualType = 'phone_link';
-            } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
-                       lowerText.includes('reach us') || lowerText.includes('reach out')) {
-              actualType = 'contact_link';
-            } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
-                       lowerText.includes('appointment')) {
-              actualType = 'schedule_link';
-            }
-
-            if (!text && !href) return;
-
-            // Filter out navigation links
-            if (isNavigationLink(href, text)) {
-              console.log('🚫 [CTA DEBUG] Filtered out navigation link:', { href, text, selector: type });
-              return;
-            }
-
-            // Validate CTA text
-            if (!text || text.length < 2 || text.length > 100) return;
-
-            // Skip generic/meaningless text
-            const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
-            if (genericTexts.includes(text.toLowerCase())) return;
-
-            // Determine placement
-            let placement = 'unknown';
-            const inNav = el.closest('nav, .nav, .navigation') !== null;
-            if (el.closest('header, .header')) placement = 'header';
-            else if (el.closest('footer, .footer')) placement = 'footer';
-            else if (inNav) placement = 'navigation';
-            else if (el.closest('aside, .sidebar')) placement = 'sidebar';
-            else if (el.closest('.modal, .popup')) placement = 'modal';
-            else if (el.closest('article, .post-content, .entry-content')) placement = 'article_content';
-            else placement = 'main_content';
-
-            // Skip navigation links in navigation placement
-            if (inNav && isNavigationLink(href, text)) {
-              console.log('🚫 [CTA DEBUG] Navigation link in nav element, skipping:', { href, text });
-              return;
-            }
-
-            // Get surrounding context for analysis
-            const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
-
-            ctaElements.push({
-              type: actualType,
-              text: text.slice(0, 100),
-              href: href.slice(0, 200),
-              placement,
-              context,
-              className: el.className || '',
-              tagName: el.tagName.toLowerCase(),
-              page_url: originalUrl
-            });
-          });
-        }
-
-        console.log('📊 [CTA DEBUG] Blog CTA extraction summary:', {
-          url: originalUrl,
-          totalCTAsFound: ctaElements.length,
-          ctaTypes: ctaElements.reduce((acc, cta) => {
-            acc[cta.type] = (acc[cta.type] || 0) + 1;
-            return acc;
-          }, {}),
-          sampleCTAs: ctaElements.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
-        });
-
-        // Extract granular visual design information with element-specific mapping
-        const visualDesign = (() => {
-          const design = {
-            // Enhanced color mapping with element associations
-            colors: {
-              primary: [],
-              background: [],
-              text: [],
-              accent: []
-            },
-            // Granular element-specific design patterns
-            elementPatterns: {},
-            // Traditional typography info (kept for compatibility)
-            typography: {
-              fonts: [],
-              headingSizes: [],
-              bodySize: null,
-              lineHeight: null
-            },
-            layout: {
-              maxWidth: null,
-              spacing: [],
-              borderRadius: []
-            },
-            contentStructure: {
-              paragraphCount: 0,
-              listCount: 0,
-              blockquoteCount: 0,
-              codeBlockCount: 0,
-              imageCount: 0
-            }
-          };
-
-          try {
-            // Helper function to convert RGB to hex for consistency
-            const rgbToHex = (rgb) => {
-              if (!rgb || rgb === 'transparent' || rgb === 'rgba(0, 0, 0, 0)') return null;
-              
-              const rgbMatch = rgb.match(/rgb\(?(\d+),\s*(\d+),\s*(\d+)/);
-              if (rgbMatch) {
-                const r = parseInt(rgbMatch[1]);
-                const g = parseInt(rgbMatch[2]);
-                const b = parseInt(rgbMatch[3]);
-                return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-              }
-              
-              const rgbaMatch = rgb.match(/rgba\(?(\d+),\s*(\d+),\s*(\d+),\s*[\d.]+/);
-              if (rgbaMatch) {
-                const r = parseInt(rgbaMatch[1]);
-                const g = parseInt(rgbaMatch[2]);
-                const b = parseInt(rgbaMatch[3]);
-                return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-              }
-              
-              return rgb.startsWith('#') ? rgb : null;
-            };
-
-            // Define element selectors and their categories for granular analysis
-            const elementCategories = {
-              'headings': {
-                'h1': document.querySelectorAll('h1'),
-                'h2': document.querySelectorAll('h2'), 
-                'h3': document.querySelectorAll('h3'),
-                'h4': document.querySelectorAll('h4'),
-                'h5': document.querySelectorAll('h5'),
-                'h6': document.querySelectorAll('h6')
-              },
-              'text': {
-                'paragraph': document.querySelectorAll('article p, .post-content p, .entry-content p, main p'),
-                'link': document.querySelectorAll('article a, .post-content a, .entry-content a, main a'),
-                'blockquote': document.querySelectorAll('blockquote')
-              },
-              'interactive': {
-                'button': document.querySelectorAll('button, .btn, .button'),
-                'form_input': document.querySelectorAll('input, textarea, select'),
-                'cta': document.querySelectorAll('.cta, [class*="call-to-action"], [class*="cta"]')
-              },
-              'layout': {
-                'container': document.querySelectorAll('article, .post-content, .entry-content, main, .container'),
-                'sidebar': document.querySelectorAll('.sidebar, .widget, .aside'),
-                'navigation': document.querySelectorAll('nav, .menu, .navigation')
-              }
-            };
-
-            // Analyze each element category for granular patterns
-            Object.keys(elementCategories).forEach(category => {
-              design.elementPatterns[category] = {};
-              
-              Object.keys(elementCategories[category]).forEach(elementType => {
-                const elements = elementCategories[category][elementType];
-                const patterns = {
-                  colors: {},
-                  typography: {},
-                  spacing: {},
-                  commonStyles: {}
-                };
-                
-                if (elements.length > 0) {
-                  // Analyze up to 5 elements of each type for patterns
-                  Array.from(elements).slice(0, 5).forEach((el, index) => {
-                    const styles = window.getComputedStyle(el);
-                    
-                    // Extract and map colors to specific elements
-                    const bgColor = rgbToHex(styles.backgroundColor);
-                    const textColor = rgbToHex(styles.color);
-                    const borderColor = rgbToHex(styles.borderColor);
-                    
-                    if (bgColor) {
-                      patterns.colors.backgroundColor = patterns.colors.backgroundColor || [];
-                      if (!patterns.colors.backgroundColor.includes(bgColor)) {
-                        patterns.colors.backgroundColor.push(bgColor);
-                      }
-                    }
-                    
-                    if (textColor) {
-                      patterns.colors.textColor = patterns.colors.textColor || [];
-                      if (!patterns.colors.textColor.includes(textColor)) {
-                        patterns.colors.textColor.push(textColor);
-                      }
-                    }
-                    
-                    if (borderColor && borderColor !== '#000000') {
-                      patterns.colors.borderColor = patterns.colors.borderColor || [];
-                      if (!patterns.colors.borderColor.includes(borderColor)) {
-                        patterns.colors.borderColor.push(borderColor);
-                      }
-                    }
-                    
-                    // Extract typography patterns
-                    const fontFamily = styles.fontFamily ? styles.fontFamily.split(',')[0].replace(/['"]/g, '').trim() : null;
-                    const fontSize = styles.fontSize;
-                    const fontWeight = styles.fontWeight;
-                    const lineHeight = styles.lineHeight;
-                    
-                    if (fontFamily) {
-                      patterns.typography.fontFamily = patterns.typography.fontFamily || [];
-                      if (!patterns.typography.fontFamily.includes(fontFamily)) {
-                        patterns.typography.fontFamily.push(fontFamily);
-                      }
-                    }
-                    
-                    if (fontSize) {
-                      patterns.typography.fontSize = patterns.typography.fontSize || [];
-                      if (!patterns.typography.fontSize.includes(fontSize)) {
-                        patterns.typography.fontSize.push(fontSize);
-                      }
-                    }
-                    
-                    if (fontWeight && fontWeight !== '400') {
-                      patterns.typography.fontWeight = patterns.typography.fontWeight || [];
-                      if (!patterns.typography.fontWeight.includes(fontWeight)) {
-                        patterns.typography.fontWeight.push(fontWeight);
-                      }
-                    }
-                    
-                    // Extract spacing and layout patterns
-                    const margin = styles.margin;
-                    const padding = styles.padding;
-                    const borderRadius = styles.borderRadius;
-                    
-                    if (margin && margin !== '0px') {
-                      patterns.spacing.margin = patterns.spacing.margin || [];
-                      if (!patterns.spacing.margin.includes(margin)) {
-                        patterns.spacing.margin.push(margin);
-                      }
-                    }
-                    
-                    if (padding && padding !== '0px') {
-                      patterns.spacing.padding = patterns.spacing.padding || [];
-                      if (!patterns.spacing.padding.includes(padding)) {
-                        patterns.spacing.padding.push(padding);
-                      }
-                    }
-                    
-                    if (borderRadius && borderRadius !== '0px') {
-                      patterns.commonStyles.borderRadius = patterns.commonStyles.borderRadius || [];
-                      if (!patterns.commonStyles.borderRadius.includes(borderRadius)) {
-                        patterns.commonStyles.borderRadius.push(borderRadius);
-                      }
-                    }
-                  });
-                  
-                  // Store the patterns for this element type
-                  design.elementPatterns[category][elementType] = {
-                    count: elements.length,
-                    patterns: patterns,
-                    // Generate readable pattern descriptions
-                    description: generateElementDescription(elementType, patterns)
-                  };
-                }
-              });
-            });
-
-            // Generate overall color palette from all elements
-            const allColors = new Set();
-            const allFonts = new Set();
-            
-            Object.values(design.elementPatterns).forEach(category => {
-              Object.values(category).forEach(elementData => {
-                const colors = elementData.patterns.colors;
-                if (colors.backgroundColor) colors.backgroundColor.forEach(c => allColors.add(c));
-                if (colors.textColor) colors.textColor.forEach(c => allColors.add(c));
-                if (colors.borderColor) colors.borderColor.forEach(c => allColors.add(c));
-                
-                const typography = elementData.patterns.typography;
-                if (typography.fontFamily) typography.fontFamily.forEach(f => allFonts.add(f));
-              });
-            });
-
-            // Convert colors to arrays (maintain compatibility with existing code)
-            design.colors.primary = Array.from(allColors).slice(0, 8);
-            design.typography.fonts = Array.from(allFonts).slice(0, 5);
-            
-            // Helper function to generate human-readable descriptions
-            function generateElementDescription(elementType, patterns) {
-              const descriptions = [];
-              
-              if (patterns.colors.textColor && patterns.colors.textColor.length > 0) {
-                descriptions.push(`Text color: ${patterns.colors.textColor.join(', ')}`);
-              }
-              
-              if (patterns.colors.backgroundColor && patterns.colors.backgroundColor.length > 0) {
-                descriptions.push(`Background: ${patterns.colors.backgroundColor.join(', ')}`);
-              }
-              
-              if (patterns.typography.fontSize && patterns.typography.fontSize.length > 0) {
-                descriptions.push(`Font size: ${patterns.typography.fontSize.join(', ')}`);
-              }
-              
-              if (patterns.typography.fontFamily && patterns.typography.fontFamily.length > 0) {
-                descriptions.push(`Font family: ${patterns.typography.fontFamily.join(', ')}`);
-              }
-              
-              return descriptions.join(' | ');
-            }
-
-            // Extract typography sizes
-            document.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(heading => {
-              const styles = window.getComputedStyle(heading);
-              const fontSize = styles.fontSize;
-              if (fontSize) {
-                design.typography.headingSizes.push({
-                  level: heading.tagName.toLowerCase(),
-                  size: fontSize,
-                  weight: styles.fontWeight
-                });
-              }
-            });
-
-            // Extract body text typography
-            const bodyEl = document.querySelector('article p, .post-content p, .entry-content p, main p');
-            if (bodyEl) {
-              const styles = window.getComputedStyle(bodyEl);
-              design.typography.bodySize = styles.fontSize;
-              design.typography.lineHeight = styles.lineHeight;
-            }
-
-            // Extract layout information
-            const mainContent = document.querySelector('article, .post-content, .entry-content, main');
-            if (mainContent) {
-              const styles = window.getComputedStyle(mainContent);
-              design.layout.maxWidth = styles.maxWidth;
-              design.layout.spacing.push(styles.padding, styles.margin);
-              design.layout.borderRadius.push(styles.borderRadius);
-            }
-
-            // Analyze content structure
-            design.contentStructure.paragraphCount = document.querySelectorAll('article p, .post-content p, .entry-content p').length;
-            design.contentStructure.listCount = document.querySelectorAll('article ul, article ol, .post-content ul, .post-content ol').length;
-            design.contentStructure.blockquoteCount = document.querySelectorAll('article blockquote, .post-content blockquote').length;
-            design.contentStructure.codeBlockCount = document.querySelectorAll('article pre, article code, .post-content pre, .post-content code').length;
-            design.contentStructure.imageCount = document.querySelectorAll('article img, .post-content img').length;
-
-          } catch (error) {
-            console.warn('Failed to extract visual design:', error);
-          }
-
-          return design;
-        })();
-
-        // Extract internal and external links before removing elements
-        const extractedLinks = (() => {
-          const internalLinks = [];
-          const externalLinks = [];
-          
-          try {
-            const domain = new URL(originalUrl).hostname;
-            
-            // Find all links within the main content area
-            const contentSelectors = [
-              'article a',
-              '.post-content a',
-              '.entry-content a',
-              '.content a',
-              'main a'
-            ];
-            
-            const allLinks = new Set();
-            contentSelectors.forEach(selector => {
-              document.querySelectorAll(selector).forEach(link => allLinks.add(link));
-            });
-            
-            Array.from(allLinks).forEach(link => {
-              const href = link.href;
-              const text = link.textContent?.trim() || '';
-              const context = link.closest('p, li, div')?.textContent?.slice(0, 100) || '';
-              
-              if (href && text && href !== originalUrl) { // Don't include self-links
-                try {
-                  const linkUrl = new URL(href);
-                  const linkData = {
-                    href,
-                    text,
-                    context: context.trim(),
-                    tag: link.tagName.toLowerCase(),
-                    className: link.className || ''
-                  };
-                  
-                  if (linkUrl.hostname === domain || linkUrl.hostname === `www.${domain}` || linkUrl.hostname === domain.replace('www.', '')) {
-                    // Internal link
-                    internalLinks.push({
-                      ...linkData,
-                      type: 'internal',
-                      linkType: href.includes('/blog/') || href.includes('/post/') || href.includes('/article/') ? 'blog' : 'page'
-                    });
-                  } else {
-                    // External link
-                    externalLinks.push({
-                      ...linkData,
-                      type: 'external',
-                      domain: linkUrl.hostname
-                    });
-                  }
-                } catch (linkError) {
-                  // Skip invalid URLs
-                }
-              }
-            });
-            
-          } catch (linkExtractionError) {
-            console.warn('Failed to extract links:', linkExtractionError);
-          }
-          
-          return { internalLinks, externalLinks };
-        })();
-
-        // Now remove unwanted elements for clean content extraction
-        // NOTE: Do NOT remove .modal, .popup, .sidebar as they may contain valid CTAs
-        const elementsToRemove = [
-          'script', 'style', 'nav', 'header', 'footer',
-          '.cookie-banner', '.advertisement', '.social-share', '.comments'
-        ];
-
-        elementsToRemove.forEach(selector => {
-          document.querySelectorAll(selector).forEach(el => el.remove());
-        });
-
-        const finalWordCount = content.split(/\s+/).filter(word => word.length > 0).length;
-        
-        console.log('📊 Final extraction results:', {
-          title: title?.substring(0, 50) + '...',
-          contentLength: content.length,
-          wordCount: finalWordCount,
-          internalLinks: extractedLinks.internalLinks.length,
-          externalLinks: extractedLinks.externalLinks.length,
-          ctas: ctaElements.length,
-          hasVisualDesign: !!visualDesign,
-          selectorUsed
-        });
-
-        return {
-          title,
-          content: content.length > 50000 ? content.slice(0, 50000) + '...' : content, // Intelligent content limit for very large posts
-          metaDescription,
-          publishDate,
-          author,
-          headings,
-          internalLinks: extractedLinks.internalLinks,
-          externalLinks: extractedLinks.externalLinks,
-          wordCount: finalWordCount,
-          url: originalUrl, // Use original input URL to maintain consistency
-          ctas: ctaElements, // Include extracted CTAs
-          visualDesign: visualDesign // Include visual design data
-        };
-      }, normalizedUrl);
-
+      const scraped = await this.scrapeWebsite(normalizedUrl);
+      const postData = {
+        title: scraped.title || '',
+        content: scraped.content || '',
+        metaDescription: scraped.metaDescription || '',
+        author: ''
+      };
       return this.cleanBlogPostContent(postData);
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
+    } catch (error) {
+      console.error('Blog post scrape error:', error);
+      throw new Error(`Failed to scrape blog post: ${error.message}`);
     }
   }
-  
+
   /**
-   * Extract CTAs (Call-to-Actions) from a page
+   * [REMOVED: legacy Puppeteer page.evaluate block for scrapeBlogPost - now uses scrapeWebsite]
+   */
+  _scrapeBlogPostPlaceholderRemoved() {
+    // Block removed; scrapeBlogPost uses scrapeWebsite + cleanBlogPostContent.
+  }
+
+  /**
+   * Extract CTAs (Call-to-Actions) from a page using scrapeWebsite (Cheerio/Cloudflare).
    */
   async extractCTAs(pageUrl) {
-    let browser;
     try {
-      browser = await puppeteer.launch(await this.getPuppeteerConfig());
-
-      const page = await browser.newPage();
-      await page.setUserAgent(this.userAgent);
-      await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      const ctas = await page.evaluate(() => {
-        const ctaElements = [];
-
-        // Navigation link filter - these are NOT conversion CTAs
-        const navigationPatterns = [
-          /blog/i,
-          /cart/i,
-          /about/i,
-          /home/i,
-          /services/i,
-          /products/i,
-          /gallery/i,
-          /portfolio/i,
-          /team/i,
-          /careers/i,
-          /faq/i,
-          /privacy/i,
-          /terms/i
-        ];
-
-        const isNavigationLink = (href, text) => {
-          if (!href && !text) return false;
-
-          const hrefLower = (href || '').toLowerCase();
-          const textLower = (text || '').toLowerCase();
-
-          // Check if href or text matches navigation patterns
-          return navigationPatterns.some(pattern =>
-            pattern.test(hrefLower) || pattern.test(textLower)
-          );
-        };
-
-        // Unified conversion-focused CTA selectors (same as blog extraction)
-        const ctaSelectors = [
-          // Contact CTAs
-          { selector: 'a[href*="contact"]', type: 'contact_link' },
-          { selector: 'button[class*="contact"]', type: 'contact_link' },
-          { selector: 'a[href^="mailto:"]', type: 'contact_link' },
-          { selector: 'a[href^="tel:"]', type: 'phone_link' },
-
-          // Scheduling CTAs
-          { selector: 'a[href*="schedule"]', type: 'schedule_link' },
-          { selector: 'a[href*="book"]', type: 'schedule_link' },
-          { selector: 'a[href*="appointment"]', type: 'schedule_link' },
-          { selector: 'button[class*="schedule"], button[class*="book"]', type: 'schedule_link' },
-
-          // Consultation CTAs
-          { selector: 'a[href*="consultation"], a[href*="consult"]', type: 'consultation_link' },
-
-          // Demo/Trial CTAs
-          { selector: 'a[href*="demo"]', type: 'demo_link' },
-          { selector: 'a[href*="trial"]', type: 'trial_link' },
-          { selector: 'a[href*="free"]', type: 'trial_link' },
-
-          // Purchase CTAs
-          { selector: 'a[href*="buy"], a[href*="purchase"], a[href*="shop"]', type: 'product_link' },
-          { selector: 'button[class*="buy"], button[class*="purchase"]', type: 'product_link' },
-
-          // Request CTAs
-          { selector: 'a[href*="request"], a[href*="quote"]', type: 'request_link' },
-          { selector: 'button[class*="request"]', type: 'request_link' },
-
-          // Signup/Subscribe CTAs
-          { selector: 'a[href*="signup"], a[href*="register"]', type: 'signup_link' },
-          { selector: 'a[href*="subscribe"], a[href*="newsletter"]', type: 'newsletter_signup' },
-
-          // Generic CTA classes
-          { selector: '[class*="cta"]:not(nav [class*="cta"]):not(.nav [class*="cta"])', type: 'cta_element' },
-          { selector: '.call-to-action a, .cta-button', type: 'cta_element' },
-
-          // Form CTAs
-          { selector: 'form:not(.search-form):not([action*="search"])', type: 'form' },
-          { selector: 'input[type="email"]', type: 'email_capture' },
-
-          // Button CTAs (generic, filtered by context)
-          { selector: 'button.btn, button.button, .btn:not(nav .btn):not(.nav .btn)', type: 'button' }
-        ];
-
-        for (const { selector, type } of ctaSelectors) {
-          const elements = document.querySelectorAll(selector);
-
-          elements.forEach((el, index) => {
-            if (index >= 10) return; // Limit per type
-
-            const text = el.textContent?.trim() || el.placeholder || el.value || '';
-            const href = el.href || '';
-
-            // Enhanced type classification for custom components
-            let actualType = type;  // Start with selector type
-            const lowerText = text.toLowerCase();
-            const lowerHref = href.toLowerCase();
-
-            // Override type if text/href indicates specific CTA type
-            if (lowerHref.includes('mailto:') || lowerText.includes('email us') ||
-                lowerText.includes('send us a message')) {
-              actualType = 'contact_link';
-            } else if (lowerHref.includes('tel:') || lowerText.includes('call us') ||
-                       lowerText.includes('phone') || lowerText.match(/\d{3}[-.\s]?\d{3}[-.\s]?\d{4}/)) {
-              actualType = 'phone_link';
-            } else if (lowerText.includes('contact us') || lowerText.includes('get in touch') ||
-                       lowerText.includes('reach us') || lowerText.includes('reach out')) {
-              actualType = 'contact_link';
-            } else if (lowerText.includes('schedule') || lowerText.includes('book') ||
-                       lowerText.includes('appointment')) {
-              actualType = 'schedule_link';
-            }
-
-            if (!text && !href) return;
-
-            // Filter out navigation links
-            if (isNavigationLink(href, text)) {
-              console.log('🚫 [CTA DEBUG] Filtered out navigation link:', { href, text, type });
-              return;
-            }
-
-            // Validate CTA text
-            if (!text || text.length < 2 || text.length > 100) return;
-
-            // Skip generic/meaningless text
-            const genericTexts = ['click here', 'here', 'link', 'button', 'more', 'read more'];
-            if (genericTexts.includes(text.toLowerCase())) return;
-
-            // Determine placement
-            let placement = 'unknown';
-            const inNav = el.closest('nav, .nav, .navigation') !== null;
-            if (el.closest('header, .header')) placement = 'header';
-            else if (el.closest('footer, .footer')) placement = 'footer';
-            else if (inNav) placement = 'navigation';
-            else if (el.closest('aside, .sidebar')) placement = 'sidebar';
-            else if (el.closest('.modal, .popup')) placement = 'modal';
-            else placement = 'main_content';
-
-            // Skip navigation links in navigation placement
-            if (inNav && isNavigationLink(href, text)) {
-              console.log('🚫 [CTA DEBUG] Navigation link in nav element, skipping:', { href, text });
-              return;
-            }
-
-            // Get surrounding context for analysis
-            const context = el.closest('section, article, div')?.textContent?.trim().slice(0, 200) || '';
-
-            ctaElements.push({
-              type: actualType,
-              text: text.slice(0, 100),
-              href: href.slice(0, 200),
-              placement,
-              context,
-              className: el.className || '',
-              tagName: el.tagName.toLowerCase()
-            });
-          });
-        }
-
-        console.log('📊 [CTA DEBUG] Main CTA extraction summary:', {
-          totalCTAsFound: ctaElements.length,
-          ctaTypes: ctaElements.reduce((acc, cta) => {
-            acc[cta.type] = (acc[cta.type] || 0) + 1;
-            return acc;
-          }, {}),
-          sampleCTAs: ctaElements.slice(0, 3).map(c => ({ text: c.text, type: c.type, href: c.href.substring(0, 50) }))
-        });
-
-        return ctaElements;
-      });
-
-      return ctas;
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
+      const content = await this.scrapeWebsite(pageUrl);
+      const ctas = content.ctas || [];
+      return ctas.map((c) => ({ ...c, page_url: c.page_url || pageUrl }));
+    } catch (error) {
+      console.error('CTA extraction error:', error);
+      return [];
     }
   }
-  
+
   /**
-   * Extract internal linking structure
+   * Extract internal linking structure using HTTP + Cheerio (no browser).
    */
   async extractInternalLinks(pageUrl) {
     try {
-      const pageContent = await this.scrapeWithPuppeteer(pageUrl);
-      
-      // Use Puppeteer to get all internal links with context
-      let browser;
-      try {
-        browser = await puppeteer.launch({
-          headless: 'new',
-          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        });
-
-        const page = await browser.newPage();
-        await page.setUserAgent(this.userAgent);
-        await page.goto(pageUrl, { waitUntil: 'networkidle0', timeout: this.timeout });
-
-        const linkStructure = await page.evaluate(() => {
-          const host = window.location.host;
-          const links = [];
-          
-          document.querySelectorAll('a[href]').forEach((link, index) => {
-            if (index >= 50) return; // Limit total links
-            
-            const href = link.href;
-            const text = link.textContent?.trim();
-            
-            if (!text || !href.includes(host) || href === window.location.href) return;
-            
-            // Categorize link type
-            let linkType = 'page';
-            if (href.includes('/blog/') || href.includes('/post/')) linkType = 'blog';
-            else if (href.includes('/product/') || href.includes('/service/')) linkType = 'product';
-            else if (href.includes('/about')) linkType = 'about';
-            else if (href.includes('/contact')) linkType = 'contact';
-            
-            // Get context
-            const context = link.closest('nav, .nav, .menu') ? 'navigation' : 
-                           link.closest('footer') ? 'footer' :
-                           link.closest('sidebar, .sidebar') ? 'sidebar' : 'content';
-            
-            links.push({
-              url: href,
-              text: text.slice(0, 100),
-              linkType,
-              context,
-              anchorText: text
-            });
-          });
-
-          return {
-            internalLinks: links,
-            totalLinksFound: links.length
-          };
-        });
-
-        return linkStructure;
-      } finally {
-        if (browser) {
-          await browser.close();
-        }
+      const response = await axios.get(pageUrl, {
+        headers: { 'User-Agent': this.userAgent, Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        timeout: this.timeout,
+        maxRedirects: 5
+      });
+      if (!response.data || typeof response.data !== 'string') {
+        return { internalLinks: [], totalLinksFound: 0 };
       }
+      const extracted = this._extractContentAndCTAsFromHTML(response.data, pageUrl);
+      const raw = extracted.internalLinks || [];
+      const domain = new URL(pageUrl).hostname;
+      const internalLinks = raw.slice(0, 50).map((link) => {
+        const href = typeof link === 'string' ? link : link.url;
+        const text = typeof link === 'object' && link.text ? link.text : '';
+        let linkType = 'page';
+        if (href.includes('/blog/') || href.includes('/post/')) linkType = 'blog';
+        else if (href.includes('/product/') || href.includes('/service/')) linkType = 'product';
+        else if (href.includes('/about')) linkType = 'about';
+        else if (href.includes('/contact')) linkType = 'contact';
+        return {
+          url: href,
+          text: (text || '').slice(0, 100),
+          linkType,
+          context: (typeof link === 'object' && link.context) ? link.context : 'content',
+          anchorText: (text || '').slice(0, 100)
+        };
+      });
+      return { internalLinks, totalLinksFound: internalLinks.length };
     } catch (error) {
       console.error('Internal links extraction error:', error);
-      return {
-        internalLinks: [],
-        totalLinksFound: 0,
-        error: error.message
-      };
+      return { internalLinks: [], totalLinksFound: 0, error: error.message };
     }
   }
 
