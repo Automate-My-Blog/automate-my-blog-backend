@@ -67,3 +67,7 @@ Thumbs.db
 access_token.txt
 login_test.json
 test_login.json
+
+# Runtime / trigger files
+.restart-trigger
+.vercel-trigger

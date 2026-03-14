@@ -13,16 +13,15 @@
 | `npm run setup-test-db` | Prepare test database |
 | `npm run worker` | Start BullMQ job worker |
 
-## Root-Level One-Off Scripts
+## Root and archived one-off scripts
 
-These scripts in the project root are typically run manually for debugging, migrations, or one-off fixes. They are not part of the main application.
+**In root (used by npm):** `verify-connection.js` (`npm run verify-db`), `setup-database.js` (`npm run setup-db`).
 
-**Debug/diagnostic:** `debug_*.js`, `check_*.js`, `extract-recent-logs.js`, `diagnose-*.js`  
-**Migrations/fixes:** `fix-*.js`, `run-migration-*.js`, `run-essential-migration.js`, `add-*.js`  
-**Testing/validation:** `test-*.js` (standalone, not in `tests/`), `comprehensive-validation-test.js`, `validate-*.js`  
-**Setup/utilities:** `create-test-user.js`, `create-org-intelligence.js`
-
-If a script is no longer needed, consider moving it to `scripts/archive/` or removing it.
+**Archived:** Former root one-off scripts (debug, check, fix, run-migration-*, test-*, validate-*, etc.) have been moved to **`scripts/archive/root-one-off/`**. Run with:
+```bash
+node scripts/archive/root-one-off/<script-name>.js
+```
+See `scripts/archive/root-one-off/README.md` for the full list and categories.
 
 ## scripts/ (staging & real-world flows)
 
