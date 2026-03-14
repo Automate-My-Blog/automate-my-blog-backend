@@ -210,6 +210,8 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
     for (const cta of scrapedContent.ctas) {
       try {
         const n = normalizeCTA(cta);
+        const pageUrl = cta.page_url || url;
+        const pageType = pageUrl === url || pageUrl.replace(/\/?$/, '') === url.replace(/\/?$/, '') ? 'homepage' : 'static_page';
         await db.query(
           `INSERT INTO cta_analysis (
             organization_id, page_url, cta_text, cta_type, placement, href, context, class_name, tag_name,
@@ -218,8 +220,8 @@ async function persistAnalysis(url, analysis, scrapedContent, { userId, sessionI
           ON CONFLICT (organization_id, page_url, cta_text, placement) DO UPDATE SET
             cta_type = EXCLUDED.cta_type, href = EXCLUDED.href, context = EXCLUDED.context,
             data_source = EXCLUDED.data_source, scraped_at = EXCLUDED.scraped_at`,
-          [organizationId, url, n.cta_text, n.cta_type, n.placement, n.href, n.context, n.class_name, n.tag_name,
-            n.conversion_potential, n.visibility_score, 'homepage', 'website_scraping', 'scraped']
+          [organizationId, pageUrl, n.cta_text, n.cta_type, n.placement, n.href, n.context, n.class_name, n.tag_name,
+            n.conversion_potential, n.visibility_score, pageType, 'website_scraping', 'scraped']
         );
       } catch (e) {
         console.warn('CTA persist skip:', e.message);
@@ -703,7 +705,9 @@ export async function runWebsiteAnalysisPipeline(input, context = {}, opts = {})
 
   /** Progress 2–10% during scrape; granular phases published to stream as thoughts. */
   const SCRAPE_PROGRESS = {
-    start: 2, validate: 3, 'method-puppeteer': 4, config: 4, 'browser-launch': 5,
+    start: 2, validate: 3, 'method-cheerio-fast': 3, 'method-cheerio-fallback': 4,
+    'cf-request': 5, 'cf-wait': 6, 'cf-parse': 8,
+    'method-puppeteer': 4, config: 4, 'browser-launch': 5,
     navigate: 6, 'wait-content': 7, extract: 8, ctas: 9,
     'fallback-playwright': 9, 'fallback-browserless': 9, 'fallback-cheerio': 9,
     'api-request': 5, 'parse-html': 7, fetch: 5
