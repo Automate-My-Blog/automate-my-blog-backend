@@ -189,6 +189,51 @@ describe('wordpress-publish', () => {
     expect(body.content).not.toContain('![TWEET:');
   });
 
+  it('uploads real generated image URLs (non-placeholder) to WordPress media', async () => {
+    const postResponse = { id: 2, link: 'https://wp.example.com/?p=2' };
+    const mediaResponse = { id: 20, source_url: 'https://wp.example.com/wp-content/uploads/2026/03/generated.png' };
+    const tinyPng = new ArrayBuffer(8);
+    globalThis.fetch.mockImplementation((url, opts) => {
+      const u = typeof url === 'string' ? url : url?.url || '';
+      if (u.includes('cdn.example.com/generated.png')) {
+        return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(tinyPng) });
+      }
+      if (u.includes('/wp/v2/media') && opts?.method === 'POST' && !u.match(/\/media\/\d+$/)) {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          text: async () => JSON.stringify(mediaResponse),
+          json: async () => mediaResponse
+        });
+      }
+      if (u.includes('/wp/v2/posts')) {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          text: async () => JSON.stringify(postResponse),
+          json: async () => postResponse
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${u}`));
+    });
+
+    await publishToWordPress(
+      { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
+      {
+        title: 'Post with real image',
+        content: 'Text.\n\n<img src="https://cdn.example.com/generated.png" alt="AI generated" />\n\nMore.'
+      }
+    );
+
+    const postCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/wp/v2/posts'));
+    expect(postCalls.length).toBe(1);
+    const [, postOpts] = postCalls[0];
+    const body = JSON.parse(postOpts.body);
+    expect(body.content).toContain('https://wp.example.com/wp-content/uploads/2026/03/generated.png');
+    expect(body.content).not.toContain('cdn.example.com/generated.png');
+    expect(body.featured_media).toBe(20);
+  });
+
   it('strips index-based and literal placeholders so they do not appear on WordPress', async () => {
     const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
     const mediaResponse = { id: 5, source_url: 'https://wp.example.com/wp-content/uploads/2026/03/image.png' };

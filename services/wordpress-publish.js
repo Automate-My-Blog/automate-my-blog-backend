@@ -4,8 +4,8 @@
  *
  * Workflow:
  * 1. Convert post content from markdown to HTML; replace tweet placeholders with Twitter oEmbed.
- * 2. Upload placeholder images (via.placeholder.com) to the WordPress media library (POST /wp/v2/media)
- *    and replace img src with the uploaded media URLs so images are served from WordPress.
+ * 2. Upload all external images (placeholders and real generated images) to the WordPress media library
+ *    (POST /wp/v2/media) and replace img src with the uploaded media URLs so images are served from WordPress.
  * 3. Create the post (POST /wp/v2/posts) with the final content and optional featured_media (first image id).
  *
  * Supports two REST URL styles for both posts and media:
@@ -81,23 +81,29 @@ async function prepareContentForWordPress(content) {
 }
 
 /**
- * Upload placeholder images (via.placeholder.com) to WordPress media and replace img src with media URLs.
- * Returns { contentHtml, featuredMediaId } (featuredMediaId is first uploaded image id or 0).
+ * Upload all external images (placeholders and real generated images) to WordPress media and replace img src.
+ * Skips URLs that are already on the same WordPress site. Returns { contentHtml, featuredMediaId }.
  */
-async function uploadPlaceholderImagesAndReplace(ctx, contentHtml) {
-  const matches = [...contentHtml.matchAll(VIA_PLACEHOLDER_SRC_RE)];
-  const uniqueUrls = [...new Set(matches.map((m) => m[1]))];
+async function uploadExternalImagesAndReplace(ctx, contentHtml) {
+  const matches = [...contentHtml.matchAll(EXTERNAL_IMAGE_SRC_RE)];
+  let uniqueUrls = [...new Set(matches.map((m) => m[1]))];
+  try {
+    const wpOrigin = new URL(String(ctx.baseUrl || '').trim().replace(/\/+$/, '') || 'https://dummy').origin;
+    uniqueUrls = uniqueUrls.filter((url) => new URL(url).origin !== wpOrigin);
+  } catch {
+    // keep all if baseUrl invalid
+  }
   if (uniqueUrls.length === 0) return { contentHtml, featuredMediaId: 0 };
   const urlToMedia = new Map();
   for (let i = 0; i < uniqueUrls.length; i++) {
     const url = uniqueUrls[i];
     try {
-      const slug = url.includes('text=Chart') ? 'chart.png' : 'image.png';
-      const media = await uploadImageToWordPressMedia(ctx, url, { filename: slug });
+      const filename = filenameFromImageUrl(url);
+      const media = await uploadImageToWordPressMedia(ctx, url, { filename });
       urlToMedia.set(url, media);
       if (i < uniqueUrls.length - 1) await new Promise((r) => setTimeout(r, 200));
     } catch (e) {
-      console.warn('WordPress media upload failed for placeholder:', url, e?.message || e);
+      console.warn('WordPress media upload failed for image:', url.substring(0, 80), e?.message || e);
     }
   }
   let out = contentHtml;
@@ -118,13 +124,24 @@ function buildMediaUrl(baseUrl, useIndexPhpRestRoute) {
   return useIndexPhpRestRoute ? `${base}${WP_MEDIA_REST_ROUTE}` : `${base}${WP_MEDIA_PATH}`;
 }
 
-/** Match img src URLs we use for placeholders (via.placeholder.com). */
-const VIA_PLACEHOLDER_SRC_RE = /src="(https:\/\/via\.placeholder\.com\/[^"]+)"/g;
+/** Match any external img src (https or http) so we upload placeholders and real generated images. */
+const EXTERNAL_IMAGE_SRC_RE = /src="(https?:\/\/[^"]+)"/g;
+
+/** Derive a safe filename for media upload from an image URL. */
+function filenameFromImageUrl(url) {
+  try {
+    const pathname = new URL(url).pathname;
+    const base = pathname.split('/').pop() || '';
+    return /\.(png|jpe?g|gif|webp)$/i.test(base) ? base : 'image.png';
+  } catch {
+    return 'image.png';
+  }
+}
 
 /**
  * Upload an image to the WordPress media library via REST API.
  * @param {object} ctx - { baseUrl, auth, useIndexPhpRestRoute }
- * @param {string} imageUrl - URL of the image to upload (e.g. https://via.placeholder.com/...)
+ * @param {string} imageUrl - URL of the image to upload (e.g. placeholder or generated image URL)
  * @param {{ filename?: string, alt?: string }} [opts] - optional filename and alt text
  * @returns {Promise<{ id: number, source_url: string }>}
  */
@@ -210,7 +227,7 @@ export async function publishToWordPress(credentials, post, opts = {}) {
   const ctx = { baseUrl, auth, useIndexPhpRestRoute: useIndexPhp };
   const status = opts.status === 'draft' ? 'draft' : 'publish';
   let contentHtml = await prepareContentForWordPress(post.content);
-  const { contentHtml: contentWithMedia, featuredMediaId } = await uploadPlaceholderImagesAndReplace(ctx, contentHtml);
+  const { contentHtml: contentWithMedia, featuredMediaId } = await uploadExternalImagesAndReplace(ctx, contentHtml);
   contentHtml = contentWithMedia;
   const postPayload = {
     title: post.title || 'Untitled',
