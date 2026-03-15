@@ -4,7 +4,7 @@ When posts published from Automate My Blog show only caption text (or links) ins
 
 ## What we send
 
-- **Images:** Placeholder images are **uploaded to the WordPress media library** (POST /wp/v2/media), then the post content uses the uploaded media URLs (`source_url`) in `<img src="...">`. The first uploaded image is set as `featured_media` on the post. Content is wrapped in `<!-- wp:html -->` blocks.
+- **Images:** All external images (placeholders and real generated image URLs) are **uploaded to the WordPress media library** (POST /wp/v2/media), then the post content uses the uploaded media URLs (`source_url`) in `<img src="...">`. The first uploaded image is set as `featured_media` on the post. Content is wrapped in `<!-- wp:html -->` blocks.
 - **Tweets:** `<!-- wp:html -->` + oEmbed/fallback HTML + `<!-- /wp:html -->`.
 
 ## Checks on the WordPress side
@@ -18,7 +18,7 @@ When posts published from Automate My Blog show only caption text (or links) ins
 3. **Security / content plugins**  
    Plugins that sanitize post content (e.g. strict KSES, “disable embeds”) can remove `<img>`, `style`, or iframes. Check:
    - Allowed HTML / “unfiltered HTML” for your user role.
-   - Whitelisting `via.placeholder.com` (or your image domain) if the plugin blocks external images.
+   - Whitelisting external image domains if the plugin blocks them; after publish, images are served from your WordPress site’s media URLs.
 
 4. **Viewing the stored content**  
    In WordPress admin, edit the post and switch to **Code editor** (block editor). Confirm you see `<!-- wp:image -->` and `<figure>…<img …></figure>`. If you only see text, the content was changed before save (e.g. by a plugin or an older flow).
