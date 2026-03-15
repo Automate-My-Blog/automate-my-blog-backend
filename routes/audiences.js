@@ -3,8 +3,17 @@ import db from '../services/database.js';
 import openaiService from '../services/openai.js';
 import { createContentCalendarJob } from '../services/job-queue.js';
 import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
+import { isUUID } from '../lib/uuid-validation.js';
 
 const router = express.Router();
+
+// Reject invalid audience ids before any DB call (avoids "invalid input syntax for type uuid" 500s)
+router.param('id', (req, res, next, id) => {
+  if (!isUUID(id)) {
+    return res.status(404).json({ success: false, error: 'Audience not found', message: 'Invalid audience id' });
+  }
+  next();
+});
 
 /** Parse content_ideas from DB (JSONB can be string or already-parsed array). Returns array or empty array. */
 function parseContentIdeas(raw) {

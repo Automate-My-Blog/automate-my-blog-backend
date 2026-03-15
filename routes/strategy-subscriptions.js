@@ -4,6 +4,7 @@ import pricingCalculator from '../services/pricing-calculator.js';
 import Stripe from 'stripe';
 import * as strategyWebhooks from '../services/strategy-subscription-webhooks.js';
 import { getFixtureContentIdeas, isCalendarTestbed } from '../lib/calendar-testbed-fixture.js';
+import { isUUID } from '../lib/uuid-validation.js';
 
 // Lazy init so server can start when STRIPE_SECRET_KEY is missing.
 let _stripe = null;
@@ -23,6 +24,14 @@ function getStripe() {
  * @param {express.Router} router
  */
 export function registerRoutes(router) {
+  // Reject invalid strategy ids before any DB call (avoids "invalid input syntax for type uuid" 500s)
+  router.param('id', (req, res, next, id) => {
+    if (!isUUID(id)) {
+      return res.status(404).json({ error: 'Strategy not found', message: 'Invalid strategy id' });
+    }
+    next();
+  });
+
   /**
    * GET /api/v1/strategies/content-calendar
  * Return unified 30-day content calendar across all subscribed strategies (Issue #270).
