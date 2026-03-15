@@ -18,7 +18,8 @@
     "setup-db": "node setup-database.js",
     "worker": "node -r dotenv/config jobs/job-worker.js",
     "logs:staging": "node scripts/vercel-staging-logs.js",
-    "logs:staging:create-issues": "node scripts/analyze-staging-logs-create-issues.js"
+    "logs:staging:create-issues": "node scripts/analyze-staging-logs-create-issues.js",
+    "logs:render-staging": "node scripts/render-staging-logs.js"
   },
   "keywords": [
     "autoblog",

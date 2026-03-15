@@ -132,6 +132,8 @@ Render can run the BullMQ worker as a **Background Worker** (same repo, differen
 
 Render will install dependencies and then run the worker process. It stays running and processes jobs from the queue.
 
+To view staging worker logs from the command line, install the [Render CLI](https://render.com/docs/cli) (`brew install render`), run `render login`, set `RENDER_STAGING_WORKER_SERVICE_ID` to your staging worker’s service ID (from the Render Dashboard), then run `npm run logs:render-staging` or `node scripts/render-staging-logs.js --help`.
+
 ### 3. Environment variables
 
 Add the same env vars the worker needs. In the worker service: **Environment** → **Add Environment Variable**.
