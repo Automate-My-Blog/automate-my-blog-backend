@@ -27,4 +27,15 @@ describe('strategies subscribe route', () => {
       expect(res.body?.error || res.text).toBeDefined();
     }
   });
+
+  it('returns 404 for invalid strategy id (placeholder ids)', async () => {
+    const res = await request(app)
+      .post('/api/v1/strategies/analysis-fallback-0/subscribe')
+      .set('Content-Type', 'application/json')
+      .send({ billingInterval: 'monthly' });
+
+    expect(res.status).toBe(404);
+    expect(res.body?.error).toBe('Strategy not found');
+    expect(res.body?.message).toBe('Invalid strategy id');
+  });
 });
