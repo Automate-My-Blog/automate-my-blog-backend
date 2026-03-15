@@ -105,12 +105,37 @@ describe('wordpress-publish', () => {
   });
 
   it('replaces image and chart placeholders with img tags for WordPress', async () => {
-    const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
-    globalThis.fetch.mockResolvedValueOnce({
-      ok: true,
-      status: 201,
-      text: async () => JSON.stringify(jsonBody),
-      json: async () => jsonBody
+    const postResponse = { id: 1, link: 'https://wp.example.com/?p=1' };
+    const imageMediaResponse = { id: 10, source_url: 'https://wp.example.com/wp-content/uploads/2026/03/image.png' };
+    const chartMediaResponse = { id: 11, source_url: 'https://wp.example.com/wp-content/uploads/2026/03/chart.png' };
+    const tinyPng = new ArrayBuffer(8);
+    globalThis.fetch.mockImplementation((url, opts) => {
+      const u = typeof url === 'string' ? url : url?.url || '';
+      if (u.includes('via.placeholder.com')) {
+        return Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(tinyPng) });
+      }
+      if (u.includes('/wp/v2/media') && opts?.method === 'POST' && !u.match(/\/media\/\d+$/)) {
+        const isChart = opts?.headers?.['Content-Disposition']?.includes('chart');
+        const data = isChart ? chartMediaResponse : imageMediaResponse;
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          text: async () => JSON.stringify(data),
+          json: async () => data
+        });
+      }
+      if (u.match(/\/wp\/v2\/media\/\d+$/) && opts?.method === 'POST') {
+        return Promise.resolve({ ok: true, status: 200, text: async () => '{}', json: async () => ({}) });
+      }
+      if (u.includes('/wp/v2/posts')) {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          text: async () => JSON.stringify(postResponse),
+          json: async () => postResponse
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${u}`));
     });
 
     await publishToWordPress(
@@ -121,18 +146,21 @@ describe('wordpress-publish', () => {
       }
     );
 
-    const [, opts] = globalThis.fetch.mock.calls[0];
-    const body = JSON.parse(opts.body);
+    const postCalls = globalThis.fetch.mock.calls.filter(([url]) => String(url).includes('/wp/v2/posts'));
+    expect(postCalls.length).toBe(1);
+    const [, postOpts] = postCalls[0];
+    const body = JSON.parse(postOpts.body);
     expect(body.content).toContain('<img');
     expect(body.content).toContain('Sunset over mountains');
     expect(body.content).toContain('Sales 2024');
-    expect(body.content).toContain('via.placeholder.com');
+    expect(body.content).toContain('https://wp.example.com/wp-content/uploads/');
     expect(body.content).not.toContain('![IMAGE:');
     expect(body.content).not.toContain('![CHART:');
     expect(body.content).toContain('<!-- wp:html -->');
     expect(body.content).toContain('wp-block-image');
     expect(body.content).not.toMatch(/<figure[^>]*\sstyle=/);
     expect(body.content).not.toMatch(/<img[^>]*\sstyle=/);
+    expect(body.featured_media).toBe(10);
   });
 
   it('replaces tweet placeholders with oEmbed or fallback HTML for WordPress', async () => {
@@ -163,12 +191,22 @@ describe('wordpress-publish', () => {
 
   it('strips index-based and literal placeholders so they do not appear on WordPress', async () => {
     const jsonBody = { id: 1, link: 'https://wp.example.com/?p=1' };
-    globalThis.fetch.mockResolvedValueOnce({
-      ok: true,
-      status: 201,
-      text: async () => JSON.stringify(jsonBody),
-      json: async () => jsonBody
-    });
+    const mediaResponse = { id: 5, source_url: 'https://wp.example.com/wp-content/uploads/2026/03/image.png' };
+    const tinyPng = new ArrayBuffer(8);
+    globalThis.fetch
+      .mockResolvedValueOnce({ ok: true, arrayBuffer: () => Promise.resolve(tinyPng) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        text: async () => JSON.stringify(mediaResponse),
+        json: async () => mediaResponse
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        text: async () => JSON.stringify(jsonBody),
+        json: async () => jsonBody
+      });
 
     await publishToWordPress(
       { site_url: 'https://wp.example.com', username: 'u', application_password: 'p' },
@@ -178,8 +216,9 @@ describe('wordpress-publish', () => {
       }
     );
 
-    const [, opts] = globalThis.fetch.mock.calls[0];
-    const body = JSON.parse(opts.body);
+    const postCall = globalThis.fetch.mock.calls.find(([url]) => String(url).includes('/wp/v2/posts'));
+    expect(postCall).toBeDefined();
+    const body = JSON.parse(postCall[1].body);
     expect(body.content).not.toContain('[TWEET:1]');
     expect(body.content).not.toContain('[VIDEO:3]');
     expect(body.content).not.toContain('[Image:');

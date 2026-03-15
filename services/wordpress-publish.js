@@ -2,17 +2,22 @@
  * Publish a post to WordPress via REST API (Application Passwords / Basic auth).
  * @see https://developer.wordpress.org/rest-api/reference/posts/#create-a-post
  *
- * Supports two REST URL styles:
- * - Pretty: {site_url}/wp-json/wp/v2/posts
- * - Index.php (no pretty permalinks): {site_url}/index.php?rest_route=/wp/v2/posts
- * Set credentials.useIndexPhpRestRoute = true to use the index.php form, or we retry on 404.
+ * Workflow:
+ * 1. Convert post content from markdown to HTML; replace tweet placeholders with Twitter oEmbed.
+ * 2. Upload placeholder images (via.placeholder.com) to the WordPress media library (POST /wp/v2/media)
+ *    and replace img src with the uploaded media URLs so images are served from WordPress.
+ * 3. Create the post (POST /wp/v2/posts) with the final content and optional featured_media (first image id).
  *
- * Post content is converted from markdown to HTML; tweet placeholders are replaced with Twitter oEmbed HTML so tweets display.
+ * Supports two REST URL styles for both posts and media:
+ * - Pretty: /wp-json/wp/v2/posts and /wp-json/wp/v2/media
+ * - Index.php: index.php?rest_route=/wp/v2/posts and .../wp/v2/media. Set credentials.useIndexPhpRestRoute = true.
  */
 import { markdownToHtml, TWEET_EMBED_MARKER } from '../lib/markdown-to-html.js';
 
 const WP_POSTS_PATH = '/wp-json/wp/v2/posts';
 const WP_POSTS_REST_ROUTE = '/index.php?rest_route=/wp/v2/posts';
+const WP_MEDIA_PATH = '/wp-json/wp/v2/media';
+const WP_MEDIA_REST_ROUTE = '/index.php?rest_route=/wp/v2/media';
 
 /** Fetch Twitter/X oEmbed HTML for a tweet URL. Returns embed HTML or fallback link on failure. */
 async function fetchTweetOEmbedHtml(tweetUrl) {
@@ -75,9 +80,111 @@ async function prepareContentForWordPress(content) {
   return out;
 }
 
+/**
+ * Upload placeholder images (via.placeholder.com) to WordPress media and replace img src with media URLs.
+ * Returns { contentHtml, featuredMediaId } (featuredMediaId is first uploaded image id or 0).
+ */
+async function uploadPlaceholderImagesAndReplace(ctx, contentHtml) {
+  const matches = [...contentHtml.matchAll(VIA_PLACEHOLDER_SRC_RE)];
+  const uniqueUrls = [...new Set(matches.map((m) => m[1]))];
+  if (uniqueUrls.length === 0) return { contentHtml, featuredMediaId: 0 };
+  const urlToMedia = new Map();
+  for (let i = 0; i < uniqueUrls.length; i++) {
+    const url = uniqueUrls[i];
+    try {
+      const slug = url.includes('text=Chart') ? 'chart.png' : 'image.png';
+      const media = await uploadImageToWordPressMedia(ctx, url, { filename: slug });
+      urlToMedia.set(url, media);
+      if (i < uniqueUrls.length - 1) await new Promise((r) => setTimeout(r, 200));
+    } catch (e) {
+      console.warn('WordPress media upload failed for placeholder:', url, e?.message || e);
+    }
+  }
+  let out = contentHtml;
+  for (const [url, media] of urlToMedia) {
+    out = out.split(url).join(media.source_url);
+  }
+  const firstMedia = urlToMedia.get(uniqueUrls[0]);
+  return { contentHtml: out, featuredMediaId: firstMedia ? firstMedia.id : 0 };
+}
+
 function buildPostsUrl(baseUrl, useIndexPhpRestRoute) {
   const base = String(baseUrl).trim().replace(/\/+$/, '');
   return useIndexPhpRestRoute ? `${base}${WP_POSTS_REST_ROUTE}` : `${base}${WP_POSTS_PATH}`;
+}
+
+function buildMediaUrl(baseUrl, useIndexPhpRestRoute) {
+  const base = String(baseUrl).trim().replace(/\/+$/, '');
+  return useIndexPhpRestRoute ? `${base}${WP_MEDIA_REST_ROUTE}` : `${base}${WP_MEDIA_PATH}`;
+}
+
+/** Match img src URLs we use for placeholders (via.placeholder.com). */
+const VIA_PLACEHOLDER_SRC_RE = /src="(https:\/\/via\.placeholder\.com\/[^"]+)"/g;
+
+/**
+ * Upload an image to the WordPress media library via REST API.
+ * @param {object} ctx - { baseUrl, auth, useIndexPhpRestRoute }
+ * @param {string} imageUrl - URL of the image to upload (e.g. https://via.placeholder.com/...)
+ * @param {{ filename?: string, alt?: string }} [opts] - optional filename and alt text
+ * @returns {Promise<{ id: number, source_url: string }>}
+ */
+async function uploadImageToWordPressMedia(ctx, imageUrl, opts = {}) {
+  const { baseUrl, auth, useIndexPhpRestRoute } = ctx;
+  const filename = opts.filename || 'image.png';
+  const mime = filename.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+  let imageBuffer;
+  try {
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error(`Fetch image ${res.status}`);
+    const ab = await res.arrayBuffer();
+    imageBuffer = Buffer.from(ab);
+  } catch (e) {
+    throw new Error(`Could not fetch image for upload: ${e?.message || e}`);
+  }
+  const mediaUrl = buildMediaUrl(baseUrl, useIndexPhpRestRoute);
+  const headers = {
+    Authorization: `Basic ${auth}`,
+    'Content-Type': mime,
+    'Content-Disposition': `attachment; filename="${filename.replace(/"/g, '\\"')}"`
+  };
+  let response = await fetch(mediaUrl, { method: 'POST', headers, body: imageBuffer });
+  if (response.status === 404 && !useIndexPhpRestRoute) {
+    const fallbackUrl = buildMediaUrl(baseUrl, true);
+    response = await fetch(fallbackUrl, { method: 'POST', headers, body: imageBuffer });
+  }
+  const text = await response.text();
+  if (!response.ok) {
+    let msg = `Media upload failed ${response.status}`;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) msg = json.message;
+      else if (json.code) msg = json.code;
+    } catch {
+      if (text && text.length < 300) msg = text;
+    }
+    throw new Error(msg);
+  }
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('Media upload response was not valid JSON');
+  }
+  const sourceUrl = data.source_url || data.guid?.rendered || data.link;
+  if (!data.id || !sourceUrl) throw new Error('Media upload did not return id or source_url');
+  const result = { id: data.id, source_url: sourceUrl };
+  if (opts.alt && data.id) {
+    try {
+      await fetch(`${mediaUrl}/${data.id}`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alt_text: opts.alt })
+      });
+    } catch {
+      /* optional alt update */
+    }
+  }
+  return result;
 }
 
 /**
@@ -99,13 +206,19 @@ export async function publishToWordPress(credentials, post, opts = {}) {
 
   const baseUrl = String(site_url).trim().replace(/\/+$/, '');
   const auth = Buffer.from(`${username}:${application_password}`, 'utf8').toString('base64');
+  const useIndexPhp = !!useIndexPhpRestRoute;
+  const ctx = { baseUrl, auth, useIndexPhpRestRoute: useIndexPhp };
   const status = opts.status === 'draft' ? 'draft' : 'publish';
-  const contentHtml = await prepareContentForWordPress(post.content);
-  const body = JSON.stringify({
+  let contentHtml = await prepareContentForWordPress(post.content);
+  const { contentHtml: contentWithMedia, featuredMediaId } = await uploadPlaceholderImagesAndReplace(ctx, contentHtml);
+  contentHtml = contentWithMedia;
+  const postPayload = {
     title: post.title || 'Untitled',
     content: contentHtml,
     status
-  });
+  };
+  if (featuredMediaId > 0) postPayload.featured_media = featuredMediaId;
+  const body = JSON.stringify(postPayload);
 
   const headers = {
     Authorization: `Basic ${auth}`,
