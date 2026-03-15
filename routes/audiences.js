@@ -965,6 +965,7 @@ router.post('/:id/request-content-calendar', async (req, res) => {
         message: 'Job queue is temporarily unavailable. Please try again shortly.'
       });
     }
+    console.log(`📅 Content calendar job enqueued: jobId=${result.jobId}, userId=${userContext.userId}, audienceId=${audienceId}`);
     return res.status(201).json({ success: true, jobId: result.jobId });
   } catch (error) {
     console.error('Request content calendar error:', error);
