@@ -18,7 +18,7 @@ We use **multiple environments in the same Vercel project** (not a second projec
 - **CI**: GitHub Actions run for both `main` and `staging` (code-quality, env-var-validation, security-scan, smoke-test, test, migration-validation on relevant pushes/PRs).
 - **Infrastructure**: Staging uses its own Postgres (e.g. Neon branch), its own Redis (e.g. second Upstash DB), and Stripe test mode with a webhook pointing at the staging URL. Never point staging at production DB/Redis.
 
-Full checklist and details: **docs/STAGING_SETUP.md**.
+Full checklist and details: **docs/setup/STAGING_SETUP.md**.
 
 ## Stack
 

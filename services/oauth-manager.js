@@ -167,6 +167,49 @@ export class OAuthManager {
   }
 
   /**
+   * Store platform-wide publishing OAuth app credentials (Medium, Shopify, Webflow, etc.). Super_admin only.
+   * Do not log or expose client_secret.
+   */
+  async storePlatformPublishingAppCredentials(platformKey, clientId, clientSecret) {
+    const clientIdEncrypted = this.encryptToken(clientId);
+    const clientSecretEncrypted = this.encryptToken(clientSecret);
+
+    const query = `
+      INSERT INTO platform_publishing_app_credentials
+        (platform_key, client_id_encrypted, client_secret_encrypted)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (platform_key)
+      DO UPDATE SET
+        client_id_encrypted = EXCLUDED.client_id_encrypted,
+        client_secret_encrypted = EXCLUDED.client_secret_encrypted,
+        updated_at = CURRENT_TIMESTAMP
+    `;
+
+    await db.query(query, [platformKey, clientIdEncrypted, clientSecretEncrypted]);
+  }
+
+  /**
+   * Get platform-wide publishing OAuth app credentials if stored.
+   * Returns { client_id, client_secret } or null.
+   */
+  async getPlatformPublishingAppCredentials(platformKey) {
+    const query = `
+      SELECT client_id_encrypted, client_secret_encrypted
+      FROM platform_publishing_app_credentials
+      WHERE platform_key = $1
+    `;
+
+    const result = await db.query(query, [platformKey]);
+    if (!result.rows?.length) return null;
+
+    const row = result.rows[0];
+    return {
+      client_id: this.decryptToken(row.client_id_encrypted),
+      client_secret: this.decryptToken(row.client_secret_encrypted)
+    };
+  }
+
+  /**
    * Store OAuth tokens for user
    */
   async storeCredentials(userId, serviceName, tokens, scopes, serviceConfig = {}) {

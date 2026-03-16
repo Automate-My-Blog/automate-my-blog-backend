@@ -21,7 +21,15 @@ import keywordRoutes from './routes/keywords.js';
 import userRoutes from './routes/users.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import postsRoutes from './routes/posts.js';
-import publishingPlatformsRoutes, { mediumOAuthCallback } from './routes/publishing-platforms.js';
+import publishingPlatformsRoutes, {
+  mediumOAuthCallback,
+  shopifyOAuthCallback,
+  webflowOAuthCallback,
+  squarespaceOAuthCallback,
+  wixOAuthCallback,
+  hubspotOAuthCallback,
+  drupalOAuthCallback
+} from './routes/publishing-platforms.js';
 import analysisRoutes from './routes/analysis.js';
 import seoAnalysisRoutes from './routes/seo-analysis.js';
 import contentUploadRoutes from './routes/content-upload.js';
@@ -180,9 +188,11 @@ app.use(cors({
 // Rate limiting (after CORS so error responses still have CORS headers)
 const isDevelopment = process.env.NODE_ENV === 'development' || !process.env.NODE_ENV;
 const isDev = process.env.NODE_ENV === 'development';
+const rateLimitWindowMs = Math.max(60000, parseInt(process.env.RATE_LIMIT_WINDOW_MS || '', 10) || 15 * 60 * 1000);
+const rateLimitMax = Math.max(50, parseInt(process.env.RATE_LIMIT_MAX || process.env.RATE_LIMIT_MAX_REQUESTS || '', 10) || (isDevelopment ? 10000 : 200));
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: isDevelopment ? 10000 : 100, // Increased for local dev with many API calls
+  windowMs: rateLimitWindowMs,
+  max: rateLimitMax,
   message: {
     error: 'Too many requests from this IP, please try again later.'
   },
@@ -262,8 +272,14 @@ app.use('/api/v1/keywords', optionalAuth, keywordRoutes);
 app.use('/api/v1/users', optionalAuth, userRoutes);
 app.use('/api/v1/recommendations', requireAuth, recommendationsRoutes);
 app.use('/api/v1/posts', optionalAuth, postsRoutes);
-// Medium OAuth callback (no JWT; user is redirected from Medium)
+// OAuth callbacks (no JWT; user is redirected from provider)
 app.get('/api/v1/publishing-platforms/medium/callback', mediumOAuthCallback);
+app.get('/api/v1/publishing-platforms/shopify/callback', shopifyOAuthCallback);
+app.get('/api/v1/publishing-platforms/webflow/callback', webflowOAuthCallback);
+app.get('/api/v1/publishing-platforms/squarespace/callback', squarespaceOAuthCallback);
+app.get('/api/v1/publishing-platforms/wix/callback', wixOAuthCallback);
+app.get('/api/v1/publishing-platforms/hubspot/callback', hubspotOAuthCallback);
+app.get('/api/v1/publishing-platforms/drupal/callback', drupalOAuthCallback);
 app.use('/api/v1/publishing-platforms', requireAuth, publishingPlatformsRoutes);
 app.use('/api/v1/analysis', optionalAuth, analysisRoutes);
 app.use('/api/v1/jobs', optionalAuth, jobsRoutes);
@@ -284,20 +300,20 @@ app.use('/api/v1/organizations', optionalAuth, organizationRoutes);
 app.use('/api/v1/projects', requireAuth, projectsRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
-// Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
+// Stripe routes - webhook has NO auth (signature verified); other endpoints accept cookie or Bearer (flexible)
+// session-status is called after Stripe redirect when frontend has only cookies, so we use requireFlexibleAuth
 app.use('/api/v1/stripe', (req, res, next) => {
   // Skip auth for webhook endpoint (Stripe uses signature verification)
   if (req.path === '/webhook') {
     return next();
   }
-  // All other Stripe endpoints require authentication
-  requireAuth(req, res, next);
+  requireFlexibleAuth(req, res, next);
 }, stripeRoutes);
 
 // Strategy subscription routes - all require authentication
 // Note: Bundle routes must be registered BEFORE general strategy routes to avoid path conflicts
 app.use('/api/v1/strategies/bundle', requireAuth, bundleSubscriptionRoutes);
-// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/STRATEGY_ROUTES_ORDER.md.
+// Strategy routes: single composite router (order defined in routes/strategies-router.js). See docs/reference/STRATEGY_ROUTES_ORDER.md.
 app.use('/api/v1/strategies', requireFlexibleAuth, strategyRoutes);
 
 // Analytics routes - all require authentication

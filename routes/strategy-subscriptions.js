@@ -257,44 +257,19 @@ router.post('/:id/subscribe',  async (req, res) => {
       }
     });
 
-    // Build URLs - dynamically detect frontend URL from request origin
-    // This allows local development to work correctly (localhost → localhost)
-    // while production still works (prod → prod)
     const requestOrigin = req.headers.origin || req.headers.referer;
-    let frontendUrl;
-
-    if (requestOrigin) {
-      // Extract origin from referer if needed
-      const originMatch = requestOrigin.match(/^https?:\/\/[^\/]+/);
-      frontendUrl = originMatch ? originMatch[0] : (process.env.FRONTEND_URL || 'http://localhost:3000');
-    } else {
-      // Fallback to environment variable
-      frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000');
-    }
-
-    // Sanitize URL
+    let frontendUrl = requestOrigin?.match(/^https?:\/\/[^/]+/)?.[0] || (process.env.FRONTEND_URL || 'http://localhost:3000');
     frontendUrl = frontendUrl.trim().replace(/\/+$/, '');
 
-    const successUrl = `${frontendUrl}/dashboard?tab=audience-segments&strategy_subscribed=${strategyId}&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${frontendUrl}/dashboard?tab=audience-segments`;
+    // Prefer embedded checkout; return_url so frontend gets session_id and can call session-status + activate-purchase
+    const returnUrl = `${frontendUrl}/dashboard?tab=audience&session_id={CHECKOUT_SESSION_ID}&strategy_subscribed=${strategyId}`;
 
-    console.log('🔗 Stripe Checkout URLs:', {
-      requestOrigin,
-      detectedFrontendUrl: frontendUrl,
-      successUrl,
-      cancelUrl
-    });
-
-    // Create Checkout Session
     const session = await getStripe().checkout.sessions.create({
       customer_email: req.user.email,
-      line_items: [{
-        price: stripePrice.id,
-        quantity: 1
-      }],
+      line_items: [{ price: stripePrice.id, quantity: 1 }],
       mode: 'subscription',
-      success_url: successUrl,
-      cancel_url: cancelUrl,
+      ui_mode: 'embedded',
+      return_url: returnUrl,
       metadata: {
         user_id: userId.toString(),
         strategy_id: strategyId.toString(),
@@ -304,11 +279,16 @@ router.post('/:id/subscribe',  async (req, res) => {
       }
     });
 
-    res.json({
+    console.log('🔗 Strategy checkout return_url:', returnUrl);
+
+    // Frontend prefers clientSecret (embedded); also include url if present for redirect fallback
+    const payload = {
+      clientSecret: session.client_secret,
       sessionId: session.id,
-      url: session.url,
       pricing
-    });
+    };
+    if (session.url) payload.url = session.url;
+    res.json(payload);
 
   } catch (error) {
     console.error('❌ Error creating strategy subscription:', {

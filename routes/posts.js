@@ -3,7 +3,13 @@ import { v4 as uuidv4 } from 'uuid';
 import db from '../services/database.js';
 import { PLATFORM_KEYS, getConnectedPlatforms, normalizePlatformKey } from '../lib/publishing-platforms.js';
 import { getConnectionCredentials } from '../services/publishing-connections.js';
+import { publishToContentful } from '../services/contentful-publish.js';
+import { publishToGhost } from '../services/ghost-publish.js';
+import { publishToJekyll } from '../services/jekyll-publish.js';
 import { publishToMedium } from '../services/medium-publish.js';
+import { publishToNextjs } from '../services/nextjs-publish.js';
+import { publishToSanity } from '../services/sanity-publish.js';
+import { publishToSubstack } from '../services/substack-publish.js';
 import { publishToWordPress } from '../services/wordpress-publish.js';
 import postsAutomationRoutes from './posts-automation.js';
 
@@ -421,7 +427,7 @@ router.post('/:id/publish', async (req, res) => {
     }
 
     const { id } = req.params;
-    const { platforms } = req.body || {};
+    const { platforms, publish_mode: publishMode, update_existing: updateExisting, wordpress_use_index_php_rest_route } = req.body || {};
 
     if (!Array.isArray(platforms) || platforms.length === 0) {
       return res.status(400).json({
@@ -475,6 +481,7 @@ router.post('/:id/publish', async (req, res) => {
 
     const post = selectResult.rows[0];
     const platformPublications = [];
+    const isDraft = publishMode === 'draft';
 
     for (const platformKey of normalizedPlatforms) {
       if (platformKey === 'wordpress') {
@@ -483,11 +490,14 @@ router.post('/:id/publish', async (req, res) => {
           platformPublications.push({ platform: platformKey, status: 'failed', message: 'WordPress connection not found' });
           continue;
         }
+        const wpCreds = wordpress_use_index_php_rest_route === true || wordpress_use_index_php_rest_route === 'true'
+          ? { ...creds, useIndexPhpRestRoute: true }
+          : creds;
         try {
-          const result = await publishToWordPress(creds, {
+          const result = await publishToWordPress(wpCreds, {
             title: post.title,
             content: post.content || ''
-          });
+          }, { status: isDraft ? 'draft' : 'publish' });
           platformPublications.push({
             platform: platformKey,
             status: 'published',
@@ -495,6 +505,31 @@ router.post('/:id/publish', async (req, res) => {
           });
         } catch (err) {
           console.error('WordPress publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'ghost') {
+        const creds = await getConnectionCredentials(context.userId, 'ghost');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Ghost connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToGhost(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result.url || undefined,
+            label: 'Ghost'
+          });
+        } catch (err) {
+          console.error('Ghost publish failed:', err.message);
           platformPublications.push({
             platform: platformKey,
             status: 'failed',
@@ -511,7 +546,7 @@ router.post('/:id/publish', async (req, res) => {
           const result = await publishToMedium(creds, {
             title: post.title,
             content: post.content || ''
-          });
+          }, { publishStatus: isDraft ? 'draft' : 'public' });
           platformPublications.push({
             platform: platformKey,
             status: 'published',
@@ -526,8 +561,133 @@ router.post('/:id/publish', async (req, res) => {
             message: err.message || 'Publish failed'
           });
         }
+      } else if (platformKey === 'substack') {
+        const creds = await getConnectionCredentials(context.userId, 'substack');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Substack connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToSubstack(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Substack'
+          });
+        } catch (err) {
+          console.error('Substack publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'contentful') {
+        const creds = await getConnectionCredentials(context.userId, 'contentful');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Contentful connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToContentful(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Contentful'
+          });
+        } catch (err) {
+          console.error('Contentful publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'sanity') {
+        const creds = await getConnectionCredentials(context.userId, 'sanity');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Sanity connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToSanity(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Sanity'
+          });
+        } catch (err) {
+          console.error('Sanity publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'jekyll') {
+        const creds = await getConnectionCredentials(context.userId, 'jekyll');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Jekyll connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToJekyll(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Jekyll'
+          });
+        } catch (err) {
+          console.error('Jekyll publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
+      } else if (platformKey === 'nextjs') {
+        const creds = await getConnectionCredentials(context.userId, 'nextjs');
+        if (!creds) {
+          platformPublications.push({ platform: platformKey, status: 'failed', message: 'Next.js connection not found' });
+          continue;
+        }
+        try {
+          const result = await publishToNextjs(creds, {
+            title: post.title,
+            content: post.content || ''
+          });
+          platformPublications.push({
+            platform: platformKey,
+            status: 'published',
+            url: result?.url,
+            label: 'Next.js'
+          });
+        } catch (err) {
+          console.error('Next.js publish failed:', err.message);
+          platformPublications.push({
+            platform: platformKey,
+            status: 'failed',
+            message: err.message || 'Publish failed'
+          });
+        }
       } else {
-        // Substack, Ghost, etc.: not yet implemented; leave as publishing
+        // Other platforms: not yet implemented; leave as publishing
         platformPublications.push({ platform: platformKey, status: 'publishing' });
       }
     }

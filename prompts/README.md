@@ -34,4 +34,4 @@ messages: [
 
 **What’s next**
 
-See `docs/PROMPTS-INVENTORY.md` for the full list. Good next steps: add `seo-analysis.js` and switch the route over; then break up the enhanced blog prompt into sections and a composer; then migrate the rest of the prompts in `openai.js` the same way.
+See `docs/reference/PROMPTS-INVENTORY.md` for the full list. Good next steps: add `seo-analysis.js` and switch the route over; then break up the enhanced blog prompt into sections and a composer; then migrate the rest of the prompts in `openai.js` the same way.
