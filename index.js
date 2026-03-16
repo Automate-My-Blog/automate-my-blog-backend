@@ -300,14 +300,14 @@ app.use('/api/v1/organizations', optionalAuth, organizationRoutes);
 app.use('/api/v1/projects', requireAuth, projectsRoutes);
 app.use('/api/v1/leads', leadsRoutes);
 
-// Stripe routes - webhook has NO auth (signature verified), other endpoints require auth
+// Stripe routes - webhook has NO auth (signature verified); other endpoints accept cookie or Bearer (flexible)
+// session-status is called after Stripe redirect when frontend has only cookies, so we use requireFlexibleAuth
 app.use('/api/v1/stripe', (req, res, next) => {
   // Skip auth for webhook endpoint (Stripe uses signature verification)
   if (req.path === '/webhook') {
     return next();
   }
-  // All other Stripe endpoints require authentication
-  requireAuth(req, res, next);
+  requireFlexibleAuth(req, res, next);
 }, stripeRoutes);
 
 // Strategy subscription routes - all require authentication

@@ -416,17 +416,15 @@ router.post('/subscribe',  async (req, res) => {
 
     console.log('✅ Bundle Stripe price created:', bundlePrice.id);
 
-    // Create Checkout Session
-    console.log('🛒 Creating Stripe checkout session...');
+    const baseUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').trim().replace(/\/+$/, '');
+    const returnUrl = `${baseUrl}/dashboard?tab=audience&session_id={CHECKOUT_SESSION_ID}&bundle_subscribed=true`;
+
     const session = await getStripe().checkout.sessions.create({
       customer_email: req.user.email,
-      line_items: [{
-        price: bundlePrice.id,
-        quantity: 1
-      }],
+      line_items: [{ price: bundlePrice.id, quantity: 1 }],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?bundle_subscribed=true`,
-      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/dashboard?tab=audience`,
+      ui_mode: 'embedded',
+      return_url: returnUrl,
       metadata: {
         user_id: userId.toString(),
         is_bundle: 'true',
@@ -439,16 +437,15 @@ router.post('/subscribe',  async (req, res) => {
       }
     });
 
-    console.log('✅ [BUNDLE] Checkout session created:', {
-      sessionId: session.id,
-      url: session.url
-    });
+    console.log('✅ [BUNDLE] Checkout session created:', session.id);
 
-    res.json({
+    const payload = {
+      clientSecret: session.client_secret,
       sessionId: session.id,
-      url: session.url,
       bundlePricing
-    });
+    };
+    if (session.url) payload.url = session.url;
+    res.json(payload);
 
   } catch (error) {
     console.error('❌ Error creating bundle subscription:', {

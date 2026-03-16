@@ -63,9 +63,12 @@ router.get('/session-status', async (req, res) => {
 router.post('/create-checkout-session', async (req, res) => {
   try {
     const { priceId, planType } = req.body;
-    const userId = req.user.userId;
-    const userEmail = req.user.email;
+    const userId = req.user?.userId;
+    const userEmail = req.user?.email;
 
+    if (!userId || !userEmail) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
     if (!priceId) {
       return res.status(400).json({
         success: false,
@@ -75,48 +78,34 @@ router.post('/create-checkout-session', async (req, res) => {
 
     console.log(`Creating checkout session for user ${userId}, priceId: ${priceId}, planType: ${planType}`);
 
-    // Determine success/cancel URLs based on environment
-    // Use FRONTEND_URL env variable if set, otherwise use default
     let baseUrl = process.env.FRONTEND_URL || (
       process.env.NODE_ENV === 'production'
         ? 'https://automatemyblog.com'
         : 'http://localhost:3000'
     );
-
-    // Clean up baseUrl - trim whitespace and remove trailing slash
     baseUrl = baseUrl.trim().replace(/\/$/, '');
 
-    const successUrl = `${baseUrl}/dashboard?payment=success`;
-    const cancelUrl = `${baseUrl}/dashboard?payment=cancelled`;
-
-    console.log(`Using frontend URL for redirects: ${baseUrl}`);
-    console.log(`Success URL: ${successUrl}`);
-    console.log(`Cancel URL: ${cancelUrl}`);
-
+    // Embedded checkout: frontend expects clientSecret for PricingModal
     const session = await getStripe().checkout.sessions.create({
       customer_email: userEmail,
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
-        },
-      ],
+      line_items: [{ price: priceId, quantity: 1 }],
       mode: planType === 'one_time' ? 'payment' : 'subscription',
-      success_url: successUrl,
-      cancel_url: cancelUrl,
+      ui_mode: 'embedded',
+      return_url: `${baseUrl}/dashboard?tab=audience&session_id={CHECKOUT_SESSION_ID}`,
       metadata: {
-        userId: userId,
-        priceId: priceId,
-        planType: planType
+        userId: userId.toString(),
+        priceId,
+        planType: planType || 'subscription'
       }
     });
 
     console.log(`✅ Checkout session created: ${session.id}`);
 
+    // Frontend accepts clientSecret, client_secret, or checkoutClientSecret (top-level or data.*)
     res.json({
       success: true,
-      sessionId: session.id,
-      url: session.url
+      clientSecret: session.client_secret,
+      sessionId: session.id
     });
   } catch (error) {
     console.error('Error creating checkout session:', error);
